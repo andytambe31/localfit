@@ -4,10 +4,12 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 /* ---------- data layer: localStorage-first, best-effort backend mirror ---------- */
 const LS_KEY = 'localfit-state'
 const DEFAULT_STATE = {
-  profile: { name: 'Aniruddha', goals: ['Fat loss', 'Muscle growth'], stepTarget: 10000, gymTargetPerWeek: 3, waterTarget: 8 },
+  profile: { name: 'Aniruddha', stepTarget: 10000, gymTargetPerWeek: 3, waterTarget: 8, bodyFatTarget: 12, timeline: 'the end of the year' },
   days: {},
   weightLog: [],
+  bodyFatLog: [],
 }
+const ensureProfile = (p = {}) => { p.waterTarget ??= 8; p.bodyFatTarget ??= 12; p.timeline ??= 'the end of the year'; return p }
 const loadLocal = () => { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null } }
 const saveLocal = (s) => { try { localStorage.setItem(LS_KEY, JSON.stringify(s)) } catch { /* quota */ } }
 const clone = (o) => JSON.parse(JSON.stringify(o))
@@ -47,13 +49,13 @@ export default function App() {
   useEffect(() => {
     const local = loadLocal()
     if (local) {
-      if (!local.profile?.waterTarget) local.profile.waterTarget = 8
+      ensureProfile(local.profile ||= {})
       setState(local)
       doSync() // push offline changes, pull merged truth
     } else {
       // No local copy (first run, or it was lost/cleared) → restore from the backend.
       fetch('/api/state').then((r) => (r.ok ? r.json() : null)).then((b) => {
-        const init = b || DEFAULT_STATE; if (!init.profile.waterTarget) init.profile.waterTarget = 8
+        const init = b || DEFAULT_STATE; ensureProfile(init.profile ||= {})
         setState(init); saveLocal(init)
       }).catch(() => { setState(DEFAULT_STATE); saveLocal(DEFAULT_STATE) })
     }
@@ -88,6 +90,18 @@ export default function App() {
       return next
     })
     setOverride(null)
+    scheduleSync()
+  }
+  function saveBodyFat(pct) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.bodyFatLog = next.bodyFatLog || []
+      const e = next.bodyFatLog.find((x) => x.date === today)
+      if (e) e.pct = pct; else next.bodyFatLog.push({ date: today, pct })
+      next.bodyFatLog.sort((a, b) => a.date.localeCompare(b.date))
+      saveLocal(next)
+      return next
+    })
     scheduleSync()
   }
 
@@ -157,7 +171,7 @@ export default function App() {
         </div>
       </div>
 
-      <GoalsSection day={day} state={state} profile={profile} today={today} />
+      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
     </div>
@@ -330,69 +344,63 @@ function WeightChart({ log }) {
     </ResponsiveContainer>
   )
 }
-/* ---------- goals: where you are in pursuit of fat loss + muscle ---------- */
-const shiftIso = (iso, delta) => {
-  const [y, m, d] = iso.split('-').map(Number)
-  const nd = new Date(new Date(y, m - 1, d).getTime() + delta * 86400000)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${nd.getFullYear()}-${p(nd.getMonth() + 1)}-${p(nd.getDate())}`
-}
-function trainingThisWeek(days, today) {
-  let n = 0
-  for (let i = 0; i < 7; i++) { const d = days[shiftIso(today, -i)]; if (d?.workout?.did && !['Rest', 'Walk'].includes(d.workout.type)) n++ }
-  return n
-}
-function weightDelta(log) {
-  if (!log || log.length < 2) return null
-  const recent = log.slice(-7)
-  return +(recent[recent.length - 1].kg - recent[0].kg).toFixed(1)
-}
+/* ---------- goals: your personal outcomes, in words ---------- */
+function GoalsSection({ state, profile, onBodyFat }) {
+  const log = state.bodyFatLog || []
+  const latest = log[log.length - 1]
+  const target = profile.bodyFatTarget || 12
 
-function GoalsSection({ day, state, profile, today }) {
-  const steps = day.steps || 0, water = day.water || 0, meals = day.meals || {}
-  const train = trainingThisWeek(state.days || {}, today)
-  const onPlan = ['breakfast', 'lunch', 'dinner'].filter((m) => meals[m] === 'on').length
-  const rows = [
-    { label: 'Daily steps', value: steps, target: profile.stepTarget },
-    { label: 'Training this week', value: train, target: profile.gymTargetPerWeek },
-    { label: 'Hydration', value: water, target: profile.waterTarget },
-    { label: 'Clean eating today', value: onPlan, target: 3 },
-  ]
-  const avg = rows.reduce((a, r) => a + Math.min(1, r.target ? r.value / r.target : 0), 0) / rows.length
-  const summary = avg >= 0.8 ? 'You’re on top of it — keep it rolling.'
-    : avg >= 0.45 ? 'Good progress. Close the gaps before the day’s out.'
-      : 'Behind today. Pick one thing and get moving.'
-  const wd = weightDelta(state.weightLog)
+  let bf
+  if (!latest) {
+    bf = `Log your body fat when you next measure it — that’s how we’ll know the work is paying off.`
+  } else {
+    const toGo = +(latest.pct - target).toFixed(1)
+    if (log.length < 2) {
+      bf = `Last measured ${latest.pct}% on ${fmtMD(latest.date)}. ${toGo > 0 ? `${toGo} points to ${target}%.` : `You’re there — now hold it.`}`
+    } else {
+      const delta = +(latest.pct - log[0].pct).toFixed(1)
+      const move = delta < 0 ? `down ${Math.abs(delta)} points since you started` : delta > 0 ? `up ${delta} points` : `flat`
+      bf = `Now ${latest.pct}% (${fmtMD(latest.date)}) — ${move}. ${toGo > 0 ? `${toGo} to ${target}%. Stay consistent and it keeps coming.` : `Target reached — protect it.`}`
+    }
+  }
 
   return (
     <section className="mt-6 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
       <h2 className="font-display text-xl font-semibold text-[#23211c]">Your goals</h2>
-      <p className="text-[12px] text-[#8a8474]">{(profile.goals || []).join(' · ')}</p>
-      <p className="mt-2 text-[14px] font-medium text-[#3d4a32]">{summary}</p>
-      <div className="mt-4 space-y-3">
-        {rows.map((r) => <GoalRow key={r.label} {...r} />)}
+      <p className="mt-0.5 text-[12px] text-[#8a8474]">The outcomes you’re chasing. Everything else is just the work to get here.</p>
+
+      <div className="mt-4">
+        <p className="text-[15px] font-semibold text-[#23211c]">Reach {target}% body fat — abs visible.</p>
+        <p className="text-[13px] text-[#8a8474]">By {profile.timeline}.</p>
+        <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bf}</p>
+        <LogBodyFat onSave={onBodyFat} />
       </div>
-      {wd != null && (
-        <p className="mt-4 border-t border-[#ece6da] pt-3 text-[13px] text-[#6f6a5d]">
-          Bodyweight {wd <= 0 ? 'down' : 'up'} <span className="font-semibold text-[#23211c]">{Math.abs(wd)} kg</span> over your recent entries.
-        </p>
-      )}
+
+      <ul className="mt-4 space-y-2.5 border-t border-[#ece6da] pt-4 text-[14px] leading-relaxed">
+        <li><span className="font-semibold text-[#23211c]">Visible muscle.</span> <span className="text-[#6f6a5d]">Carved by consistent training and protein. Keep showing up and it shows.</span></li>
+        <li><span className="font-semibold text-[#23211c]">Clear skin.</span> <span className="text-[#6f6a5d]">A result of the daily routine, not a one-off. Stay with it.</span></li>
+        <li><span className="font-semibold text-[#23211c]">Healthy hair.</span> <span className="text-[#6f6a5d]">Keep your care on schedule and it looks after itself.</span></li>
+      </ul>
     </section>
   )
 }
-function GoalRow({ label, value, target }) {
-  const pct = target ? Math.min(1, value / target) : 0
+function LogBodyFat({ onSave }) {
+  const [open, setOpen] = useState(false)
+  const [v, setV] = useState('')
+  if (!open) return <button onClick={() => setOpen(true)} className="mt-2 text-[13px] font-medium text-[#3d4a32] underline underline-offset-2">Log body fat</button>
   return (
-    <div>
-      <div className="flex items-baseline justify-between text-[13px]">
-        <span className="text-[#4a463c]">{label}</span>
-        <span className="tabular-nums text-[#8a8474]">{value.toLocaleString()} / {target.toLocaleString()}</span>
-      </div>
-      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
-        <div className="h-full rounded-full bg-[#3d4a32] transition-all" style={{ width: `${pct * 100}%` }} />
-      </div>
+    <div className="mt-2 flex items-center gap-2">
+      <input type="number" step="0.1" value={v} onChange={(e) => setV(e.target.value)} placeholder="%" autoFocus
+        className="w-20 rounded-xl border border-[#ddd5c5] bg-white px-3 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]" />
+      <button onClick={() => { if (v !== '') { onSave(Number(v)); setOpen(false); setV('') } }}
+        className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-medium text-[#f4f1e8]">Save</button>
     </div>
   )
+}
+function fmtMD(iso) {
+  const [, m, d] = iso.split('-').map(Number)
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[m - 1]} ${d}`
 }
 
 function Centered({ children }) { return <div className="flex min-h-screen items-center justify-center px-6 text-center text-[#8a8474]">{children}</div> }

@@ -75,6 +75,10 @@ function mergeStates(server, client) {
   for (const e of server.weightLog || []) byDate[e.date] = e
   for (const e of client.weightLog || []) byDate[e.date] = e
   out.weightLog = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date))
+  const bf = {}
+  for (const e of server.bodyFatLog || []) bf[e.date] = e
+  for (const e of client.bodyFatLog || []) bf[e.date] = e
+  out.bodyFatLog = Object.values(bf).sort((a, b) => a.date.localeCompare(b.date))
   return out
 }
 
