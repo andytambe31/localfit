@@ -33,21 +33,23 @@ export default function App() {
   const today = isoToday()
   const now = new Date(); const hour = now.getHours(); const minute = now.getMinutes()
   const [override, setOverride] = useState(null)
-  const [syncStatus, setSyncStatus] = useState('idle') // idle | syncing | synced | offline
+  const [syncing, setSyncing] = useState(false)
+  const [pending, setPending] = useState(false) // unsynced local changes
 
   // Push the local copy to the backend and adopt the merged truth. No-op offline.
   const doSync = useCallback(async () => {
     const local = loadLocal(); if (!local) return
-    setSyncStatus('syncing')
+    setSyncing(true)
     try {
       const res = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(local) })
       if (!res.ok) throw new Error('sync')
       const merged = await res.json()
       saveLocal(merged); setState(merged)
-      setSyncStatus('synced')
-      setTimeout(() => setSyncStatus((s) => (s === 'synced' ? 'idle' : s)), 1500)
+      setPending(false) // backend now has the latest
     } catch {
-      setSyncStatus('offline') // keep working from localStorage; auto-retry covers it
+      // stay pending; auto-retry (heartbeat / reconnect / focus) covers it
+    } finally {
+      setSyncing(false)
     }
   }, [])
   const scheduleSync = useCallback(() => { clearTimeout(_syncTimer); _syncTimer = setTimeout(doSync, 1500) }, [doSync])
@@ -79,6 +81,14 @@ export default function App() {
     }
   }, [doSync])
 
+  // Warn before leaving / reloading if changes haven't been backed up to the server.
+  useEffect(() => {
+    if (!pending) return
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [pending])
+
   function patch(p) {
     setState((prev) => {
       const next = clone(prev)
@@ -89,6 +99,7 @@ export default function App() {
       return next
     })
     setOverride(null)
+    setPending(true)
     scheduleSync()
   }
   function saveWeight(kg) {
@@ -105,6 +116,7 @@ export default function App() {
       return next
     })
     setOverride(null)
+    setPending(true)
     scheduleSync()
   }
   function saveBodyFat(pct) {
@@ -117,6 +129,7 @@ export default function App() {
       saveLocal(next)
       return next
     })
+    setPending(true)
     scheduleSync()
   }
   function updateProfile(p) {
@@ -126,6 +139,7 @@ export default function App() {
       saveLocal(next)
       return next
     })
+    setPending(true)
     scheduleSync()
   }
 
@@ -149,13 +163,21 @@ export default function App() {
 
   return (
     <div className="mx-auto max-w-xl px-5 pb-16 pt-7">
-      <div className="mb-5 flex items-baseline justify-between">
+      <div className="mb-3 flex items-baseline justify-between">
         <span className="font-display text-lg font-semibold tracking-tight text-[#20201d]">localfit</span>
         <div className="flex items-center gap-2">
-          <SyncIndicator status={syncStatus} />
+          <SyncIndicator status={syncing ? 'syncing' : pending ? 'unsynced' : 'synced'} />
           <span className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">{prettyToday(today)}</span>
         </div>
       </div>
+      {pending && !syncing && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-[#e7d4b6] bg-[#f7ecd6] px-3 py-2 text-[12px] text-[#8a5a1e]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" />
+          </svg>
+          <span>Not backed up yet — these changes live only on this device. Keep the app open or reconnect to sync.</span>
+        </div>
+      )}
 
       {/* The coach speaks — directive, one thing at a time */}
       <section className="rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
@@ -605,21 +627,26 @@ function fmtFull(iso) {
 }
 
 function SyncIndicator({ status }) {
-  if (status === 'idle') return null
-  const color = status === 'offline' ? '#b9442f' : '#3d4a32'
-  const title = status === 'syncing' ? 'Syncing…' : status === 'synced' ? 'Synced' : 'Offline — will sync when you’re back online'
-  if (status === 'synced') {
+  // Syncing → spinning arrows. Unsynced → amber alert. Synced → constant check.
+  if (status === 'syncing') {
     return (
-      <span title={title} style={{ color }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+      <span title="Syncing…" style={{ color: '#3d4a32' }}>
+        <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+      </span>
+    )
+  }
+  if (status === 'unsynced') {
+    return (
+      <span title="Not synced — changes are saved on this device only" style={{ color: '#b9742f' }} className="flex items-center gap-1">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
+        <span className="text-[10px] font-medium uppercase tracking-wider">Unsynced</span>
       </span>
     )
   }
   return (
-    <span title={title} style={{ color }}>
-      <svg className={status === 'syncing' ? 'animate-spin' : ''} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
-      </svg>
+    <span title="All changes synced" style={{ color: '#3d4a32' }} className="flex items-center gap-1">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="m8.5 12.3 2.3 2.3 4.7-5" /></svg>
+      <span className="text-[10px] font-medium uppercase tracking-wider">Synced</span>
     </span>
   )
 }
