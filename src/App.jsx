@@ -157,6 +157,8 @@ export default function App() {
         </div>
       </div>
 
+      <GoalsSection day={day} state={state} profile={profile} today={today} />
+
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
     </div>
   )
@@ -328,6 +330,71 @@ function WeightChart({ log }) {
     </ResponsiveContainer>
   )
 }
+/* ---------- goals: where you are in pursuit of fat loss + muscle ---------- */
+const shiftIso = (iso, delta) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  const nd = new Date(new Date(y, m - 1, d).getTime() + delta * 86400000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${nd.getFullYear()}-${p(nd.getMonth() + 1)}-${p(nd.getDate())}`
+}
+function trainingThisWeek(days, today) {
+  let n = 0
+  for (let i = 0; i < 7; i++) { const d = days[shiftIso(today, -i)]; if (d?.workout?.did && !['Rest', 'Walk'].includes(d.workout.type)) n++ }
+  return n
+}
+function weightDelta(log) {
+  if (!log || log.length < 2) return null
+  const recent = log.slice(-7)
+  return +(recent[recent.length - 1].kg - recent[0].kg).toFixed(1)
+}
+
+function GoalsSection({ day, state, profile, today }) {
+  const steps = day.steps || 0, water = day.water || 0, meals = day.meals || {}
+  const train = trainingThisWeek(state.days || {}, today)
+  const onPlan = ['breakfast', 'lunch', 'dinner'].filter((m) => meals[m] === 'on').length
+  const rows = [
+    { label: 'Daily steps', value: steps, target: profile.stepTarget },
+    { label: 'Training this week', value: train, target: profile.gymTargetPerWeek },
+    { label: 'Hydration', value: water, target: profile.waterTarget },
+    { label: 'Clean eating today', value: onPlan, target: 3 },
+  ]
+  const avg = rows.reduce((a, r) => a + Math.min(1, r.target ? r.value / r.target : 0), 0) / rows.length
+  const summary = avg >= 0.8 ? 'You’re on top of it — keep it rolling.'
+    : avg >= 0.45 ? 'Good progress. Close the gaps before the day’s out.'
+      : 'Behind today. Pick one thing and get moving.'
+  const wd = weightDelta(state.weightLog)
+
+  return (
+    <section className="mt-6 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
+      <h2 className="font-display text-xl font-semibold text-[#23211c]">Your goals</h2>
+      <p className="text-[12px] text-[#8a8474]">{(profile.goals || []).join(' · ')}</p>
+      <p className="mt-2 text-[14px] font-medium text-[#3d4a32]">{summary}</p>
+      <div className="mt-4 space-y-3">
+        {rows.map((r) => <GoalRow key={r.label} {...r} />)}
+      </div>
+      {wd != null && (
+        <p className="mt-4 border-t border-[#ece6da] pt-3 text-[13px] text-[#6f6a5d]">
+          Bodyweight {wd <= 0 ? 'down' : 'up'} <span className="font-semibold text-[#23211c]">{Math.abs(wd)} kg</span> over your recent entries.
+        </p>
+      )}
+    </section>
+  )
+}
+function GoalRow({ label, value, target }) {
+  const pct = target ? Math.min(1, value / target) : 0
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-[13px]">
+        <span className="text-[#4a463c]">{label}</span>
+        <span className="tabular-nums text-[#8a8474]">{value.toLocaleString()} / {target.toLocaleString()}</span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
+        <div className="h-full rounded-full bg-[#3d4a32] transition-all" style={{ width: `${pct * 100}%` }} />
+      </div>
+    </div>
+  )
+}
+
 function Centered({ children }) { return <div className="flex min-h-screen items-center justify-center px-6 text-center text-[#8a8474]">{children}</div> }
 function prettyToday(iso) {
   const [y, m, d] = iso.split('-').map(Number)
