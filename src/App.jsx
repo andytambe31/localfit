@@ -104,6 +104,15 @@ export default function App() {
     })
     scheduleSync()
   }
+  function updateProfile(p) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.profile = { ...next.profile, ...p }
+      saveLocal(next)
+      return next
+    })
+    scheduleSync()
+  }
 
   const day = useMemo(() => (state ? { ...defaultDay(), ...(state.days?.[today] || {}) } : null), [state, today])
   if (!state || !day) return <Centered>…</Centered>
@@ -171,7 +180,7 @@ export default function App() {
         </div>
       </div>
 
-      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} />
+      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
     </div>
@@ -366,7 +375,8 @@ function bodyFatScore(log, today) {
   return 3
 }
 
-function GoalsSection({ state, profile, today, onBodyFat }) {
+function GoalsSection({ state, profile, today, onBodyFat, onProfile }) {
+  const [estimating, setEstimating] = useState(false)
   const days = state.days || {}
   const log = state.bodyFatLog || []
   const latest = log[log.length - 1]
@@ -422,7 +432,9 @@ function GoalsSection({ state, profile, today, onBodyFat }) {
         </div>
         <p className="text-[13px] text-[#8a8474]">By {fmtFull(deadline)} · {daysLeft} days left</p>
         {bfStatus && <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bfStatus}</p>}
-        <LogBodyFat onSave={onBodyFat} hasLog={!!latest} />
+        <button onClick={() => setEstimating(true)} className="mt-3 rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-medium text-[#f4f1e8] active:scale-95">
+          {latest ? 'Re-estimate body fat' : 'Estimate body fat'}
+        </button>
       </div>
 
       {/* Clear skin */}
@@ -442,23 +454,106 @@ function GoalsSection({ state, profile, today, onBodyFat }) {
         </div>
         <p className="text-[13px] text-[#8a8474]">Care sessions — {hairDays} over the last 14 days.</p>
       </div>
+
+      {estimating && (
+        <BodyFatModal profile={profile} onClose={() => setEstimating(false)}
+          onSave={(pct, patch) => { onBodyFat(pct); onProfile(patch); setEstimating(false) }} />
+      )}
     </section>
   )
 }
-function LogBodyFat({ onSave, hasLog }) {
-  const [open, setOpen] = useState(false)
-  const [v, setV] = useState('')
-  if (!open) return (
-    <button onClick={() => setOpen(true)} className="mt-3 rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-medium text-[#f4f1e8] active:scale-95">
-      {hasLog ? 'Update body fat' : 'Log body fat'}
-    </button>
-  )
+
+/* ---------- body-fat estimator (US Navy method) ---------- */
+const round1 = (n) => Math.round(n * 10) / 10
+const clampBf = (b) => Math.max(3, Math.min(60, round1(b)))
+function estimateBodyFat({ sex, height, neck, waist, hip }) {
+  if (!(height > 0 && neck > 0 && waist > 0)) return null
+  if (sex === 'female') {
+    if (!(hip > 0) || waist + hip - neck <= 0) return null
+    return clampBf(495 / (1.29579 - 0.35004 * Math.log10(waist + hip - neck) + 0.22100 * Math.log10(height)) - 450)
+  }
+  if (waist - neck <= 0) return null
+  return clampBf(495 / (1.0324 - 0.19077 * Math.log10(waist - neck) + 0.15456 * Math.log10(height)) - 450)
+}
+function bfCategory(pct, sex) {
+  const m = [[6, 'Essential'], [14, 'Athletic'], [18, 'Fitness'], [25, 'Average']]
+  const f = [[14, 'Essential'], [21, 'Athletic'], [25, 'Fitness'], [32, 'Average']]
+  for (const [lim, name] of (sex === 'female' ? f : m)) if (pct < lim) return name
+  return 'High'
+}
+
+function BodyFatModal({ profile, onClose, onSave }) {
+  const [sex, setSex] = useState(profile.sex || 'male')
+  const [unit, setUnit] = useState('cm')
+  const [height, setHeight] = useState(profile.height ? String(round1(profile.height)) : '')
+  const [neck, setNeck] = useState('')
+  const [waist, setWaist] = useState('')
+  const [hip, setHip] = useState('')
+
+  const toCm = (v) => (unit === 'in' ? Number(v) * 2.54 : Number(v))
+  const switchUnit = (u) => {
+    if (u === unit) return
+    const conv = (x) => (x === '' ? '' : String(round1(u === 'in' ? Number(x) / 2.54 : Number(x) * 2.54)))
+    setHeight(conv(height)); setNeck(conv(neck)); setWaist(conv(waist)); setHip(conv(hip))
+    setUnit(u)
+  }
+  const est = estimateBodyFat({ sex, height: toCm(height), neck: toCm(neck), waist: toCm(waist), hip: toCm(hip) })
+
   return (
-    <div className="mt-3 flex items-center gap-2">
-      <input type="number" step="0.1" value={v} onChange={(e) => setV(e.target.value)} placeholder="%" autoFocus
-        className="w-20 rounded-xl border border-[#ddd5c5] bg-white px-3 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]" />
-      <button onClick={() => { if (v !== '') { onSave(Number(v)); setOpen(false); setV('') } }}
-        className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-medium text-[#f4f1e8]">Save</button>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-[#f4f1ea] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-2xl font-semibold text-[#23211c]">Estimate body fat</h3>
+            <p className="mt-1 text-[13px] text-[#8a8474]">A few tape measurements — the US Navy method does the math.</p>
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <Chip small on={sex === 'male'} onClick={() => setSex('male')}>Male</Chip>
+          <Chip small on={sex === 'female'} onClick={() => setSex('female')}>Female</Chip>
+          <span className="flex-1" />
+          <Chip small on={unit === 'cm'} onClick={() => switchUnit('cm')}>cm</Chip>
+          <Chip small on={unit === 'in'} onClick={() => switchUnit('in')}>in</Chip>
+        </div>
+
+        <MeasureInput label="Height" unit={unit} value={height} onChange={setHeight} />
+        <MeasureInput label="Neck" unit={unit} value={neck} onChange={setNeck} hint="Just below the larynx, tape sloping slightly down to the front." />
+        <MeasureInput label="Waist" unit={unit} value={waist} onChange={setWaist} hint="At navel level, relaxed — don’t suck in." />
+        {sex === 'female' && <MeasureInput label="Hip" unit={unit} value={hip} onChange={setHip} hint="At the widest point." />}
+
+        <div className="mt-5 rounded-2xl bg-[#23291f] px-5 py-4 text-center">
+          {est != null ? (
+            <>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-[#9aa581]">Estimated body fat</p>
+              <p className="font-display text-4xl font-semibold text-[#f4f1e8]">{est}%</p>
+              <p className="mt-0.5 text-[13px] text-[#cfccba]">{bfCategory(est, sex)}</p>
+            </>
+          ) : (
+            <p className="text-[13px] text-[#9aa581]">Enter your measurements to see the estimate.</p>
+          )}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
+          <button disabled={est == null} onClick={() => onSave(est, { height: Math.round(toCm(height)), sex })}
+            className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] disabled:opacity-40">Save to goal</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+function MeasureInput({ label, unit, value, onChange, hint }) {
+  return (
+    <div className="mt-3">
+      <div className="flex items-baseline justify-between">
+        <label className="text-sm font-medium text-[#23211c]">{label}</label>
+        <span className="text-[11px] text-[#a39c8d]">{unit}</span>
+      </div>
+      <input type="number" inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} placeholder="0"
+        className="mt-1 w-full rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[#23211c] outline-none focus:border-[#3d4a32]" />
+      {hint && <p className="mt-1 text-[11px] leading-snug text-[#a39c8d]">{hint}</p>}
     </div>
   )
 }
