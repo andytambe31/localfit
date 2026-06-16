@@ -33,6 +33,7 @@ export default function App() {
   const today = isoToday()
   const now = new Date(); const hour = now.getHours(); const minute = now.getMinutes()
   const [override, setOverride] = useState(null)
+  const [view, setView] = useState('home') // 'home' | 'rewards'
   const [syncing, setSyncing] = useState(false)
   const [pending, setPending] = useState(false) // unsynced local changes
 
@@ -158,6 +159,19 @@ export default function App() {
   if (!state || !day) return <Centered>…</Centered>
 
   const { profile } = state
+
+  if (view === 'rewards') {
+    return (
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-7">
+        <button onClick={() => setView('home')} className="mb-5 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+          Back
+        </button>
+        <RewardsSection state={state} profile={profile} today={today} onClaim={claimReward} />
+      </div>
+    )
+  }
+
   const r = day.routines, w = day.workout, meals = day.meals || {}
   const coach = buildCoach({ hour, minute, day, profile })
   const focus = override || coach.action?.target || null
@@ -233,7 +247,7 @@ export default function App() {
 
       <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} />
 
-      <RewardsSection state={state} profile={profile} today={today} onClaim={claimReward} />
+      <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
     </div>
@@ -671,6 +685,29 @@ function dayGaps(d, profile) {
   if (!((w.type && w.type !== '') || (d?.steps || 0) >= (profile.stepTarget || 10000))) gaps.push('movement')
   if (['breakfast', 'lunch', 'dinner'].filter((m) => meals[m] != null).length < 2) gaps.push('log your meals')
   return gaps
+}
+
+function RewardsSummary({ state, profile, today, onOpen }) {
+  const days = state.days || {}
+  const streak = currentStreak(days, today, profile)
+  const claimed = state.rewardsClaimed || {}
+  const claimable = REWARDS.filter((rw) => streak >= rw.days && !claimed[rw.days])
+  const next = REWARDS.find((rw) => streak < rw.days)
+  const sub = claimable.length
+    ? `${claimable.length} reward${claimable.length > 1 ? 's' : ''} ready to claim`
+    : next ? `Next: ${next.title} in ${next.days - streak} day${next.days - streak === 1 ? '' : 's'}`
+      : 'All rewards claimed'
+  return (
+    <button onClick={onOpen} className="mt-4 flex w-full items-center justify-between gap-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 text-left shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)] active:scale-[0.99]">
+      <div className="min-w-0">
+        <h2 className="font-display text-xl font-semibold text-[#23211c]">Rewards</h2>
+        <p className="mt-0.5 text-[13px] text-[#8a8474]">{streak > 0 ? `${streak}-day streak · ` : ''}{sub}</p>
+      </div>
+      <span className={`shrink-0 ${claimable.length ? 'text-[#3d4a32]' : 'text-[#a39c8d]'}`}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+      </span>
+    </button>
+  )
 }
 
 function RewardsSection({ state, profile, today, onClaim }) {
