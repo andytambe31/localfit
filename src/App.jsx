@@ -4,12 +4,12 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 /* ---------- data layer: localStorage-first, best-effort backend mirror ---------- */
 const LS_KEY = 'localfit-state'
 const DEFAULT_STATE = {
-  profile: { name: 'Aniruddha', stepTarget: 10000, gymTargetPerWeek: 3, waterTarget: 8, bodyFatTarget: 12, timeline: 'the end of the year' },
+  profile: { name: 'Aniruddha', stepTarget: 10000, gymTargetPerWeek: 3, waterTarget: 8, bodyFatTarget: 12, bodyFatDeadline: '2026-12-31' },
   days: {},
   weightLog: [],
   bodyFatLog: [],
 }
-const ensureProfile = (p = {}) => { p.waterTarget ??= 8; p.bodyFatTarget ??= 12; p.timeline ??= 'the end of the year'; return p }
+const ensureProfile = (p = {}) => { p.waterTarget ??= 8; p.bodyFatTarget ??= 12; p.bodyFatDeadline ??= '2026-12-31'; return p }
 const loadLocal = () => { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null } }
 const saveLocal = (s) => { try { localStorage.setItem(LS_KEY, JSON.stringify(s)) } catch { /* quota */ } }
 const clone = (o) => JSON.parse(JSON.stringify(o))
@@ -344,24 +344,36 @@ function WeightChart({ log }) {
     </ResponsiveContainer>
   )
 }
-/* ---------- goals: your personal outcomes, in words ---------- */
-function GoalsSection({ state, profile, onBodyFat }) {
+/* ---------- goals: your personal outcomes, quantified, in words ---------- */
+const shiftIso = (iso, delta) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  const nd = new Date(new Date(y, m - 1, d).getTime() + delta * 86400000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${nd.getFullYear()}-${p(nd.getMonth() + 1)}-${p(nd.getDate())}`
+}
+function countLastN(days, today, n, pred) {
+  let c = 0
+  for (let i = 0; i < n; i++) { const d = days[shiftIso(today, -i)]; if (d && pred(d)) c++ }
+  return c
+}
+
+function GoalsSection({ state, profile, today, onBodyFat }) {
+  const days = state.days || {}
   const log = state.bodyFatLog || []
   const latest = log[log.length - 1]
   const target = profile.bodyFatTarget || 12
+  const deadline = profile.bodyFatDeadline || '2026-12-31'
+  const daysLeft = Math.max(0, Math.ceil((Date.parse(deadline) - Date.parse(today)) / 86400000))
 
-  let bf
-  if (!latest) {
-    bf = `Log your body fat when you next measure it — that’s how we’ll know the work is paying off.`
-  } else {
+  const skin = countLastN(days, today, 14, (d) => d.routines?.skincareAM && d.routines?.skincarePM)
+  const hair = countLastN(days, today, 14, (d) => d.routines?.haircare)
+
+  let bfStatus = null
+  if (latest) {
     const toGo = +(latest.pct - target).toFixed(1)
-    if (log.length < 2) {
-      bf = `Last measured ${latest.pct}% on ${fmtMD(latest.date)}. ${toGo > 0 ? `${toGo} points to ${target}%.` : `You’re there — now hold it.`}`
-    } else {
-      const delta = +(latest.pct - log[0].pct).toFixed(1)
-      const move = delta < 0 ? `down ${Math.abs(delta)} points since you started` : delta > 0 ? `up ${delta} points` : `flat`
-      bf = `Now ${latest.pct}% (${fmtMD(latest.date)}) — ${move}. ${toGo > 0 ? `${toGo} to ${target}%. Stay consistent and it keeps coming.` : `Target reached — protect it.`}`
-    }
+    bfStatus = toGo > 0
+      ? `Now ${latest.pct}% (${fmtMD(latest.date)}) — ${toGo} to go. Stay consistent and it keeps coming.`
+      : `Now ${latest.pct}% (${fmtMD(latest.date)}) — target reached. Hold it.`
   }
 
   return (
@@ -369,27 +381,47 @@ function GoalsSection({ state, profile, onBodyFat }) {
       <h2 className="font-display text-xl font-semibold text-[#23211c]">Your goals</h2>
       <p className="mt-0.5 text-[12px] text-[#8a8474]">The outcomes you’re chasing. Everything else is just the work to get here.</p>
 
+      {/* Body fat */}
       <div className="mt-4">
-        <p className="text-[15px] font-semibold text-[#23211c]">Reach {target}% body fat — abs visible.</p>
-        <p className="text-[13px] text-[#8a8474]">By {profile.timeline}.</p>
-        <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bf}</p>
-        <LogBodyFat onSave={onBodyFat} />
+        <div className="flex items-baseline justify-between">
+          <p className="text-[15px] font-semibold text-[#23211c]">Reach {target}% body fat</p>
+          {latest && <span className="text-[14px] font-semibold text-[#3d4a32]">{latest.pct}%</span>}
+        </div>
+        <p className="text-[13px] text-[#8a8474]">By {fmtFull(deadline)} · {daysLeft} days left</p>
+        {bfStatus && <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bfStatus}</p>}
+        <LogBodyFat onSave={onBodyFat} hasLog={!!latest} />
       </div>
 
-      <ul className="mt-4 space-y-2.5 border-t border-[#ece6da] pt-4 text-[14px] leading-relaxed">
-        <li><span className="font-semibold text-[#23211c]">Visible muscle.</span> <span className="text-[#6f6a5d]">Carved by consistent training and protein. Keep showing up and it shows.</span></li>
-        <li><span className="font-semibold text-[#23211c]">Clear skin.</span> <span className="text-[#6f6a5d]">A result of the daily routine, not a one-off. Stay with it.</span></li>
-        <li><span className="font-semibold text-[#23211c]">Healthy hair.</span> <span className="text-[#6f6a5d]">Keep your care on schedule and it looks after itself.</span></li>
-      </ul>
+      {/* Clear skin */}
+      <div className="mt-4 border-t border-[#ece6da] pt-4">
+        <div className="flex items-baseline justify-between">
+          <p className="text-[15px] font-semibold text-[#23211c]">Clear skin</p>
+          <span className="text-[14px] font-semibold text-[#3d4a32]">{skin}/14</span>
+        </div>
+        <p className="text-[13px] text-[#8a8474]">Full AM + PM routine over the last 14 days. Aim for 12+.</p>
+      </div>
+
+      {/* Healthy hair */}
+      <div className="mt-4 border-t border-[#ece6da] pt-4">
+        <div className="flex items-baseline justify-between">
+          <p className="text-[15px] font-semibold text-[#23211c]">Healthy hair</p>
+          <span className="text-[14px] font-semibold text-[#3d4a32]">{hair}/4</span>
+        </div>
+        <p className="text-[13px] text-[#8a8474]">Care sessions over the last 14 days. Aim for ~4.</p>
+      </div>
     </section>
   )
 }
-function LogBodyFat({ onSave }) {
+function LogBodyFat({ onSave, hasLog }) {
   const [open, setOpen] = useState(false)
   const [v, setV] = useState('')
-  if (!open) return <button onClick={() => setOpen(true)} className="mt-2 text-[13px] font-medium text-[#3d4a32] underline underline-offset-2">Log body fat</button>
+  if (!open) return (
+    <button onClick={() => setOpen(true)} className="mt-3 rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-medium text-[#f4f1e8] active:scale-95">
+      {hasLog ? 'Update body fat' : 'Log body fat'}
+    </button>
+  )
   return (
-    <div className="mt-2 flex items-center gap-2">
+    <div className="mt-3 flex items-center gap-2">
       <input type="number" step="0.1" value={v} onChange={(e) => setV(e.target.value)} placeholder="%" autoFocus
         className="w-20 rounded-xl border border-[#ddd5c5] bg-white px-3 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]" />
       <button onClick={() => { if (v !== '') { onSave(Number(v)); setOpen(false); setV('') } }}
@@ -401,6 +433,11 @@ function fmtMD(iso) {
   const [, m, d] = iso.split('-').map(Number)
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${months[m - 1]} ${d}`
+}
+function fmtFull(iso) {
+  const [y, m, d] = iso.split('-').map(Number)
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[m - 1]} ${d}, ${y}`
 }
 
 function Centered({ children }) { return <div className="flex min-h-screen items-center justify-center px-6 text-center text-[#8a8474]">{children}</div> }
