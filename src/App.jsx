@@ -466,14 +466,29 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile }) {
 /* ---------- body-fat estimator (US Navy method) ---------- */
 const round1 = (n) => Math.round(n * 10) / 10
 const clampBf = (b) => Math.max(3, Math.min(60, round1(b)))
-function estimateBodyFat({ sex, height, neck, waist, hip }) {
-  if (!(height > 0 && neck > 0 && waist > 0)) return null
-  if (sex === 'female') {
-    if (!(hip > 0) || waist + hip - neck <= 0) return null
-    return clampBf(495 / (1.29579 - 0.35004 * Math.log10(waist + hip - neck) + 0.22100 * Math.log10(height)) - 450)
+// Blend three tape-measure-validated methods so no single bias dominates.
+// All circumferences in cm. Returns { best, breakdown } or null.
+function estimateBF({ sex, height, neck, waist, hip }) {
+  const female = sex === 'female'
+  const parts = {}
+  // US Navy (Hodgdon–Beckett)
+  if (height > 0 && neck > 0 && waist > 0) {
+    if (female) { if (hip > 0 && waist + hip - neck > 0) parts.navy = 495 / (1.29579 - 0.35004 * Math.log10(waist + hip - neck) + 0.22100 * Math.log10(height)) - 450 }
+    else if (waist - neck > 0) parts.navy = 495 / (1.0324 - 0.19077 * Math.log10(waist - neck) + 0.15456 * Math.log10(height)) - 450
   }
-  if (waist - neck <= 0) return null
-  return clampBf(495 / (1.0324 - 0.19077 * Math.log10(waist - neck) + 0.15456 * Math.log10(height)) - 450)
+  // Relative Fat Mass (Woolcott–Bergman 2018, validated vs DXA)
+  if (height > 0 && waist > 0) parts.rfm = (female ? 76 : 64) - 20 * (height / waist)
+  // Body Adiposity Index (Bergman 2011) — brings in hip
+  if (hip > 0 && height > 0) parts.bai = hip / Math.pow(height / 100, 1.5) - 18
+
+  const w = { navy: 0.4, rfm: 0.4, bai: 0.2 }
+  let sum = 0, wsum = 0
+  const breakdown = {}
+  for (const k of ['navy', 'rfm', 'bai']) {
+    if (parts[k] != null && isFinite(parts[k])) { const v = clampBf(parts[k]); breakdown[k] = v; sum += v * w[k]; wsum += w[k] }
+  }
+  if (!wsum) return null
+  return { best: round1(sum / wsum), breakdown }
 }
 function bfCategory(pct, sex) {
   const m = [[6, 'Essential'], [14, 'Athletic'], [18, 'Fitness'], [25, 'Average']]
@@ -483,12 +498,13 @@ function bfCategory(pct, sex) {
 }
 
 function BodyFatModal({ profile, onClose, onSave }) {
+  const m0 = profile.measurements || {}
   const [sex, setSex] = useState(profile.sex || 'male')
   const [unit, setUnit] = useState('cm')
   const [height, setHeight] = useState(profile.height ? String(round1(profile.height)) : '')
-  const [neck, setNeck] = useState('')
-  const [waist, setWaist] = useState('')
-  const [hip, setHip] = useState('')
+  const [neck, setNeck] = useState(m0.neck ? String(round1(m0.neck)) : '')
+  const [waist, setWaist] = useState(m0.waist ? String(round1(m0.waist)) : '')
+  const [hip, setHip] = useState(m0.hip ? String(round1(m0.hip)) : '')
 
   const toCm = (v) => (unit === 'in' ? Number(v) * 2.54 : Number(v))
   const switchUnit = (u) => {
@@ -497,7 +513,8 @@ function BodyFatModal({ profile, onClose, onSave }) {
     setHeight(conv(height)); setNeck(conv(neck)); setWaist(conv(waist)); setHip(conv(hip))
     setUnit(u)
   }
-  const est = estimateBodyFat({ sex, height: toCm(height), neck: toCm(neck), waist: toCm(waist), hip: toCm(hip) })
+  const result = estimateBF({ sex, height: toCm(height), neck: toCm(neck), waist: toCm(waist), hip: toCm(hip) })
+  const breakdown = result ? Object.entries(result.breakdown).map(([k, v]) => `${k.toUpperCase()} ${v}%`).join('  ·  ') : ''
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center" onClick={onClose}>
@@ -505,7 +522,7 @@ function BodyFatModal({ profile, onClose, onSave }) {
         <div className="flex items-start justify-between">
           <div>
             <h3 className="font-display text-2xl font-semibold text-[#23211c]">Estimate body fat</h3>
-            <p className="mt-1 text-[13px] text-[#8a8474]">A few tape measurements — the US Navy method does the math.</p>
+            <p className="mt-1 text-[13px] text-[#8a8474]">Four tape measurements, blended across three validated methods.</p>
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
         </div>
@@ -521,14 +538,15 @@ function BodyFatModal({ profile, onClose, onSave }) {
         <MeasureInput label="Height" unit={unit} value={height} onChange={setHeight} />
         <MeasureInput label="Neck" unit={unit} value={neck} onChange={setNeck} hint="Just below the larynx, tape sloping slightly down to the front." />
         <MeasureInput label="Waist" unit={unit} value={waist} onChange={setWaist} hint="At navel level, relaxed — don’t suck in." />
-        {sex === 'female' && <MeasureInput label="Hip" unit={unit} value={hip} onChange={setHip} hint="At the widest point." />}
+        <MeasureInput label="Hip" unit={unit} value={hip} onChange={setHip} hint="Around the widest part of the hips/glutes, feet together." />
 
         <div className="mt-5 rounded-2xl bg-[#23291f] px-5 py-4 text-center">
-          {est != null ? (
+          {result ? (
             <>
               <p className="text-[11px] uppercase tracking-[0.2em] text-[#9aa581]">Estimated body fat</p>
-              <p className="font-display text-4xl font-semibold text-[#f4f1e8]">{est}%</p>
-              <p className="mt-0.5 text-[13px] text-[#cfccba]">{bfCategory(est, sex)}</p>
+              <p className="font-display text-4xl font-semibold text-[#f4f1e8]">{result.best}%</p>
+              <p className="mt-0.5 text-[13px] text-[#cfccba]">{bfCategory(result.best, sex)}</p>
+              {breakdown && <p className="mt-2 text-[11px] tracking-wide text-[#9aa581]">{breakdown}</p>}
             </>
           ) : (
             <p className="text-[13px] text-[#9aa581]">Enter your measurements to see the estimate.</p>
@@ -537,7 +555,7 @@ function BodyFatModal({ profile, onClose, onSave }) {
 
         <div className="mt-4 flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
-          <button disabled={est == null} onClick={() => onSave(est, { height: Math.round(toCm(height)), sex })}
+          <button disabled={!result} onClick={() => onSave(result.best, { height: Math.round(toCm(height)), sex, measurements: { neck: Math.round(toCm(neck)), waist: Math.round(toCm(waist)), hip: Math.round(toCm(hip)) } })}
             className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] disabled:opacity-40">Save to goal</button>
         </div>
       </div>
