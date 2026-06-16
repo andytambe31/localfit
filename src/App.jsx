@@ -4,14 +4,18 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 /* ---------- data layer: localStorage-first, best-effort backend mirror ---------- */
 const LS_KEY = 'localfit-state'
 const DEFAULT_STATE = {
-  profile: { name: 'Aniruddha', goals: ['Fat loss', 'Muscle growth'], stepTarget: 10000, gymTargetPerWeek: 3 },
+  profile: { name: 'Aniruddha', goals: ['Fat loss', 'Muscle growth'], stepTarget: 10000, gymTargetPerWeek: 3, waterTarget: 8 },
   days: {},
   weightLog: [],
 }
 const loadLocal = () => { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null } }
 const saveLocal = (s) => { try { localStorage.setItem(LS_KEY, JSON.stringify(s)) } catch { /* quota */ } }
 const clone = (o) => JSON.parse(JSON.stringify(o))
-const defaultDay = () => ({ steps: 0, workout: { did: false, type: '' }, weight: null, routines: { skincareAM: false, skincarePM: false, haircare: false }, diet: { quality: null } })
+const defaultDay = () => ({
+  steps: 0, workout: { did: false, type: '' }, weight: null,
+  routines: { skincareAM: false, skincarePM: false, haircare: false },
+  water: 0, meals: { breakfast: null, lunch: null, dinner: null }, mealNote: '',
+})
 function deepMerge(t, p) {
   for (const [k, v] of Object.entries(p || {})) {
     if (v && typeof v === 'object' && !Array.isArray(v)) t[k] = deepMerge(t[k] && typeof t[k] === 'object' ? t[k] : {}, v)
@@ -19,24 +23,20 @@ function deepMerge(t, p) {
   }
   return t
 }
-
-const isoToday = () => {
-  const d = new Date(); const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
+const isoToday = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
 
 export default function App() {
   const [state, setState] = useState(null)
   const today = isoToday()
   const now = new Date(); const hour = now.getHours(); const minute = now.getMinutes()
-  const [override, setOverride] = useState(null) // user-chosen focus, else follow the coach
+  const [override, setOverride] = useState(null)
 
-  // Load: localStorage first (works offline), else seed from backend, else defaults.
   useEffect(() => {
     const local = loadLocal()
-    if (local) { setState(local); return }
+    if (local) { if (!local.profile?.waterTarget) local.profile.waterTarget = 8; setState(local); return }
     fetch('/api/state').then((r) => (r.ok ? r.json() : null)).then((b) => {
-      const init = b || DEFAULT_STATE; setState(init); saveLocal(init)
+      const init = b || DEFAULT_STATE; if (!init.profile.waterTarget) init.profile.waterTarget = 8
+      setState(init); saveLocal(init)
     }).catch(() => { setState(DEFAULT_STATE); saveLocal(DEFAULT_STATE) })
   }, [])
 
@@ -71,16 +71,19 @@ export default function App() {
   if (!state || !day) return <Centered>…</Centered>
 
   const { profile } = state
-  const r = day.routines, w = day.workout, diet = day.diet || {}
+  const r = day.routines, w = day.workout, meals = day.meals || {}
   const coach = buildCoach({ hour, minute, day, profile })
   const focus = override || coach.action?.target || null
 
   const areas = [
-    { id: 'skin', label: 'Skin', done: r.skincareAM && r.skincarePM },
-    { id: 'movement', label: 'Movement', done: w.did },
+    { id: 'skin', label: 'Skin', done: r.skincareAM && (hour < 17 || r.skincarePM) },
+    { id: 'movement', label: 'Move', done: w.did },
+    { id: 'diet', label: 'Diet', done: dietDone(hour, meals) },
+    { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
     { id: 'hair', label: 'Hair', done: r.haircare },
-    { id: 'diet', label: 'Diet', done: !!diet.quality },
   ]
+
+  const setWater = (delta) => patch({ water: Math.max(0, (day.water || 0) + delta) })
 
   return (
     <div className="mx-auto max-w-xl px-5 pb-16 pt-7">
@@ -89,36 +92,38 @@ export default function App() {
         <span className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">{prettyToday(today)}</span>
       </div>
 
-      {/* The coach speaks — one thing at a time */}
+      {/* The coach speaks — directive, one thing at a time */}
       <section className="rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
         <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#9aa581]">{coach.eyebrow}</p>
         <h1 className="font-display mt-3 text-[26px] font-semibold leading-[1.16] text-[#f4f1e8]">{coach.headline}</h1>
         <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{coach.support}</p>
       </section>
 
-      {/* The single focused step */}
       {focus ? (
-        <FocusCard focus={focus} day={day} profile={profile} weightLog={state.weightLog || []}
+        <FocusCard
+          focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
           onSkin={(k) => patch({ routines: { [k]: !r[k] } })}
           onSteps={(v) => patch({ steps: v })}
           onTrain={(opt) => patch({ workout: { did: opt !== 'Rest', type: opt } })}
           onHair={() => patch({ routines: { haircare: !r.haircare } })}
-          onDiet={(q) => patch({ diet: { quality: q } })}
+          onMeal={(meal, val) => patch({ meals: { [meal]: meals[meal] === val ? null : val } })}
+          onNote={(text) => patch({ mealNote: text })}
+          onWater={setWater}
           onWeight={saveWeight} />
       ) : (
         <div className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-6 text-center">
-          <p className="font-display text-lg text-[#23211c]">Nothing needed right now.</p>
-          <p className="mt-1 text-sm text-[#8a8474]">You’re on top of things. Come back when it’s time for the next step.</p>
+          <p className="font-display text-lg text-[#23211c]">Nothing for you right now.</p>
+          <p className="mt-1 text-sm text-[#8a8474]">You’re on top of it. Come back when it’s time for the next move.</p>
         </div>
       )}
 
-      {/* Quiet progress — tap to jump anywhere, no pressure */}
+      {/* Quiet progress — tap any to jump, no pressure */}
       <div className="mt-6">
         <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           {areas.map((a) => (
             <button key={a.id} onClick={() => setOverride(a.id)}
-              className={`rounded-2xl border px-2 py-3 text-center transition ${
+              className={`rounded-2xl border px-1 py-3 text-center transition ${
                 focus === a.id ? 'border-[#3d4a32] bg-[#eef0e6]' : 'border-[#e6dfd0] bg-[#fbf9f3] hover:bg-[#f3efe6]'
               }`}>
               <span className={`mx-auto mb-1.5 block h-2 w-2 rounded-full ${a.done ? 'bg-[#3d4a32]' : 'bg-[#d8d1c2]'}`} />
@@ -134,30 +139,61 @@ export default function App() {
 }
 
 /* ---------- the focused step ---------- */
-const FOCUS_TITLE = { skin: 'Skin care', movement: 'Movement', hair: 'Hair care', diet: 'Today’s food' }
-function FocusCard({ focus, day, profile, weightLog, onSkin, onSteps, onTrain, onHair, onDiet, onWeight }) {
-  const r = day.routines, w = day.workout, diet = day.diet || {}
+const FOCUS_TITLE = { skin: 'Skin care', movement: 'Movement', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
+const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
+
+function FocusCard({ focus, day, profile, hour, weightLog, onSkin, onSteps, onTrain, onHair, onMeal, onNote, onWater, onWeight }) {
+  const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
       <h2 className="font-display mb-3 text-xl font-semibold text-[#23211c]">{FOCUS_TITLE[focus]}</h2>
 
       {focus === 'skin' && (
-        <Segmented multi options={['Morning', 'Evening']}
-          value={[r.skincareAM && 'Morning', r.skincarePM && 'Evening'].filter(Boolean)}
-          onPick={(opt) => onSkin(opt === 'Morning' ? 'skincareAM' : 'skincarePM')} />
+        <div className="flex gap-2">
+          <Chip on={r.skincareAM} onClick={() => onSkin('skincareAM')}>Morning</Chip>
+          <Chip on={r.skincarePM} disabled={hour < 17} hint="this evening" onClick={() => onSkin('skincarePM')}>Evening</Chip>
+        </div>
       )}
 
-      {focus === 'hair' && (
-        <Segmented options={['Done today']} value={r.haircare ? 'Done today' : ''} onPick={onHair} />
+      {focus === 'hair' && <Chip on={r.haircare} onClick={onHair}>Done today</Chip>}
+
+      {focus === 'water' && (
+        <div>
+          <div className="flex items-center justify-center gap-6">
+            <RoundBtn onClick={() => onWater(-1)}>−</RoundBtn>
+            <div className="text-center">
+              <div className="font-display text-4xl font-semibold text-[#23211c]">{day.water || 0}</div>
+              <div className="text-xs text-[#8a8474]">of {profile.waterTarget} glasses</div>
+            </div>
+            <RoundBtn onClick={() => onWater(1)}>+</RoundBtn>
+          </div>
+          <div className="mt-4 flex justify-center gap-1.5">
+            {Array.from({ length: profile.waterTarget }).map((_, i) => (
+              <span key={i} className={`h-2.5 w-2.5 rounded-full ${i < (day.water || 0) ? 'bg-[#3d4a32]' : 'bg-[#e0d9c9]'}`} />
+            ))}
+          </div>
+        </div>
       )}
 
       {focus === 'diet' && (
-        <>
-          <p className="mb-2 text-[13px] text-[#6f6a5d]">How did you eat today?</p>
-          <Segmented options={['On point', 'Okay', 'Off']}
-            value={diet.quality === 'on' ? 'On point' : diet.quality === 'ok' ? 'Okay' : diet.quality === 'off' ? 'Off' : ''}
-            onPick={(opt) => onDiet(opt === 'On point' ? 'on' : opt === 'Okay' ? 'ok' : 'off')} />
-        </>
+        <div className="space-y-2.5">
+          {['breakfast', 'lunch', 'dinner'].map((meal) => {
+            const enabled = hour >= MEAL_AFTER[meal]
+            const val = meals[meal]
+            return (
+              <div key={meal} className="flex items-center justify-between">
+                <span className={`text-sm capitalize ${enabled ? 'text-[#3a382f]' : 'text-[#bdb6a5]'}`}>{meal}</span>
+                <div className="flex gap-2">
+                  <Chip small on={val === 'on'} disabled={!enabled} onClick={() => onMeal(meal, 'on')}>On plan</Chip>
+                  <Chip small on={val === 'off'} disabled={!enabled} onClick={() => onMeal(meal, 'off')}>Off</Chip>
+                </div>
+              </div>
+            )
+          })}
+          <input defaultValue={day.mealNote || ''} placeholder="Note what you ate (optional)"
+            onBlur={(e) => onNote(e.target.value)}
+            className="mt-2 w-full rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-sm text-[#23211c] outline-none placeholder:text-[#b3ac9c] focus:border-[#3d4a32]" />
+        </div>
       )}
 
       {focus === 'movement' && (
@@ -168,7 +204,9 @@ function FocusCard({ focus, day, profile, weightLog, onSkin, onSteps, onTrain, o
           </Field>
           <div>
             <p className="mb-2 text-[13px] text-[#6f6a5d]">Today’s training</p>
-            <Segmented options={['Weights', 'Cardio', 'Walk', 'Rest']} value={w.type} onPick={onTrain} />
+            <div className="flex flex-wrap gap-2">
+              {['Weights', 'Cardio', 'Walk', 'Rest'].map((opt) => <Chip key={opt} small on={w.type === opt} onClick={() => onTrain(opt)}>{opt}</Chip>)}
+            </div>
           </div>
           <Field label="Bodyweight">
             <NumInput value={day.weight ?? ''} placeholder="kg" step="0.1" onCommit={onWeight} />
@@ -181,71 +219,78 @@ function FocusCard({ focus, day, profile, weightLog, onSkin, onSteps, onTrain, o
   )
 }
 
-/* ---------- coach: time + state aware ---------- */
+/* ---------- coach: authoritative, time + state aware ---------- */
+function dietDone(hour, meals) {
+  const need = hour < 11 ? ['breakfast'] : hour < 16 ? ['breakfast', 'lunch'] : ['breakfast', 'lunch', 'dinner']
+  return need.every((m) => meals[m] != null)
+}
+function expectedWater(hour, target) {
+  if (hour < 11) return Math.round(target * 0.25)
+  if (hour < 16) return Math.round(target * 0.5)
+  if (hour < 21) return Math.round(target * 0.8)
+  return target
+}
 function buildCoach({ hour, minute, day, profile }) {
-  const r = day.routines, w = day.workout, diet = day.diet || {}
-  const steps = day.steps || 0, target = profile.stepTarget
+  const r = day.routines, w = day.workout, meals = day.meals || {}
+  const steps = day.steps || 0, target = profile.stepTarget, water = day.water || 0, wTarget = profile.waterTarget
   const trained = w.did && w.type !== 'Rest'
   const t = fmtTime(hour, minute)
   const eyebrow = `Today — ${t}`
   const phase = hour < 5 ? 'latenight' : hour < 12 ? 'morning' : hour < 17 ? 'midday' : hour < 21 ? 'evening' : 'night'
-  const blank = !r.skincareAM && !r.skincarePM && !r.haircare && !w.did && day.weight == null && !diet.quality
 
-  if (phase === 'latenight') {
-    return { eyebrow, headline: `It’s late — time to wind down.`, support: `It’s the middle of the night. The best thing you can do for fat loss and muscle right now is sleep. Rest up; we’ll set the day up when you’re back on your feet.`, action: null }
-  }
+  if (phase === 'latenight')
+    return { eyebrow, headline: `It’s ${t}. Go to bed.`, support: `Nothing good for your goals happens past midnight. Sleep is when fat burns and muscle repairs — get to it.`, action: null }
+
   if (phase === 'morning') {
-    if (blank) return { eyebrow, headline: `Good morning. Let’s ease into the day.`, support: `Start with your morning skincare — small and easy. We’ll line up movement and food after.`, action: { label: '', target: 'skin' } }
-    if (!r.skincareAM) return { eyebrow, headline: `First, your morning routine.`, support: `Two minutes of skincare to start clean. Then we move.`, action: { target: 'skin' } }
-    if (!trained) return { eyebrow, headline: `When are you training today?`, support: `Three sessions a week is the floor for holding muscle while you lean out. Set the intention now.`, action: { target: 'movement' } }
-    return { eyebrow, headline: `You’re set up well.`, support: `Keep the steps ticking, and make your next meal an easy win.`, action: { target: 'movement' } }
+    if (water < 1) return { eyebrow, headline: `Drink a glass of water. Now.`, support: `Hydrate before anything else — it’s the easiest win of the day, and it wakes you up.`, action: { target: 'water' } }
+    if (!r.skincareAM) return { eyebrow, headline: `Do your morning skincare.`, support: `Two minutes. Get it done and keep the streak alive.`, action: { target: 'skin' } }
+    if (meals.breakfast == null) return { eyebrow, headline: `Log your breakfast.`, support: `On plan or not — be honest. The first meal sets the tone for the whole day.`, action: { target: 'diet' } }
+    if (!trained) return { eyebrow, headline: `Decide when you’re training today.`, support: `Three sessions a week is the floor for holding muscle while you cut. Commit to a time.`, action: { target: 'movement' } }
+    return { eyebrow, headline: `Good start. Keep moving.`, support: `Steps ticking, water going. Don’t coast — the day is yours to win.`, action: { target: 'movement' } }
   }
   if (phase === 'midday') {
-    if (steps < target * 0.4) return { eyebrow, headline: `You’re at ${steps.toLocaleString()} steps.`, support: `A little behind for midday. Ten minutes on your feet now beats cramming it after dark.`, action: { target: 'movement' } }
-    if (!trained) return { eyebrow, headline: `Have you trained yet?`, support: `Don’t let the afternoon drift — a session protects your muscle and your deficit.`, action: { target: 'movement' } }
-    if (!diet.quality) return { eyebrow, headline: `How’s the eating going?`, support: `Check in on lunch. Holding the line through the afternoon is half the work.`, action: { target: 'diet' } }
-    return { eyebrow, headline: `Good momentum.`, support: `You’re on track. Water up and stay steady into the evening.`, action: null }
+    if (meals.lunch == null) return { eyebrow, headline: `Log your lunch.`, support: `Tell me straight — on plan or off. That’s how we keep the trend honest.`, action: { target: 'diet' } }
+    if (water < expectedWater(hour, wTarget)) return { eyebrow, headline: `You’re at ${water} of ${wTarget} glasses. Drink up.`, support: `You’re behind on water for midday. Get a glass in before you forget.`, action: { target: 'water' } }
+    if (steps < target * 0.4) return { eyebrow, headline: `Only ${steps.toLocaleString()} steps so far. Get on your feet.`, support: `Ten minutes of walking now beats cramming it after dark.`, action: { target: 'movement' } }
+    if (!trained) return { eyebrow, headline: `Train this afternoon. Don’t push it to tonight.`, support: `A session now protects your muscle and your deficit. Lock it in.`, action: { target: 'movement' } }
+    return { eyebrow, headline: `Strong midday. Hold the line.`, support: `You’re on track. Stay sharp through the afternoon.`, action: null }
   }
   if (phase === 'evening') {
-    if (steps < target * 0.6) return { eyebrow, headline: `It’s ${t}, and you’re at ${steps.toLocaleString()} of ${target.toLocaleString()} steps.`, support: `A 30–40 minute walk closes most of that gap. This is exactly where steady fat loss is won — don’t let it slide.`, action: { target: 'movement' } }
-    if (!trained) return { eyebrow, headline: `The day’s closing, and you haven’t trained.`, support: `Even thirty minutes of lifting protects muscle while you’re cutting. Worth showing up for.`, action: { target: 'movement' } }
-    if (!diet.quality) return { eyebrow, headline: `How did eating go today?`, support: `Be honest with it — that’s how we keep the trend pointed the right way.`, action: { target: 'diet' } }
-    if (!r.skincarePM) return { eyebrow, headline: `Wind down with your evening skincare.`, support: `Close the loop on the day. Your skin does its repair work overnight.`, action: { target: 'skin' } }
-    return { eyebrow, headline: `You’ve handled today.`, support: `Skin, training, food — all tended. This is the consistency that gets you to your goal.`, action: null }
+    if (steps < target * 0.6) return { eyebrow, headline: `It’s ${t} and you’re at ${steps.toLocaleString()} of ${target.toLocaleString()} steps.`, support: `Get a 30–40 minute walk in — now, not later. This is exactly where steady fat loss is won.`, action: { target: 'movement' } }
+    if (!trained) return { eyebrow, headline: `You still haven’t trained. Thirty minutes. Go.`, support: `Even a short lifting session protects muscle while you’re cutting. Show up.`, action: { target: 'movement' } }
+    if (meals.dinner == null) return { eyebrow, headline: `Log your dinner.`, support: `Be honest with it. Dinner is where most days are won or lost.`, action: { target: 'diet' } }
+    if (water < wTarget) return { eyebrow, headline: `Finish your water — ${water} of ${wTarget}.`, support: `Don’t go to bed short on hydration. Knock out the rest now.`, action: { target: 'water' } }
+    if (!r.skincarePM) return { eyebrow, headline: `Do your evening skincare.`, support: `Close the loop on the day. Your skin repairs overnight.`, action: { target: 'skin' } }
+    return { eyebrow, headline: `You’ve handled today.`, support: `Skin, training, food, water — all tended. This is what consistency looks like.`, action: null }
   }
-  // night (21:00–23:59)
-  if (!r.skincarePM) return { eyebrow, headline: `Evening skincare before bed.`, support: `Last thing for the day, then rest — recovery is when muscle is actually built.`, action: { target: 'skin' } }
-  if (!diet.quality) return { eyebrow, headline: `Quick check: how did you eat?`, support: `One tap and you’re done. It keeps tomorrow’s plan honest.`, action: { target: 'diet' } }
-  return { eyebrow, headline: `That’s a full day. Rest up.`, support: `Weigh in first thing tomorrow — we track the trend, not the daily noise.`, action: null }
+  // night 21–24
+  if (!r.skincarePM) return { eyebrow, headline: `Evening skincare, then start winding down.`, support: `Last thing for the day. After this, the priority is sleep.`, action: { target: 'skin' } }
+  if (meals.dinner == null) return { eyebrow, headline: `Log dinner before you forget.`, support: `One tap. Then close out the day.`, action: { target: 'diet' } }
+  return { eyebrow, headline: `That’s a full day. Be in bed soon.`, support: `Recovery is non-negotiable. Weigh in first thing tomorrow — we track the trend, not the noise.`, action: null }
 }
-function fmtTime(h, m) {
-  const ap = h < 12 ? 'AM' : 'PM'; const hr = ((h + 11) % 12) + 1
-  return `${hr}:${String(m).padStart(2, '0')} ${ap}`
-}
+function fmtTime(h, m) { const ap = h < 12 ? 'AM' : 'PM'; const hr = ((h + 11) % 12) + 1; return `${hr}:${String(m).padStart(2, '0')} ${ap}` }
 
 /* ---------- UI atoms ---------- */
-function Segmented({ options, value, onPick, multi }) {
-  const isOn = (opt) => (multi ? value.includes(opt) : value === opt)
+function Chip({ on, disabled, onClick, children, hint, small }) {
+  const pad = small ? 'px-3 py-1.5 text-[13px]' : 'px-4 py-2.5 text-sm'
+  if (disabled) return <span className={`rounded-full border border-[#e8e2d4] bg-[#f4f1ea] ${pad} text-[#c1baa9]`}>{children}{hint ? ` · ${hint}` : ''}</span>
   return (
-    <div className="flex flex-wrap gap-2">
-      {options.map((opt) => (
-        <button key={opt} onClick={() => onPick(opt)}
-          className={`rounded-full px-4 py-2.5 text-sm font-medium transition active:scale-95 ${
-            isOn(opt) ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#e0d9c9] bg-[#f3efe6] text-[#4a463c] hover:bg-[#ebe6da]'
-          }`}>{opt}</button>
-      ))}
-    </div>
+    <button onClick={onClick}
+      className={`rounded-full font-medium transition active:scale-95 ${pad} ${
+        on ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#e0d9c9] bg-[#f3efe6] text-[#4a463c] hover:bg-[#ebe6da]'
+      }`}>{children}</button>
   )
+}
+function RoundBtn({ onClick, children }) {
+  return <button onClick={onClick} className="flex h-12 w-12 items-center justify-center rounded-full border border-[#d8d1c2] bg-white text-2xl text-[#3d4a32] active:scale-95">{children}</button>
 }
 function Field({ label, children }) {
   return <div className="flex items-center gap-3"><span className="w-28 text-[13px] text-[#6f6a5d]">{label}</span>{children}</div>
 }
 function NumInput({ value, placeholder, step, onCommit }) {
-  return (
-    <input type="number" step={step} placeholder={placeholder} defaultValue={value} key={value === '' ? 'e' : value}
-      onBlur={(e) => e.target.value !== '' && onCommit(Number(e.target.value))}
-      className="w-24 rounded-xl border border-[#ddd5c5] bg-white px-3 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]" />
-  )
+  return <input type="number" step={step} placeholder={placeholder} defaultValue={value} key={value === '' ? 'e' : value}
+    onBlur={(e) => e.target.value !== '' && onCommit(Number(e.target.value))}
+    className="w-24 rounded-xl border border-[#ddd5c5] bg-white px-3 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]" />
 }
 function WeightChart({ log }) {
   return (
@@ -259,9 +304,7 @@ function WeightChart({ log }) {
     </ResponsiveContainer>
   )
 }
-function Centered({ children }) {
-  return <div className="flex min-h-screen items-center justify-center px-6 text-center text-[#8a8474]">{children}</div>
-}
+function Centered({ children }) { return <div className="flex min-h-screen items-center justify-center px-6 text-center text-[#8a8474]">{children}</div> }
 function prettyToday(iso) {
   const [y, m, d] = iso.split('-').map(Number)
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
