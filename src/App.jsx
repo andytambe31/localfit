@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
+import TrainFlow from './TrainFlow'
+import { buildSession, estimateSessionMinutes } from './train'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -65,6 +67,7 @@ export default function App() {
   const [override, setOverride] = useState(null)
   const [view, setView] = useState('home') // 'home' | 'rewards'
   const [flow, setFlow] = useState(null) // 'am' | 'pm' | null — guided skincare takeover
+  const [training, setTraining] = useState(false) // guided gym session takeover
   const [manageProducts, setManageProducts] = useState(false)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
@@ -78,7 +81,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || manageProducts || booting
+  const overlayOpen = !!flow || training || manageProducts || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -226,6 +229,34 @@ export default function App() {
     setFlow(null)
   }
 
+  // Persist the whole training session into today's workout (wholesale, so set
+  // edits and cursor survive a reload). `did` flips true only on completion.
+  function writeSession(session) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      const w = next.days[today].workout || { did: false, type: '' }
+      w.session = session
+      w.did = session.status === 'done'
+      if (session.label) w.type = session.label
+      next.days[today].workout = w
+      next.days[today]._ts = Date.now()
+      saveLocal(next)
+      return next
+    })
+    setPending(true)
+    scheduleSync()
+  }
+
+  // Resume a locked-in session: if today's workout is still 'active' on load,
+  // drop straight back into the takeover instead of the dashboard.
+  const resumedRef = useRef(false)
+  useEffect(() => {
+    if (!state || resumedRef.current) return
+    resumedRef.current = true
+    if (state.days?.[today]?.workout?.session?.status === 'active') setTraining(true)
+  }, [state, today])
+
   const day = useMemo(() => (state ? { ...defaultDay(), ...(state.days?.[today] || {}) } : null), [state, today])
   if (!state || !day) return <Centered>…</Centered>
 
@@ -244,6 +275,15 @@ export default function App() {
   }
 
   const r = day.routines, w = day.workout, meals = day.meals || {}
+  // Today's training call, for the Train tile + movement focus card.
+  const trainSession = buildSession(state, today)
+  const trainCall = {
+    active: w.session?.status === 'active',
+    done: w.session?.status === 'done',
+    rest: trainSession.dayType === 'rest',
+    label: trainSession.label || 'Rest',
+    estMin: trainSession.dayType !== 'rest' ? estimateSessionMinutes(trainSession) : null,
+  }
   const skinDue = dueSummary(today, state)
   const lastSleep = lastNightSleep(state, today)
   const coach = buildCoach({ hour, minute, day, profile, skinDue, lastSleep })
@@ -265,7 +305,7 @@ export default function App() {
 
   const areas = [
     { id: 'skin', label: 'Skin', done: r.skincareAM && (hour < 17 || r.skincarePM), attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
-    { id: 'movement', label: 'Move', done: w.did },
+    { id: 'movement', label: 'Train', done: w.did, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
     { id: 'diet', label: 'Diet', done: dietDone(hour, meals) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
     { id: 'hair', label: 'Hair', done: r.haircare },
@@ -305,7 +345,7 @@ export default function App() {
           focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
           onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
           onSteps={(v) => patch({ steps: v })}
-          onTrain={(opt) => patch({ workout: { did: opt !== 'Rest', type: opt } })}
+          onStartTrain={() => setTraining(true)} train={trainCall}
           onHair={() => patch({ routines: { haircare: !r.haircare } })}
           onMeal={(meal, val) => patch({ meals: { [meal]: meals[meal] === val ? null : val } })}
           onNote={(text) => patch({ mealNote: text })}
@@ -368,6 +408,12 @@ export default function App() {
           onClose={() => setFlow(null)}
           onManage={() => { setFlow(null); setManageProducts(true) }} />
       )}
+      {training && (
+        <TrainFlow
+          dateIso={today} state={state} hour={hour} minute={minute}
+          onPersist={writeSession}
+          onClose={() => setTraining(false)} />
+      )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
           onSave={(owned) => { updateProfile({ skincare: { ...profile.skincare, ownedProducts: owned } }); setManageProducts(false) }} />
@@ -387,10 +433,10 @@ function Splash({ leaving }) {
 }
 
 /* ---------- the focused step ---------- */
-const FOCUS_TITLE = { skin: 'Skin care', movement: 'Movement', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
+const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManageProducts, onSteps, onTrain, onHair, onMeal, onNote, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManageProducts, onSteps, onStartTrain, train, onHair, onMeal, onNote, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -449,16 +495,11 @@ function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManage
 
       {focus === 'movement' && (
         <div className="space-y-3">
+          <TrainStart train={train} onStart={onStartTrain} />
           <Field label="Steps today">
             <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
             <span className="text-[13px] text-[#8a8474]">of {profile.stepTarget.toLocaleString()}</span>
           </Field>
-          <div>
-            <p className="mb-2 text-[13px] text-[#6f6a5d]">Today’s training</p>
-            <div className="flex flex-wrap gap-2">
-              {['Weights', 'Cardio', 'Walk', 'Rest'].map((opt) => <Chip key={opt} small on={w.type === opt} onClick={() => onTrain(opt)}>{opt}</Chip>)}
-            </div>
-          </div>
           <Field label="Bodyweight">
             <NumInput value={day.weight ?? ''} placeholder="kg" step="0.1" onCommit={onWeight} />
             {day.weight != null && <span className="text-[13px] text-[#5b6745]">recorded</span>}
@@ -467,6 +508,33 @@ function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManage
         </div>
       )}
     </section>
+  )
+}
+
+// The trainer's call as a single CTA: start / resume / done / rest. The brains
+// already picked the day — this just opens the guided session.
+function TrainStart({ train, onStart }) {
+  const { active, done, rest, label, estMin } = train || {}
+  const title = active ? 'Resume session' : done ? `${label} — logged` : rest ? 'Rest recommended' : `${label} day`
+  const sub = active ? "You're mid-session — pick up where you left off"
+    : done ? "Today's training is in the books"
+    : rest ? 'You can open it to train anyway'
+    : `Guided session · about ${estMin} min. The plan's ready.`
+  return (
+    <button onClick={onStart}
+      className={`flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left transition active:scale-[0.99] ${
+        done ? 'border border-[#e0d9c9] bg-[#f3efe6] text-[#4a463c]'
+        : rest ? 'border border-[#e0d9c9] bg-[#f3efe6] text-[#4a463c] hover:bg-[#ebe6da]'
+        : `bg-[#3d4a32] text-[#f4f1e8] ${active ? 'pulse-attention' : ''}`
+      }`}>
+      <span>
+        <span className="block text-[15px] font-semibold">{title}</span>
+        <span className={`mt-0.5 block text-[12px] ${done || rest ? 'text-[#8a8474]' : 'text-[#cfd6bd]'}`}>{sub}</span>
+      </span>
+      {done
+        ? <span className="text-[12px] font-medium text-[#5b6745]">Done</span>
+        : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>}
+    </button>
   )
 }
 
