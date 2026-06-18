@@ -9,8 +9,14 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..')
-const statePath = resolve(repoRoot, 'data/state.json')
+// State file is env-driven so dev and prod stay fully separate:
+//   prod  -> data/state.json        (real data, port 8788)
+//   dev   -> STATE_FILE=data/state.dev.json (throwaway, port 8799)
+const statePath = resolve(repoRoot, process.env.STATE_FILE || 'data/state.json')
 const publicState = resolve(repoRoot, 'public/state.json')
+// Only the prod backend mirrors into public/ (a PWA fallback); dev must never
+// write real data there.
+const mirrorPublic = !process.env.STATE_FILE
 const distDir = resolve(repoRoot, 'dist')
 
 const PORT = process.env.PORT || 8788
@@ -21,9 +27,11 @@ const app = express()
 // so the browser permits the public->private request.
 const ALLOWED_ORIGINS = new Set([
   'https://andytambe31.github.io',
-  'http://localhost:5174',
-  'http://localhost:8788',
-  'https://Aniruddhas-Mac-mini.local:8788',
+  'http://localhost:8788',                      // prod (same-origin)
+  'https://Aniruddhas-Mac-mini.local:8788',     // prod over HTTPS/.local
+  'http://localhost:5173',                       // dev frontend (Vite)
+  'http://localhost:5174',                       // dev frontend (Vite fallback)
+  'http://localhost:8799',                       // dev backend (direct)
 ])
 app.use((req, res, next) => {
   const origin = req.headers.origin
@@ -78,7 +86,7 @@ function deepMerge(target, patch) {
 async function persist(state) {
   const json = JSON.stringify(state, null, 2) + '\n'
   await writeFile(statePath, json)
-  if (existsSync(dirname(publicState))) await writeFile(publicState, json)
+  if (mirrorPublic && existsSync(dirname(publicState))) await writeFile(publicState, json)
 }
 
 app.get('/api/state', async (_req, res) => {
@@ -102,6 +110,13 @@ function mergeStates(server, client) {
   for (const e of client.bodyFatLog || []) bf[e.date] = e
   out.bodyFatLog = Object.values(bf).sort((a, b) => a.date.localeCompare(b.date))
   out.rewardsClaimed = { ...(server.rewardsClaimed || {}), ...(client.rewardsClaimed || {}) }
+  // Pantry: union by item id (add-and-keep), client wins on a collision (latest
+  // edit). Seed items have stable ids; custom adds have unique ids, so nothing
+  // from either device is lost.
+  const pantry = {}
+  for (const it of server.pantry || []) pantry[it.id] = it
+  for (const it of client.pantry || []) pantry[it.id] = it
+  if (Object.keys(pantry).length) out.pantry = Object.values(pantry)
   out.activity = mergeActivity(server.activity, client.activity)
   return out
 }

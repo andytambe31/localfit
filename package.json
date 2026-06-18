@@ -6,9 +6,10 @@
   "scripts": {
     "sync": "node scripts/sync-data.mjs",
     "server": "node server/index.mjs",
+    "server:dev": "PORT=8799 STATE_FILE=data/state.dev.json node server/index.mjs",
     "vite": "vite --host",
-    "predev": "npm run sync",
-    "dev": "concurrently -k -n api,web -c green,cyan \"npm:server\" \"npm:vite\"",
+    "predev": "node scripts/seed-dev.mjs",
+    "dev": "concurrently -k -n api,web -c green,cyan \"npm:server:dev\" \"npm:vite\"",
     "build": "npm run sync && vite build",
     "build:pages": "VITE_BASE=/localfit/ VITE_API_BASE=https://Aniruddhas-Mac-mini.local:8788 vite build",
     "start": "node server/index.mjs",

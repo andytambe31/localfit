@@ -1,0 +1,312 @@
+/* ---------- diet engine (pure) ----------------------------------------------
+ * A protein-first pantry coach. You eat from a small, fixed, location-scoped
+ * menu; the app holds the brains: it tracks protein toward a flat 150g target,
+ * keeps you under a computed calorie ceiling, and suggests the next grab that
+ * closes the protein gap cheapest. One running food log per day, no meal buckets.
+ *
+ * Pure functions of `state` + date; no React, no I/O. Macros are per the item's
+ * stated portion. Calorie ceiling needs bodyweight — without it, runs protein-only.
+ * -------------------------------------------------------------------------- */
+
+export const PROTEIN_TARGET_DEFAULT = 150
+
+// --- pantry seed (the owner's real list) ------------------------------------
+// Lives in CODE ONLY — never written to synced state — so editing the list just
+// ships in the app, and the sync union-merge only ever carries *custom* adds.
+// `loc` ('home' | 'office' | 'outside') is derived from each item's origin:
+// grocery/home -> home, office -> office, restaurant -> outside. Macros are per
+// the stated `portion`; logs denormalize them so edits never rewrite history.
+export const DEFAULT_PANTRY = [
+  // Home (grocery + home-made)
+  { id: 'banana',           name: 'Banana',             loc: 'home', category: 'fruit',      portion: '1 medium (118g)', kcal: 105, protein: 1.3, carbs: 27,   fat: 0.4,  fiber: 3.1 },
+  { id: 'honeycrisp_apple', name: 'Honeycrisp Apple',   loc: 'home', category: 'fruit',      portion: '1 medium (182g)', kcal: 95,  protein: 0.5, carbs: 25,   fat: 0.3,  fiber: 4.4 },
+  { id: 'blueberries',      name: 'Blueberries',        loc: 'both', category: 'fruit',      portion: '100g',            kcal: 57,  protein: 0.7, carbs: 14.5, fat: 0.3,  fiber: 2.4 },
+  { id: 'raspberries',      name: 'Raspberries',        loc: 'both', category: 'fruit',      portion: '100g',            kcal: 52,  protein: 1.2, carbs: 12,   fat: 0.7,  fiber: 6.5 },
+  { id: 'blackberries',     name: 'Blackberries',       loc: 'both', category: 'fruit',      portion: '100g',            kcal: 43,  protein: 1.4, carbs: 10,   fat: 0.5,  fiber: 5.3 },
+  { id: 'strawberries',     name: 'Strawberries',       loc: 'both', category: 'fruit',      portion: '100g',            kcal: 32,  protein: 0.7, carbs: 7.7,  fat: 0.3,  fiber: 2 },
+  { id: 'mandarins',        name: 'Mandarins',          loc: 'home', category: 'fruit',      portion: '1 medium',        kcal: 47,  protein: 0.7, carbs: 12,   fat: 0.3,  fiber: 2 },
+  { id: 'avocado',          name: 'Avocado',            loc: 'home', category: 'fruit',      portion: '100g',            kcal: 160, protein: 2,   carbs: 8.5,  fat: 14.7, fiber: 6.7 },
+  { id: 'sweet_potato',     name: 'Sweet Potato',       loc: 'home', category: 'vegetable',  portion: '1 medium cooked', kcal: 112, protein: 2,   carbs: 26,   fat: 0.1,  fiber: 4 },
+  { id: 'broccoli',         name: 'Broccoli',           loc: 'home', category: 'vegetable',  portion: '100g',            kcal: 34,  protein: 2.8, carbs: 7,    fat: 0.4,  fiber: 2.6 },
+  { id: 'mushrooms',        name: 'Mushrooms',          loc: 'home', category: 'vegetable',  portion: '100g',            kcal: 22,  protein: 3.1, carbs: 3.3,  fat: 0.3,  fiber: 1 },
+  { id: 'baby_carrots',     name: 'Baby Carrots',       loc: 'home', category: 'vegetable',  portion: '100g',            kcal: 41,  protein: 0.9, carbs: 10,   fat: 0.2,  fiber: 2.8 },
+  { id: 'chicken_breast',   name: 'Chicken Breast',     loc: 'home', category: 'protein',    portion: '100g cooked',     kcal: 165, protein: 31,  carbs: 0,    fat: 3.6,  fiber: 0 },
+  { id: 'chicken_thigh',    name: 'Chicken Thigh',      loc: 'home', category: 'protein',    portion: '100g cooked',     kcal: 209, protein: 26,  carbs: 0,    fat: 11,   fiber: 0 },
+  { id: 'egg',              name: 'Egg',                loc: 'home', category: 'protein',    portion: '1 large egg',     kcal: 72,  protein: 6.3, carbs: 0.4,  fat: 4.8,  fiber: 0 },
+  { id: 'cottage_cheese',   name: 'Cottage Cheese',     loc: 'home', category: 'dairy',      portion: '1 tbsp',          kcal: 15,  protein: 2,   carbs: 1,    fat: 0.5,  fiber: 0 },
+  { id: 'fage_total_0',     name: 'Fage Total 0%',      loc: 'home', category: 'dairy',      portion: '170g',            kcal: 90,  protein: 18,  carbs: 5,    fat: 0,    fiber: 0 },
+  { id: 'whole_milk',       name: 'Whole Milk',         loc: 'home', category: 'dairy',      portion: '1 cup',           kcal: 149, protein: 8,   carbs: 12,   fat: 8,    fiber: 0 },
+  { id: 'oat_milk',         name: 'Oat Milk',           loc: 'home', category: 'dairy_alt',  portion: '1 cup',           kcal: 120, protein: 3,   carbs: 16,   fat: 5,    fiber: 2 },
+  { id: 'espresso',         name: 'Espresso',           loc: 'home', category: 'beverage',   portion: '1 shot',          kcal: 5,   protein: 0.3, carbs: 1,    fat: 0,    fiber: 0 },
+  { id: 'sriracha',         name: 'Sriracha',           loc: 'home', category: 'condiment',  portion: '1 tbsp',          kcal: 15,  protein: 0,   carbs: 3,    fat: 0,    fiber: 0 },
+  { id: 'barebells_bar',    name: 'Barebells Protein Bar', loc: 'home', category: 'protein_snack', portion: '1 bar',    kcal: 200, protein: 20,  carbs: 20,   fat: 7,    fiber: 3 },
+  { id: 'whey_isolate',     name: 'Impact Whey Isolate',   loc: 'home', category: 'protein',       portion: '1 scoop (25g)', kcal: 100, protein: 23, carbs: 2, fat: 1, fiber: 0 },
+  { id: 'creatine',         name: 'Creatine Monohydrate',  loc: 'home', category: 'supplement',    portion: '1 scoop (3g)',  kcal: 0,   protein: 0,  carbs: 0, fat: 0, fiber: 0 },
+  { id: 'homemade_chicken_bowl', name: 'Homemade Chicken Bowl', loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 510, protein: 45, carbs: 28, fat: 23, fiber: 10 },
+  { id: 'homemade_egg_bowl',     name: 'Homemade Egg Bowl',     loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 485, protein: 25, carbs: 28, fat: 31, fiber: 10 },
+  // Combos — ingredients combined into dishes you actually eat (macros summed;
+  // estimates, tweak as needed). The raw ingredients stay available too.
+  { id: 'cappuccino_whole',      name: 'Cappuccino (Whole Milk)', loc: 'home', category: 'beverage',     portion: '1 cup',     kcal: 90,  protein: 4.5, carbs: 8,  fat: 4,  fiber: 0, ingredients: ['espresso', 'whole_milk'] },
+  { id: 'cappuccino_oat',        name: 'Cappuccino (Oat Milk)',   loc: 'home', category: 'beverage',     portion: '1 cup',     kcal: 70,  protein: 2,   carbs: 9,  fat: 3,  fiber: 1, ingredients: ['espresso', 'oat_milk'] },
+  { id: 'stirfry_chicken',       name: 'Stir-fried Chicken & Veg', loc: 'home', category: 'homemade_meal', portion: '1 plate',  kcal: 440, protein: 52,  carbs: 13, fat: 20, fiber: 4, ingredients: ['chicken_breast', 'broccoli', 'mushrooms', 'sriracha'] },
+  { id: 'indian_chicken_breast', name: 'Indian-style Chicken Breast', loc: 'home', category: 'homemade_meal', portion: '1 serving', kcal: 435, protein: 48, carbs: 8, fat: 22, fiber: 2, ingredients: ['chicken_breast'] },
+  { id: 'indian_chicken_thighs', name: 'Indian-style Chicken Thighs', loc: 'home', category: 'homemade_meal', portion: '1 serving', kcal: 505, protein: 41, carbs: 8, fat: 33, fiber: 2, ingredients: ['chicken_thigh'] },
+  // Office
+  { id: 'oikos_triple_zero',     name: 'Oikos Triple Zero',  loc: 'office', category: 'dairy',       portion: '1 container',  kcal: 90,  protein: 15, carbs: 7,  fat: 0,    fiber: 6 },
+  { id: 'office_grilled_chicken',name: 'Office Grilled Chicken', loc: 'office', category: 'office_food', portion: '100g',    kcal: 165, protein: 31, carbs: 0,  fat: 4,    fiber: 0 },
+  { id: 'office_beef',           name: 'Office Beef',        loc: 'office', category: 'office_food', portion: '100g',         kcal: 250, protein: 26, carbs: 0,  fat: 15,   fiber: 0 },
+  { id: 'office_pork',           name: 'Office Pork',        loc: 'office', category: 'office_food', portion: '100g',         kcal: 242, protein: 27, carbs: 0,  fat: 14,   fiber: 0 },
+  { id: 'falafel',               name: 'Falafel',            loc: 'office', category: 'office_food', portion: '100g',         kcal: 333, protein: 13, carbs: 31, fat: 18,   fiber: 4 },
+  { id: 'white_rice',            name: 'White Rice',         loc: 'office', category: 'office_food', portion: '1 cup cooked', kcal: 205, protein: 4,  carbs: 45, fat: 0.4,  fiber: 0.6 },
+  { id: 'office_chicken_burrito',name: 'Office Chicken Burrito', loc: 'office', category: 'office_food', portion: '1 small', kcal: 450, protein: 25, carbs: 45, fat: 18,   fiber: 4 },
+  { id: 'pizza_slice',           name: 'Pizza Slice',        loc: 'office', category: 'office_food', portion: '1 slice',      kcal: 285, protein: 12, carbs: 36, fat: 10,   fiber: 2 },
+  { id: 'hummus',                name: 'Hummus',             loc: 'office', category: 'dip',         portion: '2 tbsp',       kcal: 70,  protein: 2,  carbs: 4,  fat: 5,    fiber: 2 },
+  { id: 'tzatziki',              name: 'Tzatziki',           loc: 'office', category: 'dip',         portion: '2 tbsp',       kcal: 35,  protein: 2,  carbs: 2,  fat: 2,    fiber: 0 },
+  { id: 'french_fries',          name: 'French Fries',       loc: 'office', category: 'side',        portion: '100g',         kcal: 312, protein: 3.4,carbs: 41, fat: 15,   fiber: 3.8 },
+  { id: 'chocolate_empanada',    name: 'Chocolate Empanada', loc: 'office', category: 'dessert',     portion: '1 piece',      kcal: 250, protein: 4,  carbs: 32, fat: 12,   fiber: 1 },
+  // Office cut-fruit bar
+  { id: 'office_watermelon',     name: 'Watermelon (cubes)', loc: 'office', category: 'fruit',       portion: '1 cup cubes',  kcal: 46,  protein: 0.9, carbs: 11.5, fat: 0.2, fiber: 0.6 },
+  { id: 'office_honeydew',       name: 'Honeydew (cubes)',   loc: 'office', category: 'fruit',       portion: '1 cup diced',  kcal: 61,  protein: 0.9, carbs: 15,   fat: 0.2, fiber: 1.4 },
+  { id: 'office_mango',          name: 'Mango Slices',       loc: 'office', category: 'fruit',       portion: '1 cup sliced', kcal: 99,  protein: 1.4, carbs: 25,   fat: 0.6, fiber: 2.6 },
+  // Outside (restaurant)
+  { id: 'sweetgreen_hot_honey_chicken', name: 'Sweetgreen Hot Honey Chicken', loc: 'outside', category: 'restaurant_meal', portion: '1 plate', kcal: 855, protein: 49, carbs: 73, fat: 39, fiber: 9 },
+  // Desserts & drinks (dessert calories researched; tweak if a serving differs)
+  { id: 'chocolate_chip_cookie', name: 'Chocolate Chip Cookie', loc: 'office', category: 'dessert',  portion: '1 cookie', kcal: 230, protein: 3,   carbs: 31, fat: 11, fiber: 1 },
+  { id: 'jenis_ice_cream',       name: "Jeni's Ice Cream",      loc: 'home',   category: 'dessert',  portion: '1 scoop',  kcal: 250, protein: 4,   carbs: 28, fat: 14, fiber: 1 },
+  { id: 'dark_chocolate_toffee', name: 'Dark Chocolate Toffee', loc: 'both',   category: 'dessert',  portion: '3 pieces', kcal: 140, protein: 1.5, carbs: 15, fat: 9,  fiber: 1 },
+  { id: 'diet_coke',             name: 'Diet Coke',             loc: 'both',   category: 'beverage', portion: '1 can',    kcal: 0,   protein: 0,   carbs: 0,  fat: 0,  fiber: 0 },
+  { id: 'coke_zero',             name: 'Coke Zero',             loc: 'both',   category: 'beverage', portion: '1 can',    kcal: 0,   protein: 0,   carbs: 0,  fat: 0,  fiber: 0 },
+]
+const DEFAULT_BY_ID = Object.fromEntries(DEFAULT_PANTRY.map((it) => [it.id, it]))
+
+// The pantry the app actually uses: baked seed + the user's custom adds (synced).
+// Drops stale/legacy seed items and id collisions so the seed in code always wins.
+export function effectivePantry(state) {
+  const customs = (state?.pantry || []).filter((it) => !it.seed && !DEFAULT_BY_ID[it.id])
+  return [...DEFAULT_PANTRY, ...customs]
+}
+
+// --- location ----------------------------------------------------------------
+// Office Tue/Wed/Thu; home Mon + Fri/Sat/Sun. Outside is only ever a manual pick.
+export function defaultLocation(dateIso) {
+  const dow = new Date(dateIso + 'T00:00:00').getDay() // Sun=0..Sat=6
+  return [2, 3, 4].includes(dow) ? 'office' : 'home'
+}
+export const LOCATIONS = ['home', 'office', 'outside']
+
+// Items available at a location ('both'-tagged items show everywhere).
+export function pantryFor(pantry, loc) {
+  return (pantry || []).filter((it) => it.loc === loc || it.loc === 'both')
+}
+
+// --- targets -----------------------------------------------------------------
+function latest(log, key) {
+  if (!log?.length) return null
+  return [...log].sort((a, b) => a.date.localeCompare(b.date)).at(-1)[key]
+}
+
+// Daily calorie ceiling via Katch-McArdle (lean-mass BMR — no age needed since we
+// have body fat). Returns null when bodyweight is unknown, so the UI runs
+// protein-only until a weight is logged. activity ~ desk job + 10k steps + lifts.
+export function calorieTarget(state, opts = {}) {
+  const kg = latest(state.weightLog, 'kg')
+  if (!kg) return null
+  const bf = latest(state.bodyFatLog, 'pct')
+  const lbm = bf != null ? kg * (1 - bf / 100) : kg * 0.75 // fall back to ~25% bf
+  const bmr = 370 + 21.6 * lbm
+  const tdee = bmr * (opts.activity || 1.45)
+  const deficit = opts.deficit || 500 // ~0.5 kg/week toward the Dec target
+  return {
+    ceiling: Math.round((tdee - deficit) / 10) * 10,
+    tdee: Math.round(tdee), bmr: Math.round(bmr), lbm: Math.round(lbm * 10) / 10, kg, bf,
+  }
+}
+
+// --- day tally ---------------------------------------------------------------
+export function dayTotals(day) {
+  const log = day?.food || []
+  let kcal = 0, protein = 0, provisional = false
+  for (const e of log) { kcal += e.kcal || 0; protein += e.protein || 0; if (e.provisional) provisional = true }
+  return { kcal, protein, count: log.length, provisional }
+}
+
+// --- recommendation: protein-first, fit the remaining calorie room ----------
+export function recommend(state, dateIso, loc, proteinTarget = PROTEIN_TARGET_DEFAULT) {
+  const day = state.days?.[dateIso] || {}
+  const totals = dayTotals(day)
+  const gap = proteinTarget - totals.protein
+  if (gap <= 0) return { done: true, gap: 0, text: `Protein's in — ${Math.round(totals.protein)}g. Hold the line on calories.` }
+
+  const ct = calorieTarget(state)
+  const kcalLeft = ct ? ct.ceiling - totals.kcal : Infinity
+  // Most protein-per-calorie first — the cheapest way to close the gap.
+  const items = pantryFor(effectivePantry(state), loc)
+    .filter((it) => it.protein > 0)
+    .sort((a, b) => (b.protein / Math.max(1, b.kcal)) - (a.protein / Math.max(1, a.kcal)))
+
+  if (!items.length) {
+    return { done: false, gap, items: [],
+      text: loc === 'outside'
+        ? `You're out — get ~${Math.round(gap)}g more protein from whatever's leanest.`
+        : `Add items to your ${loc} list and I'll suggest the next grab.` }
+  }
+
+  // Greedy: stack the most efficient items that fit the budget until the gap closes (cap 3).
+  const pick = []
+  let p = 0, k = 0
+  for (const it of items) {
+    if (pick.length >= 3 || p >= gap) break
+    if (ct && k + it.kcal > kcalLeft && pick.length) continue // don't blow the ceiling
+    pick.push(it); p += it.protein; k += it.kcal
+  }
+  const names = pick.map((it) => it.name).join(' + ')
+  const kcalNote = ct ? ` · ~${k} cal, ${Math.max(0, kcalLeft - k)} left` : ''
+  return { done: false, gap, items: pick, addProtein: p, addKcal: k,
+    text: `${names} → +${Math.round(p)}g protein${kcalNote}.` }
+}
+
+// --- diet score (0-10): under calories AND hit protein; calories weigh heavier --
+// null until something's logged. Feeds the Diet goal ring.
+export function dietScore(state, dateIso, proteinTarget = PROTEIN_TARGET_DEFAULT) {
+  const day = state.days?.[dateIso] || {}
+  const totals = dayTotals(day)
+  if (!totals.count) return null
+  const proteinAch = Math.max(0, Math.min(1, totals.protein / proteinTarget))
+  const ct = calorieTarget(state)
+  if (!ct) return Math.round(proteinAch * 10) // no ceiling known → protein only
+  const calAdh = totals.kcal <= ct.ceiling ? 1 : Math.max(0, ct.ceiling / totals.kcal)
+  return Math.round((0.6 * calAdh + 0.4 * proteinAch) * 10) // calories 60%, protein 40%
+}
+
+// --- pantry grouping (so the card shows one category at a time, not a long list) --
+const GROUP_BY_CAT = {
+  homemade_meal: 'Meals', office_food: 'Meals', restaurant_meal: 'Meals',
+  protein: 'Protein',
+  fruit: 'Fruit', vegetable: 'Veg',
+  dairy: 'Dairy', dairy_alt: 'Dairy',
+  beverage: 'Drinks',
+  protein_snack: 'Snacks', dessert: 'Snacks', side: 'Snacks',
+  supplement: 'Supplements',
+  dip: 'Extras', condiment: 'Extras',
+}
+export const GROUP_ORDER = ['Meals', 'Protein', 'Supplements', 'Fruit', 'Veg', 'Dairy', 'Drinks', 'Snacks', 'Extras', 'Other']
+export function groupOf(item) { return GROUP_BY_CAT[item.category] || 'Other' }
+
+// Items flagged as treats/junk so the UI can warn you while logging. Tunable in
+// one place; custom adds can also set `unhealthy: true`.
+const UNHEALTHY_IDS = new Set([
+  'french_fries', 'pizza_slice', 'chocolate_empanada', 'chocolate_chip_cookie',
+  'jenis_ice_cream', 'dark_chocolate_toffee',
+])
+export function isUnhealthy(item) { return item?.unhealthy === true || UNHEALTHY_IDS.has(item?.id) }
+
+// Packaged/processed foods and added-sugar foods — for the goal-aligned critique.
+const PROCESSED_IDS = new Set([
+  'diet_coke', 'coke_zero', 'barebells_bar', 'oikos_triple_zero', 'chocolate_chip_cookie',
+  'jenis_ice_cream', 'dark_chocolate_toffee', 'chocolate_empanada', 'pizza_slice',
+  'french_fries', 'office_chicken_burrito',
+])
+const SUGARY_IDS = new Set(['jenis_ice_cream', 'dark_chocolate_toffee', 'chocolate_chip_cookie', 'chocolate_empanada'])
+export function isProcessed(e) { return e?.processed === true || PROCESSED_IDS.has(e?.id) }
+export function isSugary(e) { return e?.sugary === true || SUGARY_IDS.has(e?.id) }
+
+// A goal-aligned, rule-based read on the day. Returns { tone, headline, points[] }.
+// Core rule: calories are the hard ceiling — never advise eating past it to chase
+// protein. Extra rules flag treats, processed load, repeats, sugar, diet soda.
+export function dayCritique(state, dateIso, proteinTarget = PROTEIN_TARGET_DEFAULT) {
+  const log = (state.days?.[dateIso] || {}).food || []
+  const totals = dayTotals(state.days?.[dateIso] || {})
+  if (!totals.count) return { tone: 'neutral', headline: 'Nothing logged yet today.', points: [] }
+
+  const ct = calorieTarget(state)
+  const short = Math.max(0, Math.round(proteinTarget - totals.protein))
+  const proteinOk = totals.protein >= proteinTarget
+  const RANK = { neutral: 0, good: 0, warn: 1, bad: 2 }
+  let tone = 'good'
+  const worsen = (t) => { if (RANK[t] > RANK[tone]) tone = t }
+  const names = (list) => [...new Set(list.map((e) => e.name))].join(', ')
+
+  // --- core: calorie ceiling vs protein -------------------------------------
+  let headline
+  if (!ct) {
+    headline = proteinOk ? `Protein's in at ${Math.round(totals.protein)}g. Log your weight to track calories too.`
+      : `${short}g short on protein. Log your weight to set a calorie ceiling.`
+    if (!proteinOk) worsen('warn')
+  } else {
+    const room = ct.ceiling - totals.kcal
+    if (room < 0) {
+      headline = `You're ${-room} cal over your ceiling — that's the line. Don't eat more to chase protein; close it out and start earlier tomorrow.`
+      worsen('bad')
+    } else if (proteinOk) {
+      headline = `On track — ${Math.round(totals.protein)}g protein and ${room} cal under your ceiling.`
+    } else if (room < 150) {
+      headline = `Only ~${room} cal of room and ${short}g short on protein. Fit a lean protein only — whey, egg whites, chicken — and do NOT go over the ceiling for it.`
+      worsen('warn')
+    } else {
+      headline = `${room} cal of room and ${short}g protein to go — close it with a lean source (whey, chicken, Greek yogurt).`
+      worsen('warn')
+    }
+  }
+
+  // --- rules ----------------------------------------------------------------
+  const points = []
+
+  const treats = log.filter((e) => e.unhealthy)
+  if (treats.length) {
+    points.push(`${treats.length} treat${treats.length > 1 ? 's' : ''} today (${names(treats)}). On a cut, hold treats to one a day.`)
+    worsen(treats.length > 1 ? 'warn' : 'neutral')
+  }
+
+  // Overconsumption of a single item (counts quantity): e.g. 6× Oikos.
+  const qtyById = {}
+  for (const e of log) { qtyById[e.id] = (qtyById[e.id] || 0) + (e.qty || 1) }
+  for (const e of log) {
+    const n = qtyById[e.id]
+    if (n >= 4 && !points.some((p) => p.includes(e.name))) {
+      points.push(`${n}× ${e.name} — that's a lot of one thing. Even lean packaged food adds up; vary it.`)
+      worsen('warn')
+    }
+  }
+
+  const processed = log.filter(isProcessed)
+  if (processed.length >= 3) {
+    points.push(`${processed.length} processed/packaged items — lean harder on whole foods to hit your body-fat goal.`)
+    worsen('warn')
+  }
+
+  const sugary = log.filter(isSugary)
+  if (sugary.length) {
+    points.push(`Added sugar crept in (${names(sugary)}). The deficit hates it — swap for fruit or skip.`)
+    worsen('warn')
+  }
+
+  if (log.some((e) => e.id === 'diet_coke' || e.id === 'coke_zero')) {
+    points.push(`Diet soda's calorie-free, but make water the default — it's not helping the goal.`)
+  }
+
+  return { tone, headline, points }
+}
+
+// Build a log entry from a pantry item (denormalized macros + timestamp).
+export function entryFromItem(item, ts, qty = 1) {
+  const q = qty > 0 ? qty : 1
+  const r = (n) => Math.round((n || 0) * q * 10) / 10
+  return { id: item.id, name: item.name,
+    portion: q === 1 ? item.portion : `${q} × ${item.portion}`,
+    qty: q,
+    kcal: Math.round((item.kcal || 0) * q),
+    protein: r(item.protein), carbs: r(item.carbs), fat: r(item.fat), fiber: r(item.fiber),
+    provisional: !!item.provisional, unhealthy: isUnhealthy(item), meal: mealForTime(new Date(ts)), ts }
+}
+
+// Auto-categorize a food by the time it was logged — no manual meal assignment.
+// Breakfast 7:30–10:30, lunch 11:30–2:30, dinner 5:30–7:30; anything else = snack.
+export const MEAL_ORDER = ['breakfast', 'lunch', 'dinner', 'snack']
+export const MEAL_LABEL = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' }
+export function mealForTime(date) {
+  const h = date.getHours() + date.getMinutes() / 60
+  if (h >= 7.5 && h < 10.5) return 'breakfast'
+  if (h >= 11.5 && h < 14.5) return 'lunch'
+  if (h >= 17.5 && h < 19.5) return 'dinner'
+  return 'snack'
+}

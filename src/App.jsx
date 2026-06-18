@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import { buildSession, estimateSessionMinutes } from './train'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, PROTEIN_TARGET_DEFAULT } from './diet'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -49,6 +51,7 @@ const defaultDay = () => ({
   steps: 0, workout: { did: false, type: '' }, weight: null,
   routines: { skincareAM: false, skincarePM: false, haircare: false },
   water: 0, meals: { breakfast: null, lunch: null, dinner: null }, mealNote: '',
+  food: [], // running protein-first food log (diet feature)
   skincare: { am: null, pm: null },
 })
 function deepMerge(t, p) {
@@ -120,6 +123,10 @@ export default function App() {
     const local = loadLocal()
     if (local) {
       ensureProfile(local.profile ||= {})
+      // Retire any earlier placeholder pantry: the seed now lives in code, so
+      // synced state should only ever hold custom adds. Strip seed items before
+      // the first sync so they never travel to the backend.
+      if (Array.isArray(local.pantry)) local.pantry = local.pantry.filter((it) => !it.seed)
       saveLocal(local) // persist the ensured defaults before any sync reads storage
       setState(local)
       doSync() // push offline changes, pull merged truth
@@ -181,7 +188,8 @@ export default function App() {
       saveLocal(next)
       return next
     })
-    setOverride(null)
+    // Weight is logged from the always-on top card now, so don't reset the focus
+    // override (that would close whatever card the user is currently in).
     setPending(true)
     scheduleSync()
   }
@@ -257,6 +265,69 @@ export default function App() {
     if (state.days?.[today]?.workout?.session?.status === 'active') setTraining(true)
   }, [state, today])
 
+  // --- diet: one running food log per day ---
+  function logFood(item, qty = 1) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today].food = [...(next.days[today].food || []), entryFromItem(item, Date.now(), qty)]
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  function removeFood(idx) {
+    setState((prev) => {
+      const next = clone(prev)
+      const food = [...(next.days[today]?.food || [])]
+      food.splice(idx, 1)
+      next.days[today].food = food
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  // Persist the day's food location WITHOUT clearing the focus override (patch
+  // resets override → focus would jump back to the coach's pick, e.g. skin).
+  function setFoodLoc(loc) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today].foodLoc = loc
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  // Quick-add a brand-new food: creates a pantry item (provisional if no macros
+  // yet — backfilled later) and logs it in one go.
+  function addFood({ name, portion, protein, kcal }) {
+    const loc = day.foodLoc || defaultLocation(today)
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
+    const item = { id, name, portion: portion || '1 serving', loc: loc === 'outside' ? 'both' : loc,
+      kcal: kcal || 0, protein: protein || 0, carbs: 0, fat: 0, provisional: !(protein > 0), custom: true }
+    setState((prev) => {
+      const next = clone(prev)
+      next.pantry = [...(next.pantry || []), item]
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today].food = [...(next.days[today].food || []), entryFromItem(item, Date.now())]
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  // Wipe today's food log. Clears localStorage immediately; the bumped _ts means
+  // the next sync overwrites the backend's day (day-level last-write-wins), so the
+  // entries are gone from the Mac too once you're home/reachable.
+  function resetFood() {
+    setState((prev) => {
+      const next = clone(prev)
+      if (next.days[today]) { next.days[today].food = []; next.days[today]._ts = Date.now() }
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+
   const day = useMemo(() => (state ? { ...defaultDay(), ...(state.days?.[today] || {}) } : null), [state, today])
   if (!state || !day) return <Centered>…</Centered>
 
@@ -306,7 +377,7 @@ export default function App() {
   const areas = [
     { id: 'skin', label: 'Skin', done: r.skincareAM && (hour < 17 || r.skincarePM), attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
     { id: 'movement', label: 'Train', done: w.did, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
-    { id: 'diet', label: 'Diet', done: dietDone(hour, meals) },
+    { id: 'diet', label: 'Diet', done: dayTotals(day).protein >= (profile.proteinTarget || PROTEIN_TARGET_DEFAULT) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
     { id: 'hair', label: 'Hair', done: r.haircare },
   ]
@@ -340,15 +411,17 @@ export default function App() {
         <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{coach.support}</p>
       </section>
 
+      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />
+
       {focus ? (
         <FocusCard
           focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
+          state={state} dateIso={today}
           onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
           onSteps={(v) => patch({ steps: v })}
           onStartTrain={() => setTraining(true)} train={trainCall}
           onHair={() => patch({ routines: { haircare: !r.haircare } })}
-          onMeal={(meal, val) => patch({ meals: { [meal]: meals[meal] === val ? null : val } })}
-          onNote={(text) => patch({ mealNote: text })}
+          onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSetLoc={setFoodLoc} onResetFood={resetFood}
           onWater={setWater}
           onWeight={saveWeight} />
       ) : (
@@ -436,7 +509,7 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManageProducts, onSteps, onStartTrain, train, onHair, onMeal, onNote, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSteps, onStartTrain, train, onHair, onLogFood, onRemoveFood, onAddFood, onSetLoc, onResetFood, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -473,24 +546,8 @@ function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManage
       )}
 
       {focus === 'diet' && (
-        <div className="space-y-2.5">
-          {['breakfast', 'lunch', 'dinner'].map((meal) => {
-            const enabled = hour >= MEAL_AFTER[meal]
-            const val = meals[meal]
-            return (
-              <div key={meal} className="flex items-center justify-between">
-                <span className={`text-sm capitalize ${enabled ? 'text-[#3a382f]' : 'text-[#bdb6a5]'}`}>{meal}</span>
-                <div className="flex gap-2">
-                  <Chip small on={val === 'on'} disabled={!enabled} onClick={() => onMeal(meal, 'on')}>On plan</Chip>
-                  <Chip small on={val === 'off'} disabled={!enabled} onClick={() => onMeal(meal, 'off')}>Off</Chip>
-                </div>
-              </div>
-            )
-          })}
-          <input defaultValue={day.mealNote || ''} placeholder="Note what you ate (optional)"
-            onBlur={(e) => onNote(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-sm text-[#23211c] outline-none placeholder:text-[#b3ac9c] focus:border-[#3d4a32]" />
-        </div>
+        <DietCard state={state} dateIso={dateIso} day={day}
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onLoc={onSetLoc} onReset={onResetFood} />
       )}
 
       {focus === 'movement' && (
@@ -500,11 +557,6 @@ function FocusCard({ focus, day, profile, hour, weightLog, onStartSkin, onManage
             <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
             <span className="text-[13px] text-[#8a8474]">of {profile.stepTarget.toLocaleString()}</span>
           </Field>
-          <Field label="Bodyweight">
-            <NumInput value={day.weight ?? ''} placeholder="kg" step="0.1" onCommit={onWeight} />
-            {day.weight != null && <span className="text-[13px] text-[#5b6745]">recorded</span>}
-          </Field>
-          {weightLog.length >= 2 && <WeightChart log={weightLog} />}
         </div>
       )}
     </section>
@@ -535,6 +587,290 @@ function TrainStart({ train, onStart }) {
         ? <span className="text-[12px] font-medium text-[#5b6745]">Done</span>
         : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>}
     </button>
+  )
+}
+
+// Protein-first pantry card: ring + location toggle + next-grab recommendation +
+// tap-to-log pantry + running log. Calorie line appears once weight is known.
+function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset }) {
+  const [adding, setAdding] = useState(false)
+  const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [reviewing, setReviewing] = useState(false) // full-screen day review
+  const [foodGroup, setFoodGroup] = useState(null)  // selected pantry category
+  const proteinTarget = state.profile?.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const loc = day.foodLoc || defaultLocation(dateIso)
+  const totals = dayTotals(day)
+  const ct = calorieTarget(state)
+  const items = pantryFor(effectivePantry(state), loc)
+  const log = day.food || []
+  const pPct = Math.min(100, Math.round((totals.protein / proteinTarget) * 100))
+  const over = ct && totals.kcal > ct.ceiling
+  // Group the log by auto-assigned meal (older entries may lack `meal` → derive).
+  // Pantry grouped by category so we show one group at a time (not a long list).
+  const groups = [...new Set(items.map(groupOf))].sort((a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b))
+  const tabs = ['All', ...groups]
+  const activeGroup = (foodGroup === 'All' || groups.includes(foodGroup)) ? foodGroup : groups[0]
+  const shownItems = activeGroup === 'All' ? items : items.filter((it) => groupOf(it) === activeGroup)
+
+  return (
+    <div className="space-y-4">
+      {/* reset today's entries — top layer */}
+      {log.length > 0 && (
+        <div className="-mb-1 flex justify-end">
+          {confirmReset ? (
+            <span className="text-[12px] text-[#8a8474]">Clear today's food?{' '}
+              <button onClick={() => { onReset(); setConfirmReset(false) }} className="font-semibold text-[#b0552a]">Reset</button>{' · '}
+              <button onClick={() => setConfirmReset(false)} className="text-[#8a8474]">Cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmReset(true)} className="text-[12px] text-[#b3ac9c] hover:text-[#8a5a1e]">Reset day</button>
+          )}
+        </div>
+      )}
+
+      {/* protein ring (bar) + calorie guardrail */}
+      <div>
+        <div className="flex items-baseline justify-between">
+          <span className="font-display text-[26px] font-semibold text-[#23211c]">
+            {Math.round(totals.protein)}<span className="text-[15px] font-normal text-[#8a8474]"> / {proteinTarget}g protein</span>
+          </span>
+          {ct
+            ? <span className={`text-[13px] ${over ? 'text-[#b0552a]' : 'text-[#8a8474]'}`}>{totals.kcal} / {ct.ceiling} cal</span>
+            : <span className="text-[12px] text-[#b08a3a]">log weight for a calorie target</span>}
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
+          <div className="h-full rounded-full bg-[#3d4a32] transition-all" style={{ width: `${pPct}%` }} />
+        </div>
+        {over && <p className="mt-1 text-[12px] text-[#b0552a]">Over your ceiling — ease off the calories.</p>}
+      </div>
+
+      {/* location toggle */}
+      <div className="flex gap-2">
+        {LOCATIONS.map((l) => <Chip key={l} small on={loc === l} onClick={() => onLoc(l)}>{l[0].toUpperCase() + l.slice(1)}</Chip>)}
+      </div>
+
+      {/* pantry — category filter, then tap to log */}
+      <div>
+        {items.length > 0 ? (
+          <>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {tabs.map((g) => <Chip key={g} small on={g === activeGroup} onClick={() => setFoodGroup(g)}>{g}</Chip>)}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {shownItems.map((it) => (
+                <PantryButton key={it.id} item={it} onTap={() => onLog(it, 1)} onLongPress={() => setQtyItem(it)} />
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-[#b3ac9c]">Tap to log one · press &amp; hold to set a quantity</p>
+          </>
+        ) : (
+          <p className="text-[13px] text-[#8a8474]">Nothing here yet — add what you ate below.</p>
+        )}
+      </div>
+
+      {/* quick-add */}
+      {adding
+        ? <AddFoodForm onAdd={(f) => { onAdd(f); setAdding(false) }} onCancel={() => setAdding(false)} />
+        : <button onClick={() => setAdding(true)} className="text-[13px] font-medium text-[#3d4a32]">+ Add food</button>}
+
+      {/* today's food → its own screen (keeps the dashboard light) */}
+      {log.length > 0 && (
+        <button onClick={() => setReviewing(true)}
+          className="flex w-full items-center justify-between border-t border-[#e6dfd0] pt-3 text-left">
+          <span className="text-[13px] text-[#6f6a5d]">Today · {Math.round(totals.protein)}g protein{ct ? `, ${totals.kcal} cal` : ''} · {log.length} item{log.length > 1 ? 's' : ''}</span>
+          <span className="flex items-center gap-1 text-[13px] font-medium text-[#3d4a32]">See today's food
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+          </span>
+        </button>
+      )}
+
+      {qtyItem && (
+        <QtyEditor item={qtyItem}
+          onLog={(q) => { onLog(qtyItem, q); setQtyItem(null) }}
+          onClose={() => setQtyItem(null)} />
+      )}
+      {reviewing && (
+        <FoodReview state={state} dateIso={dateIso} day={day} proteinTarget={proteinTarget}
+          onRemove={onRemove} onReset={onReset} onClose={() => setReviewing(false)} />
+      )}
+    </div>
+  )
+}
+
+// A pantry chip: single tap logs one serving; press-and-hold opens the quantity
+// editor. Pointer events unify touch + mouse; contextmenu is suppressed so the
+// iOS long-press callout doesn't fire.
+function PantryButton({ item, onTap, onLongPress }) {
+  const longRef = useRef(false)
+  const timer = useRef(null)
+  const bad = isUnhealthy(item)
+  const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null } }
+  const down = () => { longRef.current = false; timer.current = setTimeout(() => { longRef.current = true; onLongPress() }, 450) }
+  const up = () => { clear(); if (!longRef.current) onTap() }
+  return (
+    <button onPointerDown={down} onPointerUp={up} onPointerLeave={clear} onPointerCancel={clear}
+      onContextMenu={(e) => e.preventDefault()} style={{ WebkitTouchCallout: 'none' }}
+      className={`select-none rounded-full border px-3 py-1.5 text-[13px] text-[#3a382f] transition active:scale-[0.97] ${
+        bad ? 'border-[#dcae73] bg-[#fbf1e1] hover:bg-[#f6e9d3]' : 'border-[#d8d1c2] bg-[#fbf9f3] hover:bg-[#f3efe6]'}`}>
+      {bad && <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[#c9742e] align-middle" title="Treat" />}
+      {item.name} <span className="text-[#a39c8d]">· {item.portion}</span>
+    </button>
+  )
+}
+
+// Quantity editor (bottom sheet): set how many servings of an item to log in one
+// go, with a live macro preview. The serving label is the item's own unit.
+function QtyEditor({ item, onLog, onClose }) {
+  const [qty, setQty] = useState(1)
+  const q = qty > 0 ? Math.round(qty * 100) / 100 : 1
+  const bump = (d) => setQty((v) => Math.max(0.25, Math.round((v + d) * 100) / 100))
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4 fade-in" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-3xl bg-[#fbf9f3] p-5 shadow-[0_24px_60px_-20px_rgba(35,41,31,0.6)]" onClick={(e) => e.stopPropagation()}>
+        <p className="font-display text-[19px] font-semibold text-[#23211c]">{item.name}</p>
+        <p className="text-[13px] text-[#8a8474]">{item.portion} · {item.protein}g protein · {item.kcal} cal each</p>
+
+        <div className="mt-4 flex items-center justify-center gap-5">
+          <RoundBtn onClick={() => bump(-1)}>−</RoundBtn>
+          <div className="text-center">
+            <input value={q} onChange={(e) => setQty(Number(e.target.value) || 0)} inputMode="decimal"
+              className="w-24 rounded-xl border border-[#ddd5c5] bg-white px-2 py-2 text-center font-display text-[26px] font-semibold text-[#23211c] outline-none focus:border-[#3d4a32]" />
+            <div className="mt-1 text-[11px] text-[#a39c8d]">× {item.portion}</div>
+          </div>
+          <RoundBtn onClick={() => bump(1)}>+</RoundBtn>
+        </div>
+
+        <div className="mt-3 flex justify-center gap-2">
+          {[0.5, 1, 2, 3, 5].map((n) => <Chip key={n} small on={q === n} onClick={() => setQty(n)}>×{n}</Chip>)}
+        </div>
+
+        <p className="mt-4 text-center text-[14px] text-[#3d4a32]">
+          {q} × {item.portion} → <span className="font-semibold">{Math.round(item.protein * q * 10) / 10}g protein</span>, {Math.round(item.kcal * q)} cal
+        </p>
+
+        <button onClick={() => onLog(q)} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[15px] font-semibold text-[#f4f1e8]">Log it</button>
+        <button onClick={onClose} className="mt-2 w-full py-2 text-[13px] text-[#8a8474]">Cancel</button>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// Full-screen day review: protein/calorie totals, an honest critique, and the
+// food grouped by auto-assigned meal. Keeps the dashboard card light.
+function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onClose }) {
+  const [confirmReset, setConfirmReset] = useState(false)
+  const totals = dayTotals(day)
+  const ct = calorieTarget(state)
+  const crit = dayCritique(state, dateIso, proteinTarget)
+  const log = day.food || []
+  const byMeal = MEAL_ORDER
+    .map((m) => ({ meal: m, rows: log.map((e, i) => ({ e, i })).filter(({ e }) => (e.meal || mealForTime(new Date(e.ts))) === m) }))
+    .filter((g) => g.rows.length)
+  const critBg = crit.tone === 'good' ? 'bg-[#eef0e6] text-[#3d4a32]'
+    : crit.tone === 'bad' ? 'bg-[#f6e3d8] text-[#9a4a22]'
+    : crit.tone === 'warn' ? 'bg-[#f6eed8] text-[#866a1c]'
+    : 'bg-[#f3efe6] text-[#6f6a5d]'
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-6">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Today's food</h1>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Protein</p>
+            <p className="font-display text-[22px] font-semibold text-[#23211c]">{Math.round(totals.protein)}<span className="text-[13px] font-normal text-[#8a8474]"> / {proteinTarget}g</span></p>
+          </div>
+          <div className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Calories</p>
+            <p className="font-display text-[22px] font-semibold text-[#23211c]">{totals.kcal}{ct && <span className="text-[13px] font-normal text-[#8a8474]"> / {ct.ceiling}</span>}</p>
+          </div>
+        </div>
+
+        <div className={`mt-3 rounded-2xl px-4 py-3 ${critBg}`}>
+          <p className="text-[14px] font-medium leading-snug">{crit.headline}</p>
+          {crit.points?.length > 0 && (
+            <ul className="mt-2 space-y-1.5 border-t border-current/10 pt-2">
+              {crit.points.map((p, i) => (
+                <li key={i} className="flex gap-1.5 text-[13px] leading-snug"><span className="opacity-60">—</span><span>{p}</span></li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-6 space-y-6">
+          {byMeal.length === 0 && <p className="text-[14px] text-[#8a8474]">Nothing logged yet.</p>}
+          {byMeal.map(({ meal, rows }) => {
+            const mp = Math.round(rows.reduce((n, { e }) => n + (e.protein || 0), 0) * 10) / 10
+            const mc = rows.reduce((n, { e }) => n + (e.kcal || 0), 0)
+            return (
+              <div key={meal}>
+                <div className="flex items-baseline justify-between">
+                  <h2 className="font-display text-[17px] font-semibold text-[#23211c]">{MEAL_LABEL[meal]}</h2>
+                  <span className="text-[12px] text-[#8a8474]">{mp}g protein · {mc} cal</span>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {rows.map(({ e, i }) => (
+                    <div key={i} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${e.unhealthy ? 'border-[#e8cfa3] bg-[#fbf3e6]' : 'border-[#e6dfd0] bg-[#fbf9f3]'}`}>
+                      <span className="text-[14px] text-[#3a382f]">
+                        {e.unhealthy && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#c9742e] align-middle" />}
+                        {e.name}{e.qty > 1 && <span className="text-[#8a8474]"> ×{e.qty}</span>}
+                        <span className="ml-2 text-[12px] text-[#a39c8d]">{e.provisional ? '~' : ''}{e.protein}g · {e.kcal} cal</span>
+                      </span>
+                      <button onClick={() => onRemove(i)} aria-label="Remove" className="px-1 text-[16px] leading-none text-[#bdb6a5] hover:text-[#8a5a1e]">×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {log.length > 0 && (
+          <div className="mt-8 text-center">
+            {confirmReset ? (
+              <span className="text-[13px] text-[#8a8474]">Clear all of today's food?{' '}
+                <button onClick={() => { onReset(); setConfirmReset(false); onClose() }} className="font-semibold text-[#b0552a]">Reset</button>{' · '}
+                <button onClick={() => setConfirmReset(false)} className="text-[#8a8474]">Cancel</button>
+              </span>
+            ) : (
+              <button onClick={() => setConfirmReset(true)} className="text-[13px] text-[#b3ac9c] hover:text-[#8a5a1e]">Reset today's food</button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// Quick-add a new food. Protein optional — without it, the item logs provisional
+// and gets its numbers filled later (matches the offline "name only" decision).
+function AddFoodForm({ onAdd, onCancel }) {
+  const [name, setName] = useState('')
+  const [portion, setPortion] = useState('')
+  const [protein, setProtein] = useState('')
+  return (
+    <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
+      <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Food name"
+        className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+      <div className="flex gap-2">
+        <input value={portion} onChange={(e) => setPortion(e.target.value)} placeholder="Portion (e.g. 1 cup)"
+          className="min-w-0 flex-1 rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+        <input value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="protein g" inputMode="numeric"
+          className="w-24 rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+      </div>
+      <div className="flex items-center gap-2">
+        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), protein: protein ? Number(protein) : 0 })}
+          className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add & log</button>
+        <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
+      </div>
+      <p className="text-[11px] leading-snug text-[#a39c8d]">No protein number? It logs provisionally — I'll fill the macros when you're home.</p>
+    </div>
   )
 }
 
@@ -720,6 +1056,52 @@ function NumInput({ value, placeholder, step, onCommit }) {
     onBlur={(e) => e.target.value !== '' && onCommit(Number(e.target.value))}
     className="w-24 rounded-xl border border-[#ddd5c5] bg-white px-3 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]" />
 }
+// Dedicated bodyweight focal card near the top of the dashboard: latest weight,
+// trend vs last entry, one-tap log/update, and the trend chart once there's data.
+function WeightCard({ weightLog, today, day, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const sorted = [...(weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+  const latest = sorted.at(-1)
+  const prev = sorted.length >= 2 ? sorted.at(-2) : null
+  const loggedToday = latest?.date === today
+  const delta = latest && prev ? Math.round((latest.kg - prev.kg) * 10) / 10 : null
+  return (
+    <section className="mt-4 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Bodyweight</p>
+          <p className="font-display leading-tight text-[#23211c]">
+            {latest
+              ? <span className="text-[24px] font-semibold">{latest.kg}<span className="text-[14px] font-normal text-[#8a8474]"> kg</span></span>
+              : <span className="text-[16px] text-[#8a8474]">Not logged yet</span>}
+            {delta != null && (
+              <span className={`ml-2 text-[12px] font-medium ${delta < 0 ? 'text-[#5b6745]' : delta > 0 ? 'text-[#b0552a]' : 'text-[#8a8474]'}`}>
+                {delta > 0 ? '+' : ''}{delta} kg
+              </span>
+            )}
+          </p>
+        </div>
+        {!editing && (
+          <button onClick={() => setEditing(true)}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition active:scale-[0.97] ${
+              loggedToday ? 'border border-[#d8d1c2] text-[#4a463c] hover:bg-[#f3efe6]' : 'bg-[#3d4a32] text-[#f4f1e8] pulse-attention'}`}>
+            {loggedToday ? 'Update' : 'Log today'}
+          </button>
+        )}
+      </div>
+      {editing && (
+        <div className="mt-3 flex items-center gap-2">
+          <NumInput value={day.weight ?? latest?.kg ?? ''} placeholder="kg" step="0.1"
+            onCommit={(v) => { onSave(v); setEditing(false) }} />
+          <span className="text-[13px] text-[#8a8474]">kg</span>
+          <button onClick={() => setEditing(false)} className="ml-auto text-[13px] text-[#8a8474]">Cancel</button>
+        </div>
+      )}
+      {sorted.length >= 2 && <div className="mt-2"><WeightChart log={sorted} /></div>}
+    </section>
+  )
+}
+
 function WeightChart({ log }) {
   return (
     <ResponsiveContainer width="100%" height={130}>
@@ -855,12 +1237,23 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) 
     ? 'Start logging and your scores will fill in.'
     : overall >= 8 ? 'You’re doing the work. Keep it up.' : weakest.msg
 
+  const latestWeight = [...(state.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date)).at(-1)
   let bfStatus = null
   if (latest) {
     const toGo = +(latest.pct - target).toFixed(1)
-    bfStatus = toGo > 0
-      ? `Now ${latest.pct}% (${fmtMD(latest.date)}) — ${toGo} to go. Stay consistent and it keeps coming.`
-      : `Now ${latest.pct}% (${fmtMD(latest.date)}) — target reached. Hold it.`
+    if (toGo <= 0) {
+      bfStatus = `Now ${latest.pct}% (${fmtMD(latest.date)}) — target reached. Hold it.`
+    } else if (latestWeight) {
+      // Translate the body-fat gap into kg to lose: hold lean mass, shed fat until
+      // body fat hits the target. targetWeight = leanMass / (1 - target%).
+      const lbm = latestWeight.kg * (1 - latest.pct / 100)
+      const targetWeight = lbm / (1 - target / 100)
+      const lose = Math.max(0, Math.round((latestWeight.kg - targetWeight) * 10) / 10)
+      const perWeek = daysLeft > 0 ? Math.round((lose / (daysLeft / 7)) * 100) / 100 : null
+      bfStatus = `Now ${latest.pct}% at ${latestWeight.kg}kg — about ${lose}kg to lose to reach ${target}% by ${fmtMD(deadline)}, ${daysLeft} days left${perWeek ? ` (~${perWeek}kg/week)` : ''}.`
+    } else {
+      bfStatus = `Now ${latest.pct}% (${fmtMD(latest.date)}) — ${toGo} to go. Log your weight to see the kilos and your runway to ${fmtMD(deadline)}.`
+    }
   }
 
   return (
