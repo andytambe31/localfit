@@ -307,6 +307,7 @@ export function buildSession(state, todayIso, opts = {}) {
       id, name: meta.name, muscle: meta.muscle, role: meta.role,
       repLow: meta.repLow, repHigh: meta.repHigh, inc: meta.inc,
       emphasized: (meta.emph || []).includes(emphasis),
+      cue: cueFor(id), rir: null, // form/intent cue + reps-in-reserve (effort)
       target,
       // a blank, logged-as-you-go set scaffold the flow fills in
       sets: Array.from({ length: target.sets }, () => ({ weight: target.weight, reps: null, done: false })),
@@ -326,6 +327,55 @@ export function buildSession(state, todayIso, opts = {}) {
 
 function labelFor(part) {
   return { 'side-delts': 'side delts', 'rear-delts': 'rear delts', 'lower-back': 'lower back', lats: 'lats / back width' }[part] || part
+}
+
+// ---- in-the-moment coaching: form/intent cues (hypertrophy focus) -----------
+const CUES = {
+  bench_press: 'Blades pinned, slow to the chest, drive through the chest — not the shoulders.',
+  incline_db_press: 'Stretch at the bottom, press up and slightly in, squeeze the upper chest.',
+  shoulder_press: 'Brace your core, press without flaring, stop just short of lockout.',
+  lateral_raise: 'Lead with the elbows, no swing — slow up, slower down. Side delts do the work.',
+  cable_fly: 'Soft elbows, deep stretch, then hug the rep and squeeze the chest together.',
+  triceps_pushdown: 'Elbows pinned to your sides, full lockout, control the way back up.',
+  overhead_ext: 'Elbows tight, deep stretch behind the head, drive to lockout.',
+  lat_pulldown: 'Drive elbows down and back to the upper chest — feel the lats, not the arms.',
+  barbell_row: 'Hinge, flat back, pull to the belt, squeeze the shoulder blades.',
+  seated_row: 'Chest up, pull to the stomach, control the stretch forward. Width is in the lats.',
+  rear_delt_fly: 'Slight bend, lead with the pinkies, squeeze the rear delts — no momentum.',
+  face_pull: 'Pull to your eyes, rotate the wrists out, hold the squeeze a beat.',
+  shrug: 'Straight up to the ears, pause at the top, slow down. No rolling.',
+  db_curl: 'Elbows still, turn the pinky up as you curl, full squeeze, slow negative.',
+  hammer_curl: 'Neutral grip, no swing — control both directions. Hits the forearm too.',
+  wrist_curl: 'Slow, full range off the bench, squeeze the forearm at the top.',
+  back_ext: 'Hinge from the hips, squeeze glutes and lower back at the top — don\'t overextend.',
+  squat: 'Brace hard, sit between the hips, drive the floor away, full depth.',
+  rdl: 'Soft knees, push the hips back, feel the hamstring stretch, drive the hips through.',
+  hip_thrust: 'Chin tucked, drive through the heels, squeeze the glutes hard at the top.',
+  leg_press: 'Controlled depth, push through mid-foot, no lockout slam.',
+  leg_curl: 'Squeeze the hamstrings, slow the negative, full range.',
+  leg_ext: 'Pause and squeeze the quads at the top, control it down.',
+  cable_kickback: 'Squeeze the glute at the top, no lower-back arch, slow return.',
+  calf_raise: 'Full stretch at the bottom, big squeeze at the top, pause both ends.',
+  tib_raise: 'Pull the toes up hard, control down — protects your knees and shins.',
+}
+export function cueFor(exId) { return CUES[exId] || 'Controlled tempo, full range, squeeze at the top.' }
+
+// ---- progress: recent completed sessions, for the "you're getting stronger" view --
+export function recentSessions(state, limit = 6) {
+  const days = state.days || {}
+  const out = []
+  for (const date of Object.keys(days).sort().reverse()) {
+    const s = days[date].workout?.session
+    if (!s || s.status !== 'done') continue
+    let sets = 0, volume = 0, beaten = 0
+    for (const e of s.exercises || []) {
+      for (const st of e.sets || []) if (st.done && st.reps) { sets++; volume += (st.weight || 0) * st.reps }
+      if (e.target && !e.target.first && e.sets?.some((st) => st.done && st.reps && st.reps >= e.target.reps && (st.weight || 0) >= (e.target.weight || 0))) beaten++
+    }
+    out.push({ date, label: s.label || s.dayType, sets, volume: Math.round(volume), beaten, minutes: s.completedTs && s.startedTs ? Math.round((s.completedTs - s.startedTs) / 60000) : null })
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 // Rough wall-clock for a built session, in minutes: warm-up + working sets

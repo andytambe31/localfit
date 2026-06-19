@@ -150,9 +150,16 @@ export function tonightActive(dateIso, state) {
   let sched = scheduledTonight(dateIso, state)
   // Respect the weekly cap on the scheduled one; if capped, drop it.
   if (sched && sched.cap && activeDoneThisWeek(sched.id, dateIso, state) >= sched.cap) sched = null
-  if (sched) return sched
-  // No scheduled active tonight → allow one carry-over.
-  return carriedActive(dateIso, state, null)
+  const active = sched || carriedActive(dateIso, state, null) // no scheduled → allow one carry-over
+  // Dynamic: when skin is flagged sensitive (feedback), ease off — skip tonight's
+  // active if another active ran within the last 2 nights, so the barrier recovers.
+  if (active && state.profile?.skincare?.sensitive) {
+    for (let i = 1; i <= 2; i++) {
+      const steps = state.days?.[shift(dateIso, -i)]?.skincare?.pm?.steps || {}
+      if (Object.entries(steps).some(([id, v]) => v === 'done' && PRODUCT_BY_ID[id]?.kind === 'active')) return null
+    }
+  }
+  return active
 }
 
 // ---- the plan ----

@@ -130,7 +130,8 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
             set.done = !set.done
             if (set.done && set.reps == null) set.reps = s.exercises[item.ref].target?.reps ?? null
             return s
-          })} />
+          })}
+          onRIR={(v) => commit((s) => { s.exercises[item.ref].rir = v; return s })} />
       )}
 
       {item?.kind === 'stretch' && (
@@ -182,18 +183,23 @@ function SessionHeader({ session, cursor, total, onFinish }) {
 }
 
 // ---- exercise card: pre-filled target + per-set logging ---------------------
-function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle }) {
+function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
   const t = ex.target || {}
+  // Reinforcement: did a completed set meet/beat the target (weight & reps)?
+  const beaten = !t.first && ex.sets.some((s) => s.done && s.reps && s.reps >= (t.reps || 0) && (s.weight || 0) >= (t.weight || 0))
+  const RIR = [0, 1, 2, 3, '4+']
   return (
     <Card onPrev={onPrev} onNext={onNext}>
       <div className="flex items-center gap-2">
         <Tag>{ex.muscle}</Tag>
         {ex.emphasized && <span className="rounded-full bg-[#4a5836] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#dfe6cf]">Lagging focus</span>}
+        {beaten && <span className="rounded-full bg-[#3d6a32] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#e7f3df]">Beat last time</span>}
       </div>
       <h2 className="mt-2 font-display text-[28px] font-semibold leading-[1.12] text-[#f4f1e8]">{ex.name}</h2>
       <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{t.note}</p>
+      {ex.cue && <p className="mt-3 rounded-xl border border-[#3a4230] bg-[#272d20] px-3 py-2 text-[13px] leading-snug text-[#cfccba]"><span className="font-semibold text-[#9aa581]">Cue · </span>{ex.cue}</p>}
 
-      <div className="mt-5 space-y-2">
+      <div className="mt-4 space-y-2">
         {ex.sets.map((set, i) => (
           <div key={i} className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 ${set.done ? 'border-[#5b6a44] bg-[#2c3522]' : 'border-[#3a4230] bg-[#272d20]'}`}>
             <span className="w-12 shrink-0 text-[12px] uppercase tracking-wider text-[#8c9472]">Set {i + 1}</span>
@@ -206,6 +212,17 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle }) {
           </div>
         ))}
       </div>
+
+      <div className="mt-3 flex items-center justify-between rounded-2xl border border-[#3a4230] bg-[#272d20] px-3 py-2">
+        <span className="text-[12px] text-[#8c9472]">Reps left in the tank?</span>
+        <div className="flex gap-1.5">
+          {RIR.map((v, idx) => (
+            <button key={idx} onClick={() => onRIR(idx)}
+              className={`grid h-7 w-7 place-items-center rounded-full text-[12px] font-semibold ${ex.rir === idx ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#333b28] text-[#9aa581]'}`}>{v}</button>
+          ))}
+        </div>
+      </div>
+
       <Advance onClick={onNext} label="Next exercise" />
     </Card>
   )

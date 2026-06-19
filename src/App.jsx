@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
-import { buildSession, estimateSessionMinutes } from './train'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, PROTEIN_TARGET_DEFAULT } from './diet'
+import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions } from './train'
+import { weeklyCheckin } from './adapt'
+import { hairPlanForDay, HAIR_DOW_LABEL, rollerDay } from './hair'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -301,11 +303,12 @@ export default function App() {
   }
   // Quick-add a brand-new food: creates a pantry item (provisional if no macros
   // yet — backfilled later) and logs it in one go.
-  function addFood({ name, portion, protein, kcal }) {
+  function addFood({ name, portion, kcal, protein, carbs, fat }) {
     const loc = day.foodLoc || defaultLocation(today)
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
     const item = { id, name, portion: portion || '1 serving', loc: loc === 'outside' ? 'both' : loc,
-      kcal: kcal || 0, protein: protein || 0, carbs: 0, fat: 0, provisional: !(protein > 0), custom: true }
+      kcal: kcal || 0, protein: protein || 0, carbs: carbs || 0, fat: fat || 0, fiber: 0,
+      provisional: !((kcal || 0) > 0 || (protein || 0) > 0), custom: true }
     setState((prev) => {
       const next = clone(prev)
       next.pantry = [...(next.pantry || []), item]
@@ -323,6 +326,18 @@ export default function App() {
     setState((prev) => {
       const next = clone(prev)
       if (next.days[today]) { next.days[today].food = []; next.days[today]._ts = Date.now() }
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  // Reassign a logged item to a different meal (overrides the time-based auto-tag).
+  function moveFood(idx, meal) {
+    setState((prev) => {
+      const next = clone(prev)
+      const food = [...(next.days[today]?.food || [])]
+      if (food[idx]) food[idx] = { ...food[idx], meal }
+      next.days[today].food = food
+      next.days[today]._ts = Date.now()
       saveLocal(next); return next
     })
     setPending(true); scheduleSync()
@@ -357,7 +372,7 @@ export default function App() {
   }
   const skinDue = dueSummary(today, state)
   const lastSleep = lastNightSleep(state, today)
-  const coach = buildCoach({ hour, minute, day, profile, skinDue, lastSleep })
+  const coach = buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, today })
   const focus = override || coach.action?.target || null
   // Routines are only loggable in their window: morning 6 AM–12 PM, evening 6 PM–12 AM.
   const inAmWindow = hour >= 6 && hour < 12
@@ -413,15 +428,25 @@ export default function App() {
 
       <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />
 
+      {(() => {
+        const checkin = weeklyCheckin(state, today)
+        return checkin.due && checkin.findings.length > 0 ? (
+          <CheckinCard checkin={checkin}
+            onApply={(changes) => updateProfile({ ...changes, lastCheckin: today })}
+            onDismiss={() => updateProfile({ lastCheckin: today })} />
+        ) : null
+      })()}
+
       {focus ? (
         <FocusCard
           focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
           state={state} dateIso={today}
           onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
+          onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
           onSteps={(v) => patch({ steps: v })}
           onStartTrain={() => setTraining(true)} train={trainCall}
           onHair={() => patch({ routines: { haircare: !r.haircare } })}
-          onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSetLoc={setFoodLoc} onResetFood={resetFood}
+          onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
           onWater={setWater}
           onWeight={saveWeight} />
       ) : (
@@ -509,7 +534,7 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSteps, onStartTrain, train, onHair, onLogFood, onRemoveFood, onAddFood, onSetLoc, onResetFood, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onHair, onLogFood, onRemoveFood, onAddFood, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -521,11 +546,19 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
             <SkinStart label="Start morning routine" done={r.skincareAM} primary={hour < 17} locked={!(hour >= 6 && hour < 12)} hint="Opens 6 AM" onClick={() => onStartSkin('am')} />
             <SkinStart label="Start evening routine" done={r.skincarePM} primary={hour >= 17} locked={hour < 18} hint="Opens 6 PM" onClick={() => onStartSkin('pm')} />
           </div>
-          <button onClick={onManageProducts} className="mt-3 text-[13px] font-medium text-[#6f6a5d] underline-offset-2 hover:underline">Manage products</button>
+          <div className="mt-3 flex items-center justify-between">
+            <button onClick={onManageProducts} className="text-[13px] font-medium text-[#6f6a5d] underline-offset-2 hover:underline">Manage products</button>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[12px] text-[#a39c8d]">Skin:</span>
+              <Chip small on={!profile.skincare?.sensitive} onClick={() => onSkinSensitive(false)}>Calm</Chip>
+              <Chip small on={!!profile.skincare?.sensitive} onClick={() => onSkinSensitive(true)}>Reacting</Chip>
+            </div>
+          </div>
+          {profile.skincare?.sensitive && <p className="mt-2 text-[12px] text-[#b08a3a]">Easing your actives — spacing them out until your skin settles.</p>}
         </div>
       )}
 
-      {focus === 'hair' && <Chip on={r.haircare} onClick={onHair}>Done today</Chip>}
+      {focus === 'hair' && <HairCard state={state} dateIso={dateIso} done={r.haircare} onDone={onHair} />}
 
       {focus === 'water' && (
         <div>
@@ -547,7 +580,7 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
 
       {focus === 'diet' && (
         <DietCard state={state} dateIso={dateIso} day={day}
-          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onLoc={onSetLoc} onReset={onResetFood} />
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} />
       )}
 
       {focus === 'movement' && (
@@ -557,9 +590,76 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
             <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
             <span className="text-[13px] text-[#8a8474]">of {profile.stepTarget.toLocaleString()}</span>
           </Field>
+          <TrainingProgress state={state} />
         </div>
       )}
     </section>
+  )
+}
+
+// Hair: today's scheduled routine (minoxidil daily, derma roller weekly).
+function HairCard({ state, dateIso, done, onDone }) {
+  const plan = hairPlanForDay(dateIso, state)
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
+        <p className="font-display text-[20px] font-semibold text-[#23211c]">{plan.title}</p>
+      </div>
+      <div className="space-y-2">
+        {plan.steps.map((s) => (
+          <div key={s.id} className={`rounded-2xl border px-3.5 py-2.5 ${s.note ? 'border-[#e7d4b6] bg-[#f7ecd6]' : 'border-[#e6dfd0] bg-[#fbf9f3]'}`}>
+            <p className="text-[14px] font-semibold text-[#3a382f]">{s.title}</p>
+            <p className="mt-0.5 text-[13px] leading-snug text-[#6f6a5d]">{s.instruction}</p>
+          </div>
+        ))}
+      </div>
+      <button onClick={onDone} className={`w-full rounded-full px-4 py-2.5 text-[14px] font-semibold transition active:scale-[0.99] ${done ? 'border border-[#d8d1c2] text-[#5b6745]' : 'bg-[#3d4a32] text-[#f4f1e8]'}`}>
+        {done ? 'Done today ✓' : 'Mark done'}
+      </button>
+      <p className="text-[11px] text-[#a39c8d]">Minoxidil daily; derma roller weekly on {HAIR_DOW_LABEL[rollerDay(state)]} (no minoxidil that night).</p>
+    </div>
+  )
+}
+
+// Weekly check-in: outcome-driven findings + one-tap plan adjustments.
+function CheckinCard({ checkin, onApply, onDismiss }) {
+  const hasChanges = Object.keys(checkin.changes).length > 0
+  return (
+    <section className="mt-4 rounded-2xl border border-[#cdd6b8] bg-[#eef0e6] px-4 py-3.5">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-[#7d8a5f]">Weekly check-in</p>
+      <ul className="mt-2 space-y-1.5">
+        {checkin.findings.map((f, i) => (
+          <li key={i} className="flex gap-2 text-[13px] leading-snug text-[#3a4230]">
+            <span className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${f.tone === 'warn' ? 'bg-[#c9742e]' : 'bg-[#5b6a44]'}`} />
+            <span><span className="font-semibold">{f.area}.</span> {f.text}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 flex gap-2">
+        {hasChanges && <button onClick={() => onApply(checkin.changes)} className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8]">Apply changes</button>}
+        <button onClick={onDismiss} className="rounded-full px-3 py-1.5 text-[13px] font-medium text-[#6f6a5d]">{hasChanges ? 'Not now' : 'Got it'}</button>
+      </div>
+    </section>
+  )
+}
+
+// A compact "you're getting stronger" recap: recent sessions with sets, volume, PRs.
+function TrainingProgress({ state }) {
+  const sessions = recentSessions(state, 4)
+  if (!sessions.length) return null
+  return (
+    <div className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
+      <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Recent sessions</p>
+      <div className="space-y-1.5">
+        {sessions.map((s) => (
+          <div key={s.date} className="flex items-center justify-between text-[13px]">
+            <span className="text-[#3a382f]">{s.label} <span className="text-[#a39c8d]">· {fmtMD(s.date)}</span></span>
+            <span className="text-[12px] text-[#8a8474]">{s.sets} sets · {s.volume.toLocaleString()} lb{s.beaten > 0 ? ` · ${s.beaten} PR` : ''}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -592,7 +692,7 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
-function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset }) {
+function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset, onMove }) {
   const [adding, setAdding] = useState(false)
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
   const [confirmReset, setConfirmReset] = useState(false)
@@ -687,12 +787,12 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset 
 
       {qtyItem && (
         <QtyEditor item={qtyItem}
-          onLog={(q) => { onLog(qtyItem, q); setQtyItem(null) }}
+          onLog={(loggedItem, q) => { onLog(loggedItem, q); setQtyItem(null) }}
           onClose={() => setQtyItem(null)} />
       )}
       {reviewing && (
         <FoodReview state={state} dateIso={dateIso} day={day} proteinTarget={proteinTarget}
-          onRemove={onRemove} onReset={onReset} onClose={() => setReviewing(false)} />
+          onRemove={onRemove} onReset={onReset} onMove={onMove} onClose={() => setReviewing(false)} />
       )}
     </div>
   )
@@ -723,13 +823,36 @@ function PantryButton({ item, onTap, onLongPress }) {
 // go, with a live macro preview. The serving label is the item's own unit.
 function QtyEditor({ item, onLog, onClose }) {
   const [qty, setQty] = useState(1)
+  const [mods, setMods] = useState(() => Object.fromEntries((item.mods || []).map((m) => [m.id, m.default])))
   const q = qty > 0 ? Math.round(qty * 100) / 100 : 1
   const bump = (d) => setQty((v) => Math.max(0.25, Math.round((v + d) * 100) / 100))
+  const adj = applyMods(item, mods)
+  const setMod = (m, v) => setMods((s) => ({ ...s, [m.id]: Math.max(m.min ?? 0, Math.min(m.max ?? 99, v)) }))
+  const log = () => {
+    const changed = (item.mods || []).filter((m) => mods[m.id] !== m.default)
+      .map((m) => `${m.label.replace(/\s*\(.*\)/, '')}: ${mods[m.id]}`).join(', ')
+    onLog({ ...item, ...adj, portion: changed ? `${item.portion} · ${changed}` : item.portion }, q)
+  }
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4 fade-in" onClick={onClose}>
       <div className="w-full max-w-sm rounded-3xl bg-[#fbf9f3] p-5 shadow-[0_24px_60px_-20px_rgba(35,41,31,0.6)]" onClick={(e) => e.stopPropagation()}>
         <p className="font-display text-[19px] font-semibold text-[#23211c]">{item.name}</p>
-        <p className="text-[13px] text-[#8a8474]">{item.portion} · {item.protein}g protein · {item.kcal} cal each</p>
+        <p className="text-[13px] text-[#8a8474]">{item.portion} · {adj.protein}g protein · {adj.kcal} cal each</p>
+
+        {(item.mods || []).length > 0 && (
+          <div className="mt-3 space-y-1.5 rounded-2xl border border-[#e6dfd0] bg-[#f6f2e9] p-3">
+            {item.mods.map((m) => (
+              <div key={m.id} className="flex items-center justify-between">
+                <span className="text-[13px] text-[#4a463c]">{m.label}</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setMod(m, mods[m.id] - 1)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">−</button>
+                  <span className="w-5 text-center text-[15px] font-semibold tabular-nums text-[#23211c]">{mods[m.id]}</span>
+                  <button onClick={() => setMod(m, mods[m.id] + 1)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">+</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="mt-4 flex items-center justify-center gap-5">
           <RoundBtn onClick={() => bump(-1)}>−</RoundBtn>
@@ -746,10 +869,10 @@ function QtyEditor({ item, onLog, onClose }) {
         </div>
 
         <p className="mt-4 text-center text-[14px] text-[#3d4a32]">
-          {q} × {item.portion} → <span className="font-semibold">{Math.round(item.protein * q * 10) / 10}g protein</span>, {Math.round(item.kcal * q)} cal
+          {q} × {item.portion} → <span className="font-semibold">{Math.round(adj.protein * q * 10) / 10}g protein</span>, {Math.round(adj.kcal * q)} cal
         </p>
 
-        <button onClick={() => onLog(q)} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[15px] font-semibold text-[#f4f1e8]">Log it</button>
+        <button onClick={log} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[15px] font-semibold text-[#f4f1e8]">Log it</button>
         <button onClick={onClose} className="mt-2 w-full py-2 text-[13px] text-[#8a8474]">Cancel</button>
       </div>
     </div>,
@@ -759,8 +882,9 @@ function QtyEditor({ item, onLog, onClose }) {
 
 // Full-screen day review: protein/calorie totals, an honest critique, and the
 // food grouped by auto-assigned meal. Keeps the dashboard card light.
-function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onClose }) {
+function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onMove, onClose }) {
   const [confirmReset, setConfirmReset] = useState(false)
+  const [movingIdx, setMovingIdx] = useState(null) // entry being reassigned to a meal
   const totals = dayTotals(day)
   const ct = calorieTarget(state)
   const crit = dayCritique(state, dateIso, proteinTarget)
@@ -815,13 +939,25 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onC
                 </div>
                 <div className="mt-2 space-y-1.5">
                   {rows.map(({ e, i }) => (
-                    <div key={i} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${e.unhealthy ? 'border-[#e8cfa3] bg-[#fbf3e6]' : 'border-[#e6dfd0] bg-[#fbf9f3]'}`}>
-                      <span className="text-[14px] text-[#3a382f]">
-                        {e.unhealthy && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#c9742e] align-middle" />}
-                        {e.name}{e.qty > 1 && <span className="text-[#8a8474]"> ×{e.qty}</span>}
-                        <span className="ml-2 text-[12px] text-[#a39c8d]">{e.provisional ? '~' : ''}{e.protein}g · {e.kcal} cal</span>
-                      </span>
-                      <button onClick={() => onRemove(i)} aria-label="Remove" className="px-1 text-[16px] leading-none text-[#bdb6a5] hover:text-[#8a5a1e]">×</button>
+                    <div key={i} className={`rounded-xl border px-3 py-2.5 ${e.unhealthy ? 'border-[#e8cfa3] bg-[#fbf3e6]' : 'border-[#e6dfd0] bg-[#fbf9f3]'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[14px] text-[#3a382f]">
+                          {e.unhealthy && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#c9742e] align-middle" />}
+                          {e.name}{e.qty > 1 && <span className="text-[#8a8474]"> ×{e.qty}</span>}
+                          <span className="ml-2 text-[12px] text-[#a39c8d]">{e.provisional ? '~' : ''}{e.protein}g · {e.kcal} cal</span>
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => setMovingIdx(movingIdx === i ? null : i)} className="text-[12px] font-medium text-[#9aa581]">Move</button>
+                          <button onClick={() => onRemove(i)} aria-label="Remove" className="text-[16px] leading-none text-[#bdb6a5] hover:text-[#8a5a1e]">×</button>
+                        </div>
+                      </div>
+                      {movingIdx === i && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {MEAL_ORDER.map((m) => (
+                            <Chip key={m} small on={meal === m} onClick={() => { onMove(i, m); setMovingIdx(null) }}>{MEAL_LABEL[m]}</Chip>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -853,23 +989,36 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onC
 function AddFoodForm({ onAdd, onCancel }) {
   const [name, setName] = useState('')
   const [portion, setPortion] = useState('')
+  const [kcal, setKcal] = useState('')
   const [protein, setProtein] = useState('')
+  const [carbs, setCarbs] = useState('')
+  const [fat, setFat] = useState('')
+  const num = (v) => (v === '' ? undefined : Number(v))
+  const Macro = ({ label, value, set }) => (
+    <label className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{label}</span>
+      <input value={value} onChange={(e) => set(e.target.value)} inputMode="decimal" placeholder="—"
+        className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-[#3d4a32]" />
+    </label>
+  )
   return (
     <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Food name"
         className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
-      <div className="flex gap-2">
-        <input value={portion} onChange={(e) => setPortion(e.target.value)} placeholder="Portion (e.g. 1 cup)"
-          className="min-w-0 flex-1 rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
-        <input value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="protein g" inputMode="numeric"
-          className="w-24 rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+      <input value={portion} onChange={(e) => setPortion(e.target.value)} placeholder="Portion (e.g. 1 bowl)"
+        className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+      <div className="grid grid-cols-4 gap-2">
+        <Macro label="cal" value={kcal} set={setKcal} />
+        <Macro label="protein" value={protein} set={setProtein} />
+        <Macro label="carbs" value={carbs} set={setCarbs} />
+        <Macro label="fat" value={fat} set={setFat} />
       </div>
-      <div className="flex items-center gap-2">
-        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), protein: protein ? Number(protein) : 0 })}
-          className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add & log</button>
+      <div className="flex items-center gap-2 pt-1">
+        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat) })}
+          className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add &amp; log</button>
         <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
       </div>
-      <p className="text-[11px] leading-snug text-[#a39c8d]">No protein number? It logs provisionally — I'll fill the macros when you're home.</p>
+      <p className="text-[11px] leading-snug text-[#a39c8d]">Leave numbers blank to log provisionally and fill them in later.</p>
     </div>
   )
 }
@@ -973,64 +1122,78 @@ function activeName(id) {
   if (id === 'azelaic') return 'Azelaic acid tonight'
   return null
 }
-function buildCoach({ hour, minute, day, profile, skinDue, lastSleep }) {
-  const r = day.routines, w = day.workout, meals = day.meals || {}
+function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, today }) {
+  const r = day.routines, w = day.workout
   skinDue = skinDue || { amPending: !r.skincareAM, pmPending: !r.skincarePM, tonightActive: null, shaveDue: false }
   const steps = day.steps || 0, target = profile.stepTarget, water = day.water || 0, wTarget = profile.waterTarget
-  const trained = w.did && w.type !== 'Rest'
   const t = fmtTime(hour, minute)
   const eyebrow = `Today — ${t}`
   const phase = hour < 5 ? 'latenight' : hour < 12 ? 'morning' : hour < 17 ? 'midday' : hour < 21 ? 'evening' : 'night'
 
+  // Diet (protein-first) + training, pulled from the engines so the hero reflects
+  // what you've actually logged today.
+  const proteinTarget = profile.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const dt = dayTotals(day)
+  const ct = state ? calorieTarget(state) : null
+  const over = ct && dt.kcal > ct.ceiling
+  const trainedToday = w.session?.status === 'done'
+  const session0 = state ? buildSession(state, today) : null
+  const tcall = state ? decideEveningPriority(state, today, hour, minute) : null
+  const move = (c) => ({ eyebrow, headline: c.headline, support: c.support, action: { target: 'movement' } })
+
+  // Protein nudge when meaningfully behind pace for the time of day (no nag in the
+  // morning when protein is naturally low).
+  const proteinNudge = () => {
+    const frac = Math.max(0, Math.min(1, (hour - 8) / 13))
+    if (dt.count && dt.protein < proteinTarget * frac - 25)
+      return { eyebrow, headline: `Protein's lagging — ${Math.round(dt.protein)}g of ${proteinTarget}.`,
+        support: over ? `You're over calories, so keep it lean — whey or egg whites, nothing heavy.` : `Grab a lean source (whey, chicken, Greek yogurt) to get back on pace.`,
+        action: { target: 'diet' } }
+    return null
+  }
+  const skincareAM = () => {
+    const support = skinDue.shaveDue ? (skinDue.shaveOverdue ? `You're past due to shave — do it, then SPF before you leave.` : `Shave today, then SPF before you leave.`)
+      : `A few quiet minutes. SPF is the one that protects your progress.`
+    return { eyebrow, headline: `Start your morning routine.`, support, action: { target: 'skin' } }
+  }
+  const skincarePM = () => {
+    const an = activeName(skinDue.tonightActive)
+    const headline = hour >= 22 ? `It's ${t} — do your evening routine before bed.` : `Your evening skincare routine.`
+    return { eyebrow, headline, support: an ? `${an}. After this, the priority is sleep.` : `Keep it gentle and let your skin repair. After this, sleep.`, action: { target: 'skin' } }
+  }
+
   if (phase === 'latenight')
-    return { eyebrow, headline: `It’s ${t}. Go to bed.`, support: `Nothing good for your goals happens past midnight. Sleep is when fat burns and muscle repairs — get to it.`, action: null }
+    return { eyebrow, headline: `It's ${t}. Go to bed.`, support: `Nothing good for your goals happens past midnight. Sleep is when fat burns and muscle repairs.`, action: null }
 
   if (phase === 'morning') {
-    if (water < 1) return { eyebrow, headline: `Drink a glass of water. Now.`, support: `Hydrate before anything else — it’s the easiest win of the day, and it wakes you up.`, action: { target: 'water' } }
-    if (!r.skincareAM && skinDue.amPending) {
-      const support = skinDue.shaveDue
-        ? (skinDue.shaveOverdue ? `You're past due to shave — do it, then SPF before you leave.` : `Shave today, then SPF before you leave.`)
-        : `A few quiet minutes. SPF is the one that protects your progress.`
-      return { eyebrow, headline: `Start your morning routine.`, support, action: { target: 'skin' } }
-    }
-    if (meals.breakfast == null) return { eyebrow, headline: `Log your breakfast.`, support: `On plan or not — be honest. The first meal sets the tone for the whole day.`, action: { target: 'diet' } }
-    if (!trained) return { eyebrow, headline: `Decide when you’re training today.`, support: `Three sessions a week is the floor for holding muscle while you cut. Commit to a time.`, action: { target: 'movement' } }
-    // Quietly acknowledge a short night if we're confident about it.
+    if (water < 1) return { eyebrow, headline: `Drink a glass of water. Now.`, support: `Hydrate before anything else — the easiest win of the day.`, action: { target: 'water' } }
+    if (!r.skincareAM && skinDue.amPending) return skincareAM()
+    if (session0 && session0.dayType !== 'rest' && !trainedToday)
+      return { eyebrow, headline: `Today's a ${session0.label.toLowerCase()} day.`, support: `${session0.emphasisReason || `${session0.reason}`} Save it for this evening — get your steps and protein in first.`, action: { target: 'movement' } }
+    const pn = proteinNudge(); if (pn) return pn
     const sleepTargetMin = (profile.sleepTargetHours || 7) * 60
     if (lastSleep && lastSleep.confident && lastSleep.minutes < sleepTargetMin)
-      return { eyebrow, headline: `Good start. Keep moving.`, support: `You ran short on sleep last night (${fmtDuration(lastSleep.minutes)}) — no guilt, just aim for an earlier night tonight. Steps and water are going; keep at it.`, action: { target: 'movement' } }
-    return { eyebrow, headline: `Good start. Keep moving.`, support: `Steps ticking, water going. Don’t coast — the day is yours to win.`, action: { target: 'movement' } }
+      return { eyebrow, headline: `Good start. Keep moving.`, support: `Short night (${fmtDuration(lastSleep.minutes)}) — aim earlier tonight. Steps and water are going; keep at it.`, action: { target: 'movement' } }
+    return { eyebrow, headline: `Good start. Keep moving.`, support: `Steps ticking, water going. The day is yours to win.`, action: null }
   }
+
   if (phase === 'midday') {
-    if (meals.lunch == null) return { eyebrow, headline: `Log your lunch.`, support: `Tell me straight — on plan or off. That’s how we keep the trend honest.`, action: { target: 'diet' } }
-    if (water < expectedWater(hour, wTarget)) return { eyebrow, headline: `You’re at ${water} of ${wTarget} glasses. Drink up.`, support: `You’re behind on water for midday. Get a glass in before you forget.`, action: { target: 'water' } }
+    const pn = proteinNudge(); if (pn) return pn
+    if (water < expectedWater(hour, wTarget)) return { eyebrow, headline: `You're at ${water} of ${wTarget} glasses. Drink up.`, support: `Behind on water for midday. Get a glass in before you forget.`, action: { target: 'water' } }
+    if (tcall && (tcall.focus === 'train' || tcall.focus === 'both')) return move(tcall)
     if (steps < target * 0.4) return { eyebrow, headline: `Only ${steps.toLocaleString()} steps so far. Get on your feet.`, support: `Ten minutes of walking now beats cramming it after dark.`, action: { target: 'movement' } }
-    if (!trained) return { eyebrow, headline: `Train this afternoon. Don’t push it to tonight.`, support: `A session now protects your muscle and your deficit. Lock it in.`, action: { target: 'movement' } }
-    return { eyebrow, headline: `Strong midday. Hold the line.`, support: `You’re on track. Stay sharp through the afternoon.`, action: null }
+    return { eyebrow, headline: `Strong midday. Hold the line.`, support: `On track. Stay sharp through the afternoon.`, action: null }
   }
-  if (phase === 'evening') {
-    if (steps < target * 0.6) return { eyebrow, headline: `It’s ${t} and you’re at ${steps.toLocaleString()} of ${target.toLocaleString()} steps.`, support: `Get a 30–40 minute walk in — now, not later. This is exactly where steady fat loss is won.`, action: { target: 'movement' } }
-    if (!trained) return { eyebrow, headline: `You still haven’t trained. Thirty minutes. Go.`, support: `Even a short lifting session protects muscle while you’re cutting. Show up.`, action: { target: 'movement' } }
-    if (meals.dinner == null) return { eyebrow, headline: `Log your dinner.`, support: `Be honest with it. Dinner is where most days are won or lost.`, action: { target: 'diet' } }
-    if (water < wTarget) return { eyebrow, headline: `Finish your water — ${water} of ${wTarget}.`, support: `Don’t go to bed short on hydration. Knock out the rest now.`, action: { target: 'water' } }
-    if (!r.skincarePM && skinDue.pmPending) {
-      if (trained) {
-        const an = activeName(skinDue.tonightActive)
-        const support = an ? `${an}. Otherwise keep it gentle.` : `Recovery night — keep it gentle and let your skin repair.`
-        return { eyebrow, headline: `Trained and showered? Now your evening routine.`, support, action: { target: 'skin' } }
-      }
-      return { eyebrow, headline: `After your workout and shower, do your evening routine.`, support: `No rush — train first, then close out the day with your skin.`, action: { target: 'skin' } }
-    }
-    return { eyebrow, headline: `You’ve handled today.`, support: `Skin, training, food, water — all tended. This is what consistency looks like.`, action: null }
-  }
-  // night 21–24
-  if (!r.skincarePM && skinDue.pmPending) {
-    const an = activeName(skinDue.tonightActive)
-    const headline = hour >= 22 ? `It’s ${t} — do your evening routine before bed.` : `Evening routine, then start winding down.`
-    return { eyebrow, headline, support: an ? `${an}. Last thing for the day — after this, sleep.` : `Last thing for the day. After this, the priority is sleep.`, action: { target: 'skin' } }
-  }
-  if (meals.dinner == null) return { eyebrow, headline: `Log dinner before you forget.`, support: `One tap. Then close out the day.`, action: { target: 'diet' } }
-  return { eyebrow, headline: `That’s a full day. Be in bed soon.`, support: `Recovery is non-negotiable. Weigh in first thing tomorrow — we track the trend, not the noise.`, action: null }
+
+  // evening + night (17–24): movement decision comes from the engine.
+  if (tcall && (tcall.focus === 'train' || tcall.focus === 'both')) return move(tcall)
+  const pn = proteinNudge(); if (pn) return pn
+  if (tcall && tcall.focus === 'walk') return move(tcall)
+  if (over) return { eyebrow, headline: `You're over your calorie ceiling.`, support: `Stop eating for tonight — no treats, no "just one more". The deficit is the whole game.`, action: { target: 'diet' } }
+  if (water < wTarget && hour < 22) return { eyebrow, headline: `Finish your water — ${water} of ${wTarget}.`, support: `Don't go to bed short on hydration. Knock out the rest now.`, action: { target: 'water' } }
+  if (!r.skincarePM && skinDue.pmPending) return skincarePM()
+  if (hour >= 21) return { eyebrow, headline: `That's a full day. Be in bed soon.`, support: `Recovery is non-negotiable. Weigh in first thing tomorrow — we track the trend, not the noise.`, action: null }
+  return { eyebrow, headline: `You've handled today.`, support: `Training, food, water, skin — all tended. This is what consistency looks like.`, action: null }
 }
 function fmtTime(h, m) { const ap = h < 12 ? 'AM' : 'PM'; const hr = ((h + 11) % 12) + 1; return `${hr}:${String(m).padStart(2, '0')} ${ap}` }
 
@@ -1214,7 +1377,7 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) 
   const skinScore = ratio10(skinDays, 12)
   const hairScore = ratio10(hairDays, 4)
   const slpScore = sleepScore(state, today, profile) // null until there's data
-  const dietSc = dietScore(state, today) // null until meals are logged
+  const dietSc = foodScore(state, today, profile.proteinTarget || PROTEIN_TARGET_DEFAULT) // protein + calorie score; null until food logged
   const moveSc = moveScore(state, today, profile) // null until a day is present
   const lastSleep = lastNightSleep(state, today)
 
@@ -1223,7 +1386,7 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) 
     { key: 'sleep', label: 'Sleep', score: slpScore, msg: `Sleep is your weak spot — aim for ${profile.sleepTargetHours || 7}h, lights out by ${clockGoal(profile.bedGoal || '23:30')}.` },
     { key: 'skin', label: 'Skin', score: skinScore, msg: 'Skin is slipping — run the full AM and PM routine, every day.' },
     { key: 'hair', label: 'Hair', score: hairScore, msg: 'Hair is falling behind — stay on your care schedule.' },
-    { key: 'diet', label: 'Diet', score: dietSc, msg: 'Diet is dragging — log honestly and keep more meals on plan.' },
+    { key: 'diet', label: 'Diet', score: dietSc, msg: 'Diet is dragging — hit your protein and stay under your calorie ceiling.' },
     { key: 'move', label: 'Move', score: moveSc, msg: 'Movement is light — hit your steps and train three times a week.' },
   ]
 

@@ -42,8 +42,10 @@ export const DEFAULT_PANTRY = [
   { id: 'barebells_bar',    name: 'Barebells Protein Bar', loc: 'home', category: 'protein_snack', portion: '1 bar',    kcal: 200, protein: 20,  carbs: 20,   fat: 7,    fiber: 3 },
   { id: 'whey_isolate',     name: 'Impact Whey Isolate',   loc: 'home', category: 'protein',       portion: '1 scoop (25g)', kcal: 100, protein: 23, carbs: 2, fat: 1, fiber: 0 },
   { id: 'creatine',         name: 'Creatine Monohydrate',  loc: 'home', category: 'supplement',    portion: '1 scoop (3g)',  kcal: 0,   protein: 0,  carbs: 0, fat: 0, fiber: 0 },
-  { id: 'homemade_chicken_bowl', name: 'Homemade Chicken Bowl', loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 510, protein: 45, carbs: 28, fat: 23, fiber: 10 },
-  { id: 'homemade_egg_bowl',     name: 'Homemade Egg Bowl',     loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 485, protein: 25, carbs: 28, fat: 31, fiber: 10 },
+  { id: 'homemade_chicken_bowl', name: 'Homemade Chicken Bowl', loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 510, protein: 45, carbs: 28, fat: 23, fiber: 10,
+    mods: [{ id: 'chicken', label: 'Chicken (×50g)', default: 3, min: 0, max: 8, per: { kcal: 83, protein: 15.5, carbs: 0, fat: 1.8 } }] },
+  { id: 'homemade_egg_bowl',     name: 'Homemade Egg Bowl',     loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 485, protein: 25, carbs: 28, fat: 31, fiber: 10,
+    mods: [{ id: 'eggs', label: 'Eggs', default: 3, min: 0, max: 8, per: { kcal: 72, protein: 6.3, carbs: 0.4, fat: 4.8 } }] },
   // Combos — ingredients combined into dishes you actually eat (macros summed;
   // estimates, tweak as needed). The raw ingredients stay available too.
   { id: 'cappuccino_whole',      name: 'Cappuccino (Whole Milk)', loc: 'home', category: 'beverage',     portion: '1 cup',     kcal: 90,  protein: 4.5, carbs: 8,  fat: 4,  fiber: 0, ingredients: ['espresso', 'whole_milk'] },
@@ -114,8 +116,9 @@ export function calorieTarget(state, opts = {}) {
   const bf = latest(state.bodyFatLog, 'pct')
   const lbm = bf != null ? kg * (1 - bf / 100) : kg * 0.75 // fall back to ~25% bf
   const bmr = 370 + 21.6 * lbm
-  const tdee = bmr * (opts.activity || 1.45)
-  const deficit = opts.deficit || 500 // ~0.5 kg/week toward the Dec target
+  const tdee = bmr * (opts.activity || state.profile?.activity || 1.45)
+  // Deficit is adjustable — the weekly check-in can tighten it when fat loss stalls.
+  const deficit = opts.deficit ?? state.profile?.deficit ?? 500
   return {
     ceiling: Math.round((tdee - deficit) / 10) * 10,
     tdee: Math.round(tdee), bmr: Math.round(bmr), lbm: Math.round(lbm * 10) / 10, kg, bf,
@@ -285,6 +288,18 @@ export function dayCritique(state, dateIso, proteinTarget = PROTEIN_TARGET_DEFAU
   }
 
   return { tone, headline, points }
+}
+
+// Apply ingredient modifiers (e.g. 2 vs 3 eggs in a bowl) to an item's macros.
+export function applyMods(item, modCounts) {
+  let { kcal = 0, protein = 0, carbs = 0, fat = 0 } = item
+  for (const m of item.mods || []) {
+    const delta = ((modCounts?.[m.id] ?? m.default) - m.default)
+    kcal += delta * (m.per.kcal || 0); protein += delta * (m.per.protein || 0)
+    carbs += delta * (m.per.carbs || 0); fat += delta * (m.per.fat || 0)
+  }
+  const r1 = (n) => Math.max(0, Math.round(n * 10) / 10)
+  return { kcal: Math.max(0, Math.round(kcal)), protein: r1(protein), carbs: r1(carbs), fat: r1(fat), fiber: item.fiber || 0 }
 }
 
 // Build a log entry from a pantry item (denormalized macros + timestamp).
