@@ -124,11 +124,17 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
         <ExerciseCard ex={item.data}
           onPrev={cursor > 0 ? () => goto(cursor - 1) : null}
           onNext={() => goto(cursor + 1)}
-          onSet={(setIdx, field, value) => commit((s) => { s.exercises[item.ref].sets[setIdx][field] = value; return s })}
+          onSet={(setIdx, field, value) => commit((s) => {
+            const set = s.exercises[item.ref].sets[setIdx]
+            set[field] = value
+            set.done = set.reps != null // a set is logged once it has reps
+            return s
+          })}
           onToggle={(setIdx) => commit((s) => {
             const set = s.exercises[item.ref].sets[setIdx]
             set.done = !set.done
             if (set.done && set.reps == null) set.reps = s.exercises[item.ref].target?.reps ?? null
+            if (set.done && set.weight == null) set.weight = s.exercises[item.ref].target?.weight ?? null
             return s
           })}
           onRIR={(v) => commit((s) => { s.exercises[item.ref].rir = v; return s })} />
@@ -201,10 +207,10 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
 
       <div className="mt-4 space-y-2">
         {ex.sets.map((set, i) => (
-          <div key={i} className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 ${set.done ? 'border-[#5b6a44] bg-[#2c3522]' : 'border-[#3a4230] bg-[#272d20]'}`}>
-            <span className="w-12 shrink-0 text-[12px] uppercase tracking-wider text-[#8c9472]">Set {i + 1}</span>
-            <Stepper label="lb" value={set.weight} step={ex.inc || 5} onChange={(v) => onSet(i, 'weight', v)} />
-            <Stepper label="reps" value={set.reps ?? t.reps} step={1} onChange={(v) => onSet(i, 'reps', v)} />
+          <div key={i} className={`flex items-center gap-2.5 rounded-2xl border px-3 py-2.5 ${set.done ? 'border-[#5b6a44] bg-[#2c3522]' : 'border-[#3a4230] bg-[#272d20]'}`}>
+            <span className="w-10 shrink-0 text-[12px] uppercase tracking-wider text-[#8c9472]">Set {i + 1}</span>
+            <SetInput value={set.weight} placeholder={t.weight != null ? String(t.weight) : 'lb'} unit="lb" onChange={(v) => onSet(i, 'weight', v)} />
+            <SetInput value={set.reps} placeholder={t.reps != null ? String(t.reps) : 'reps'} unit="reps" onChange={(v) => onSet(i, 'reps', v)} />
             <button onClick={() => onToggle(i)} aria-label="Mark set done"
               className={`ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-full border ${set.done ? 'border-[#7d8a5f] bg-[#3d4a32]' : 'border-[#4a5238]'}`}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={set.done ? '#f4f1e8' : '#6f7857'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
@@ -212,6 +218,7 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
           </div>
         ))}
       </div>
+      <p className="mt-2 text-[11px] text-[#8c9472]">Type your weight and reps — the set logs itself once reps are in.</p>
 
       <div className="mt-3 flex items-center justify-between rounded-2xl border border-[#3a4230] bg-[#272d20] px-3 py-2">
         <span className="text-[12px] text-[#8c9472]">Reps left in the tank?</span>
@@ -228,15 +235,16 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
   )
 }
 
-// A compact -/value/+ stepper. Blank value shows a dash until first set.
-function Stepper({ label, value, step, onChange }) {
-  const v = value == null ? null : value
+// Tap-to-type number field for a set's weight/reps. Placeholder shows the target,
+// so first-time lifts are enterable in one tap instead of dozens of stepper presses.
+function SetInput({ value, placeholder, unit, onChange }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <button onClick={() => onChange(Math.max(0, (v ?? 0) - step))} className="grid h-7 w-7 place-items-center rounded-full bg-[#333b28] text-[#cfccba]">−</button>
-      <span className="min-w-[2.5rem] text-center text-[15px] font-semibold tabular-nums text-[#f4f1e8]">{v == null ? '—' : v}<span className="ml-0.5 text-[10px] font-normal text-[#8c9472]">{label}</span></span>
-      <button onClick={() => onChange((v ?? 0) + step)} className="grid h-7 w-7 place-items-center rounded-full bg-[#333b28] text-[#cfccba]">+</button>
-    </div>
+    <label className="flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-[#3a4230] bg-[#23291f] px-2.5 py-1.5">
+      <input type="number" inputMode="decimal" value={value ?? ''} placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        className="w-full min-w-0 bg-transparent text-center text-[15px] font-semibold text-[#f4f1e8] outline-none placeholder:font-normal placeholder:text-[#6f7857]" />
+      <span className="shrink-0 text-[10px] text-[#8c9472]">{unit}</span>
+    </label>
   )
 }
 

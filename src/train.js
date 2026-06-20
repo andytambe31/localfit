@@ -369,7 +369,7 @@ export function recentSessions(state, limit = 6) {
     if (!s || s.status !== 'done') continue
     let sets = 0, volume = 0, beaten = 0
     for (const e of s.exercises || []) {
-      for (const st of e.sets || []) if (st.done && st.reps) { sets++; volume += (st.weight || 0) * st.reps }
+      for (const st of e.sets || []) if (st.reps) { sets++; volume += (st.weight || 0) * st.reps }
       if (e.target && !e.target.first && e.sets?.some((st) => st.done && st.reps && st.reps >= e.target.reps && (st.weight || 0) >= (e.target.weight || 0))) beaten++
     }
     out.push({ date, label: s.label || s.dayType, sets, volume: Math.round(volume), beaten, minutes: s.completedTs && s.startedTs ? Math.round((s.completedTs - s.startedTs) / 60000) : null })
