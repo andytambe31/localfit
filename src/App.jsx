@@ -305,10 +305,10 @@ export default function App() {
   }
   // Quick-add a brand-new food: creates a pantry item (provisional if no macros
   // yet — backfilled later) and logs it in one go.
-  function addFood({ name, portion, kcal, protein, carbs, fat }) {
+  function addFood({ name, portion, kcal, protein, carbs, fat, group }) {
     const loc = day.foodLoc || defaultLocation(today)
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
-    const item = { id, name, portion: portion || '1 serving', loc: loc === 'outside' ? 'both' : loc,
+    const item = { id, name, portion: portion || '1 serving', loc: loc === 'outside' ? 'both' : loc, group: group || undefined,
       kcal: kcal || 0, protein: protein || 0, carbs: carbs || 0, fat: fat || 0, fiber: 0,
       provisional: !((kcal || 0) > 0 || (protein || 0) > 0), custom: true }
     setState((prev) => {
@@ -1026,6 +1026,7 @@ function AddFoodForm({ onAdd, onCancel }) {
   const [protein, setProtein] = useState('')
   const [carbs, setCarbs] = useState('')
   const [fat, setFat] = useState('')
+  const [group, setGroup] = useState('Snacks')
   const num = (v) => (v === '' ? undefined : Number(v))
   return (
     <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
@@ -1039,8 +1040,14 @@ function AddFoodForm({ onAdd, onCancel }) {
         <MacroField label="carbs" value={carbs} onChange={setCarbs} />
         <MacroField label="fat" value={fat} onChange={setFat} />
       </div>
+      <div>
+        <p className="mb-1 text-[10px] uppercase tracking-wider text-[#a39c8d]">Category</p>
+        <div className="flex flex-wrap gap-1.5">
+          {GROUP_ORDER.filter((g) => g !== 'Other').map((g) => <Chip key={g} small on={group === g} onClick={() => setGroup(g)}>{g}</Chip>)}
+        </div>
+      </div>
       <div className="flex items-center gap-2 pt-1">
-        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat) })}
+        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), group })}
           className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add &amp; log</button>
         <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
       </div>

@@ -266,7 +266,8 @@ const GROUP_BY_CAT = {
   dip: 'Extras', condiment: 'Extras',
 }
 export const GROUP_ORDER = ['Meals', 'Protein', 'Supplements', 'Fruit', 'Veg', 'Dairy', 'Drinks', 'Snacks', 'Extras', 'Other']
-export function groupOf(item) { return GROUP_BY_CAT[item.category] || 'Other' }
+// Custom adds carry an explicit `group`; seed items derive it from their category.
+export function groupOf(item) { return item.group || GROUP_BY_CAT[item.category] || 'Other' }
 
 // Items flagged as treats/junk so the UI can warn you while logging. Tunable in
 // one place; custom adds can also set `unhealthy: true`.
