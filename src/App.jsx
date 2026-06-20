@@ -7,7 +7,8 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import ComponentBuilder from './ComponentBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -321,6 +322,38 @@ export default function App() {
     })
     setPending(true); scheduleSync()
   }
+  // Create or edit a customizable food built from parts (Hummus + Baguette). The
+  // parts become adjustable mods; baseline macros = the sum at default amounts.
+  // Pantry setup only — no auto-log (tap the chip to log it, adjusting parts then).
+  // Editing a seed food stores an `edited` override that wins over the baked seed.
+  function saveCustomFood({ name, group, loc, components }, editId = null) {
+    const built = buildFromComponents(components || [])
+    const b = built.base
+    const fields = {
+      name, loc: loc || day.foodLoc || defaultLocation(today), group: group || undefined,
+      portion: (components || []).map((c) => c.name).filter(Boolean).join(' + ') || '1 serving',
+      kcal: b.kcal, protein: b.protein, carbs: b.carbs, fat: b.fat, fiber: 0,
+      mods: built.mods, custom: true,
+      provisional: !(b.kcal > 0 || b.protein > 0),
+    }
+    setState((prev) => {
+      const next = clone(prev)
+      next.pantry = next.pantry || []
+      if (editId) {
+        const i = next.pantry.findIndex((p) => p.id === editId)
+        const merged = { ...(i >= 0 ? next.pantry[i] : {}), id: editId, ...fields, ...(isSeedFood(editId) ? { edited: true } : {}) }
+        if (i >= 0) next.pantry[i] = merged
+        else next.pantry.push(merged)
+      } else {
+        const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
+        next.pantry.push({ id, ...fields })
+      }
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
   // Wipe today's food log. Clears localStorage immediately; the bumped _ts means
   // the next sync overwrites the backend's day (day-level last-write-wins), so the
   // entries are gone from the Mac too once you're home/reachable.
@@ -468,7 +501,7 @@ export default function App() {
           onSteps={(v) => patch({ steps: v })}
           onStartTrain={() => setTraining(true)} train={trainCall}
           onStartHair={(slot) => setHairFlow(slot)}
-          onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
+          onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
           onWater={setWater}
           onWeight={saveWeight} />
       ) : (
@@ -573,7 +606,7 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -624,7 +657,7 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
 
       {focus === 'diet' && (
         <DietCard state={state} dateIso={dateIso} day={day}
-          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} />
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} />
       )}
 
       {focus === 'movement' && (
@@ -711,8 +744,9 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
-function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset, onMove }) {
+function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove }) {
   const [adding, setAdding] = useState(false)
+  const [builder, setBuilder] = useState(null) // { initial, editId } → ComponentBuilder
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
   const [confirmReset, setConfirmReset] = useState(false)
   const [reviewing, setReviewing] = useState(false) // full-screen day review
@@ -792,7 +826,9 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset,
 
       {/* quick-add */}
       {adding
-        ? <AddFoodForm defaultLoc={loc} onAdd={(f) => { onAdd(f); setAdding(false) }} onCancel={() => setAdding(false)} />
+        ? <AddFoodForm defaultLoc={loc} onAdd={(f) => { onAdd(f); setAdding(false) }}
+            onBuild={(seed) => { setAdding(false); setBuilder({ initial: { ...seed, components: [] }, editId: null }) }}
+            onCancel={() => setAdding(false)} />
         : <button onClick={() => setAdding(true)} className="text-[13px] font-medium text-[#3d4a32]">+ Add food</button>}
 
       {/* today's food → its own screen (keeps the dashboard light) */}
@@ -809,7 +845,13 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset,
       {qtyItem && (
         <QtyEditor item={qtyItem}
           onLog={(loggedItem, q) => { onLog(loggedItem, q); setQtyItem(null) }}
+          onEdit={(it) => { setQtyItem(null); setBuilder({ initial: { name: it.name, loc: it.loc, group: groupOf(it), components: componentsFromItem(it) }, editId: it.id }) }}
           onClose={() => setQtyItem(null)} />
+      )}
+      {builder && (
+        <ComponentBuilder initial={builder.initial} editId={builder.editId}
+          onSave={(payload) => { onSaveCustom(payload, builder.editId); setBuilder(null) }}
+          onCancel={() => setBuilder(null)} />
       )}
       {reviewing && (
         <FoodReview state={state} dateIso={dateIso} day={day} proteinTarget={proteinTarget}
@@ -842,7 +884,7 @@ function PantryButton({ item, onTap, onLongPress }) {
 
 // Quantity editor (bottom sheet): set how many servings of an item to log in one
 // go, with a live macro preview. The serving label is the item's own unit.
-function QtyEditor({ item, onLog, onClose }) {
+function QtyEditor({ item, onLog, onEdit, onClose }) {
   const [qty, setQty] = useState(1)
   const [mods, setMods] = useState(() => Object.fromEntries((item.mods || []).map((m) => [m.id, m.default])))
   const q = qty > 0 ? Math.round(qty * 100) / 100 : 1
@@ -851,7 +893,7 @@ function QtyEditor({ item, onLog, onClose }) {
   const setMod = (m, v) => setMods((s) => ({ ...s, [m.id]: Math.max(m.min ?? 0, Math.min(m.max ?? 99, v)) }))
   const log = () => {
     const changed = (item.mods || []).filter((m) => mods[m.id] !== m.default)
-      .map((m) => `${m.label.replace(/\s*\(.*\)/, '')}: ${mods[m.id]}`).join(', ')
+      .map((m) => `${m.label.replace(/\s*\(.*\)/, '')}: ${mods[m.id]}${m.unit ? ` ${m.unit}` : ''}`).join(', ')
     onLog({ ...item, ...adj, portion: changed ? `${item.portion} · ${changed}` : item.portion }, q)
   }
   return createPortal(
@@ -864,10 +906,10 @@ function QtyEditor({ item, onLog, onClose }) {
           <div className="mt-3 space-y-1.5 rounded-2xl border border-[#e6dfd0] bg-[#f6f2e9] p-3">
             {item.mods.map((m) => (
               <div key={m.id} className="flex items-center justify-between">
-                <span className="text-[13px] text-[#4a463c]">{m.label}</span>
+                <span className="text-[13px] text-[#4a463c]">{m.label}{m.unit ? <span className="text-[#a39c8d]"> · {m.unit}</span> : null}</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setMod(m, mods[m.id] - 1)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">−</button>
-                  <span className="w-5 text-center text-[15px] font-semibold tabular-nums text-[#23211c]">{mods[m.id]}</span>
+                  <span className="min-w-[1.5rem] text-center text-[15px] font-semibold tabular-nums text-[#23211c]">{mods[m.id]}</span>
                   <button onClick={() => setMod(m, mods[m.id] + 1)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">+</button>
                 </div>
               </div>
@@ -894,7 +936,10 @@ function QtyEditor({ item, onLog, onClose }) {
         </p>
 
         <button onClick={log} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[15px] font-semibold text-[#f4f1e8]">Log it</button>
-        <button onClick={onClose} className="mt-2 w-full py-2 text-[13px] text-[#8a8474]">Cancel</button>
+        <div className="mt-2 flex items-center justify-between">
+          <button onClick={onClose} className="py-2 text-[13px] text-[#8a8474]">Cancel</button>
+          {onEdit && <button onClick={() => onEdit(item)} className="py-2 text-[13px] font-medium text-[#3d4a32]">Customize parts →</button>}
+        </div>
       </div>
     </div>,
     document.body
@@ -1019,9 +1064,7 @@ function MacroField({ label, value, onChange }) {
     </label>
   )
 }
-const FOOD_LOCS = [['home', 'Home'], ['office', 'Office'], ['outside', 'Outside'], ['both', 'Everywhere']]
-const FOOD_UNITS = ['serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
-function AddFoodForm({ defaultLoc, onAdd, onCancel }) {
+function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('1')
   const [unit, setUnit] = useState('serving')
@@ -1067,6 +1110,11 @@ function AddFoodForm({ defaultLoc, onAdd, onCancel }) {
           className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add &amp; log</button>
         <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
       </div>
+      {onBuild && (
+        <button onClick={() => onBuild({ name: name.trim(), loc: foodLoc, group })} className="text-[12px] font-medium text-[#3d4a32]">
+          Multiple parts (e.g. hummus + baguette)? Build it →
+        </button>
+      )}
       <p className="text-[11px] leading-snug text-[#a39c8d]">Leave numbers blank to log provisionally and fill them in later.</p>
     </div>
   )

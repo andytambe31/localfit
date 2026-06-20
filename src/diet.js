@@ -82,11 +82,22 @@ export const DEFAULT_PANTRY = [
 const DEFAULT_BY_ID = Object.fromEntries(DEFAULT_PANTRY.map((it) => [it.id, it]))
 
 // The pantry the app actually uses: baked seed + the user's custom adds (synced).
-// Drops stale/legacy seed items and id collisions so the seed in code always wins.
+// An explicit user edit (`edited:true`) overrides the matching seed so customized
+// foods stick; legacy non-edited id collisions are still dropped (seed wins) so a
+// stale test item can't shadow the seed.
 export function effectivePantry(state) {
-  const customs = (state?.pantry || []).filter((it) => !it.seed && !DEFAULT_BY_ID[it.id])
-  return [...DEFAULT_PANTRY, ...customs]
+  const customs = (state?.pantry || []).filter((it) => !it.seed)
+  const edits = Object.fromEntries(customs.filter((it) => it.edited && DEFAULT_BY_ID[it.id]).map((it) => [it.id, it]))
+  const merged = DEFAULT_PANTRY.map((s) => edits[s.id] || s)
+  const extras = customs.filter((it) => !DEFAULT_BY_ID[it.id])
+  return [...merged, ...extras]
 }
+
+export const isSeedFood = (id) => !!DEFAULT_BY_ID[id]
+
+// Units offered when adding a food / a component part, and the location chips.
+export const FOOD_UNITS = ['serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
+export const FOOD_LOCS = [['home', 'Home'], ['office', 'Office'], ['outside', 'Outside'], ['both', 'Everywhere']]
 
 // --- location ----------------------------------------------------------------
 // Office Tue/Wed/Thu; home Mon + Fri/Sat/Sun. Outside is only ever a manual pick.
@@ -378,6 +389,51 @@ export function applyMods(item, modCounts) {
   }
   const r1 = (n) => Math.max(0, Math.round(n * 10) / 10)
   return { kcal: Math.max(0, Math.round(kcal)), protein: r1(protein), carbs: r1(carbs), fat: r1(fat), fiber: item.fiber || 0 }
+}
+
+const _slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+const _r1 = (n) => Math.round((Number(n) || 0) * 10) / 10
+
+// Turn a list of components (each holding the macros for its DEFAULT amount) into
+// a base-macros + mods pair. Per-unit macros are derived (defaultMacros / default)
+// so the quantity editor can scale a part up or down. base = the sum at defaults,
+// so applyMods returns exactly these macros until a part is nudged.
+export function buildFromComponents(components = []) {
+  const base = { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }
+  const mods = []
+  for (const c of components) {
+    if (!c) continue
+    const def = Math.max(1, Number(c.default) || 1)
+    const k = Number(c.kcal) || 0, p = Number(c.protein) || 0, cb = Number(c.carbs) || 0, f = Number(c.fat) || 0
+    base.kcal += k; base.protein += p; base.carbs += cb; base.fat += f
+    mods.push({
+      id: c.id || _slug(c.name) || `part_${mods.length + 1}`,
+      label: c.name || 'Part', unit: c.unit || '',
+      default: def, min: 0, max: def * 4 + 4,
+      per: { kcal: _r1(k / def), protein: _r1(p / def), carbs: _r1(cb / def), fat: _r1(f / def) },
+    })
+  }
+  return { base: { kcal: Math.round(base.kcal), protein: _r1(base.protein), carbs: _r1(base.carbs), fat: _r1(base.fat), fiber: 0 }, mods }
+}
+
+// Inverse: reconstruct editable components (default-amount macros) from an item's
+// mods, folding any non-component remainder into a fixed 'Base' part so nothing is
+// lost when editing a seed food that carries a fixed base (e.g. the egg bowl), or
+// a plain food being upgraded into parts (its whole macros become the Base part).
+export function componentsFromItem(item) {
+  const comps = (item.mods || []).map((m) => ({
+    id: m.id, name: m.label, unit: m.unit || '', default: m.default,
+    kcal: Math.round((m.per?.kcal || 0) * m.default),
+    protein: _r1((m.per?.protein || 0) * m.default),
+    carbs: _r1((m.per?.carbs || 0) * m.default),
+    fat: _r1((m.per?.fat || 0) * m.default),
+  }))
+  const sum = comps.reduce((a, c) => ({ kcal: a.kcal + c.kcal, protein: a.protein + c.protein, carbs: a.carbs + c.carbs, fat: a.fat + c.fat }), { kcal: 0, protein: 0, carbs: 0, fat: 0 })
+  const res = { kcal: (item.kcal || 0) - sum.kcal, protein: _r1((item.protein || 0) - sum.protein), carbs: _r1((item.carbs || 0) - sum.carbs), fat: _r1((item.fat || 0) - sum.fat) }
+  if (res.kcal > 1 || res.protein > 0.5 || res.carbs > 0.5 || res.fat > 0.5) {
+    comps.unshift({ id: 'base', name: 'Base', unit: 'serving', default: 1, ...res })
+  }
+  return comps
 }
 
 // Build a log entry from a pantry item (denormalized macros + timestamp).
