@@ -509,12 +509,10 @@ export default function App() {
       <div className="mt-6">
         <div className="mb-2 flex items-baseline justify-between">
           <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
-          {dayTotals(day).count > 0 && (
-            <button onClick={() => setFoodReview(true)} className="flex items-center gap-1 text-[12px] font-medium text-[#3d4a32]">
-              See today's food
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-            </button>
-          )}
+          <button onClick={() => setFoodReview(true)} className="flex items-center gap-1 text-[12px] font-medium text-[#3d4a32]">
+            {dayTotals(day).count > 0 ? `See today's food · ${Math.round(dayTotals(day).protein)}g P, ${dayTotals(day).kcal} cal` : "See today's food"}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
         </div>
         <div className="grid grid-cols-5 gap-2">
           {areas.map((a) => {
