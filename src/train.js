@@ -9,7 +9,13 @@
  * Weights are pounds (lb). Progressive overload = double progression: hold the
  * weight and add a rep until the top of the range, then bump weight (smart
  * per-exercise jump) and reset reps to the bottom.
+ *
+ * The periodization layer (periodize.js) sits on top: it decides this week's
+ * intent (accumulate / progress / heavy / deload) and modifies the targets
+ * accordingly. Heavy + deload weeks are kept OFF the double-progression ledger so
+ * the standard build weeks keep marching cleanly.
  * -------------------------------------------------------------------------- */
+import { trainingPhase } from './periodize'
 
 // ---- libraries --------------------------------------------------------------
 
@@ -241,11 +247,17 @@ export function pickEmphasis(state, todayIso, dayType) {
 // ---- progressive overload (double progression) ------------------------------
 
 // The most recent completed sets logged for an exercise, scanning backwards.
+// Skips deload + heavy weeks: those are prescribed OFF the standard ledger (light
+// or low-rep), so letting them set the baseline would corrupt the 8–12 double
+// progression. Legacy sessions carry no phase and count as normal weeks.
 function lastPerformed(state, exId, todayIso) {
   const days = state.days || {}
   for (const date of Object.keys(days).sort().reverse()) {
     if (date >= todayIso) continue
-    const ex = days[date].workout?.session?.exercises?.find((e) => e.id === exId)
+    const sess = days[date].workout?.session
+    if (!sess) continue
+    if (sess.phase === 'deload' || sess.phase === 'intensify') continue
+    const ex = sess.exercises?.find((e) => e.id === exId)
     if (ex && ex.sets?.some((s) => s.done && s.reps)) return ex.sets.filter((s) => s.done && s.reps)
   }
   return null
@@ -254,24 +266,57 @@ function lastPerformed(state, exId, todayIso) {
 // The target to put in front of the user for an exercise this session. Double
 // progression: add a rep until repHigh across the board, then +inc lb, reset to
 // repLow. No history => blank weight, scaffold reps, a first-time note.
-export function targetFor(state, exId, todayIso) {
+export function targetFor(state, exId, todayIso, phase = null) {
   const ex = EXERCISES[exId]
   const last = lastPerformed(state, exId, todayIso)
+  let std
   if (!last) {
-    return { weight: null, reps: ex.repLow, sets: ex.sets, first: true,
+    std = { weight: null, reps: ex.repLow, sets: ex.sets, first: true,
       note: 'First time on record — log the weight you work with and we build from here.' }
+  } else {
+    const topReps = Math.max(...last.map((s) => s.reps))
+    const topSet = last.find((s) => s.reps === topReps) || last[0]
+    const topWeight = topSet.weight || 0
+    const allAtTop = last.every((s) => s.reps >= ex.repHigh)
+    if (allAtTop) {
+      std = { weight: topWeight + ex.inc, reps: ex.repLow, sets: ex.sets,
+        note: `Every set hit ${ex.repHigh}. Up to ${topWeight + ex.inc} lb, back to ${ex.repLow} reps.` }
+    } else {
+      const goalReps = Math.min(ex.repHigh, topReps + 1)
+      std = { weight: topWeight, reps: goalReps, sets: ex.sets,
+        note: `Last top set: ${topReps} reps at ${topWeight} lb. Beat it — ${goalReps} reps.` }
+    }
   }
-  const topReps = Math.max(...last.map((s) => s.reps))
-  const topSet = last.find((s) => s.reps === topReps) || last[0]
-  const topWeight = topSet.weight || 0
-  const allAtTop = last.every((s) => s.reps >= ex.repHigh)
-  if (allAtTop) {
-    return { weight: topWeight + ex.inc, reps: ex.repLow, sets: ex.sets,
-      note: `Every set hit ${ex.repHigh}. Up to ${topWeight + ex.inc} lb, back to ${ex.repLow} reps.` }
+  return phase ? applyPhaseTarget(ex, std, phase) : std
+}
+
+const roundTo5 = (w) => (w == null ? null : Math.max(0, Math.round(w / 5) * 5))
+
+// Reshape the standard double-progression target for the week's intent. Heavy
+// weeks drop compounds to 4–6 reps and add a load increment; deload weeks cut to
+// ~65% load with a set fewer. Build weeks pass straight through.
+function applyPhaseTarget(ex, std, phase) {
+  if (phase.deload) {
+    const w = std.weight != null ? roundTo5(std.weight * 0.65) : null
+    const sets = Math.max(2, ex.sets - 1)
+    return { ...std, weight: w, reps: ex.repLow, sets, deload: true,
+      note: w != null
+        ? `Deload — about ${w} lb for ${ex.repLow} smooth reps, 3–4 left in reserve. Recover, don't grind.`
+        : 'Deload week — keep it light and clean, plenty left in the tank.' }
   }
-  const goalReps = Math.min(ex.repHigh, topReps + 1)
-  return { weight: topWeight, reps: goalReps, sets: ex.sets,
-    note: `Last top set: ${topReps} reps at ${topWeight} lb. Beat it — ${goalReps} reps.` }
+  if (phase.heavy) {
+    const isComp = ex.role === 'compound'
+    const repLow = isComp ? 4 : Math.max(6, ex.repLow - 2)
+    const repHigh = isComp ? 6 : Math.max(8, ex.repHigh - 3)
+    const w = (std.weight != null && isComp) ? std.weight + ex.inc : std.weight
+    return { ...std, weight: w, reps: repLow, repLow, repHigh, heavy: true,
+      note: std.first
+        ? `Heavy week — work in ${repLow}–${repHigh} reps. Pick a weight that's hard but clean.`
+        : (w != null
+          ? `Heavy week — ${repLow}–${repHigh} reps${isComp ? ` around ${w} lb` : ''}. Add load, 1–2 in reserve.`
+          : `Heavy week — ${repLow}–${repHigh} reps, heavier than usual.`) }
+  }
+  return std // accumulate / progress = standard double progression
 }
 
 // ---- session assembly -------------------------------------------------------
@@ -293,6 +338,7 @@ export function buildSession(state, todayIso, opts = {}) {
   }
   const plan = DAY_PLAN[dayType]
   const emphasis = pickEmphasis(state, todayIso, dayType)
+  const phase = trainingPhase(state, todayIso) // this week's strategic intent
 
   // Core lifts, plus emphasis isolation appended (deduped, capped).
   const ids = [...plan.core]
@@ -302,10 +348,11 @@ export function buildSession(state, todayIso, opts = {}) {
 
   const exercises = ids.map((id) => {
     const meta = EXERCISES[id]
-    const target = targetFor(state, id, todayIso)
+    const target = targetFor(state, id, todayIso, phase)
     return {
       id, name: meta.name, muscle: meta.muscle, role: meta.role,
-      repLow: meta.repLow, repHigh: meta.repHigh, inc: meta.inc,
+      // rep range shown reflects the phase (heavy week => low reps)
+      repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
       emphasized: (meta.emph || []).includes(emphasis),
       cue: cueFor(id), rir: null, // form/intent cue + reps-in-reserve (effort)
       target,
@@ -317,6 +364,10 @@ export function buildSession(state, todayIso, opts = {}) {
   return {
     dayType, emphasis,
     label: plan.label,
+    // periodization stamp — persisted on the session, drives the off-ledger skip
+    phase: phase.key, phaseLabel: phase.label, phaseShort: phase.short, phaseLine: phase.line,
+    deload: phase.deload, heavy: phase.heavy,
+    weekNumber: phase.weekNumber, totalWeeks: phase.totalWeeks, blockNumber: phase.blockNumber,
     reason: decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason,
     emphasisReason: emphasis ? `Extra focus on ${labelFor(emphasis)} — it's lagging and fits ${plan.label.toLowerCase()} day.` : null,
     warmup: WARMUPS[dayType],

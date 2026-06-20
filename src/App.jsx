@@ -4,6 +4,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions } from './train'
+import { trainingPhase } from './periodize'
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
@@ -26,6 +27,7 @@ const DEFAULT_STATE = {
 const ensureProfile = (p = {}) => {
   p.waterTarget ??= 8; p.bodyFatTarget ??= 12; p.bodyFatDeadline ??= '2026-12-31'
   p.sleepTargetHours ??= 7; p.bedGoal ??= '23:30'; p.wakeGoal ??= '07:30'
+  p.trainStart ??= isoToday() // anchors the periodization macrocycle (Monday-aligned in the engine)
   p.skincare ??= {}
   p.skincare.ownedProducts ??= [...DEFAULT_OWNED]
   p.skincare.startedDate ??= isoToday()
@@ -687,6 +689,7 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
 
       {focus === 'movement' && (
         <div className="space-y-3">
+          <TrainStrategy state={state} dateIso={dateIso} />
           <TrainStart train={train} onStart={onStartTrain} />
           <Field label="Steps today">
             <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
@@ -742,6 +745,41 @@ function TrainingProgress({ state }) {
 
 // The trainer's call as a single CTA: start / resume / done / rest. The brains
 // already picked the day — this just opens the guided session.
+// The macrocycle banner: where you are in the journey to the body-fat deadline
+// and this week's strategic intent, with a 4-week block progress bar.
+function TrainStrategy({ state, dateIso }) {
+  const ph = trainingPhase(state, dateIso)
+  const tone = ph.deload
+    ? { border: 'border-[#dcc49a]', bg: 'bg-[#f7efe0]', dot: 'bg-[#c9742e]', tag: 'bg-[#e7d3b2] text-[#8a5a1e]' }
+    : ph.heavy
+      ? { border: 'border-[#9fae82]', bg: 'bg-[#eef0e6]', dot: 'bg-[#3d4a32]', tag: 'bg-[#3d4a32] text-[#f4f1e8]' }
+      : { border: 'border-[#e6dfd0]', bg: 'bg-[#fbf9f3]', dot: 'bg-[#3d4a32]', tag: 'bg-[#e3e7d6] text-[#4a553a]' }
+  return (
+    <div className={`rounded-2xl border ${tone.border} ${tone.bg} px-4 py-3`}>
+      <div className="flex items-baseline justify-between">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-[#7d8a5f]">Strategy</p>
+        <p className="text-[11px] text-[#a39c8d]">
+          {ph.totalWeeks ? `Week ${ph.weekNumber} of ${ph.totalWeeks}` : `Week ${ph.weekNumber}`}
+          {ph.daysLeft != null ? ` · ${ph.daysLeft}d to goal` : ''}
+        </p>
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <p className="font-display text-[17px] font-semibold text-[#23211c]">
+          Block {ph.blockNumber}{ph.totalBlocks ? ` of ${ph.totalBlocks}` : ''} · {ph.label}
+        </p>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.tag}`}>{ph.short}</span>
+      </div>
+      <p className="mt-1 text-[13px] leading-snug text-[#5b574c]">{ph.line}</p>
+      <div className="mt-2.5 flex gap-1" aria-label={`Week ${ph.weekInBlock} of ${ph.blockLen} in this block`}>
+        {Array.from({ length: ph.blockLen }).map((_, i) => (
+          <span key={i} className={`h-1.5 flex-1 rounded-full ${
+            i + 1 < ph.weekInBlock ? 'bg-[#9aa581]' : i + 1 === ph.weekInBlock ? tone.dot : 'bg-[#e0d9c9]'}`} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function TrainStart({ train, onStart }) {
   const { active, done, rest, label, estMin } = train || {}
   const title = active ? 'Resume session' : done ? `${label} — logged` : rest ? 'Rest recommended' : `${label} day`

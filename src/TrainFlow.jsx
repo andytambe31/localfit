@@ -50,6 +50,14 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
           <h2 className="font-display mt-3 text-[34px] font-semibold leading-[1.08] text-[#f4f1e8]">
             {rest ? 'Rest day' : `${session.label} day`}
           </h2>
+          {!rest && session.phaseLine && (
+            <div className="mt-4 rounded-2xl border border-[#3a4a2c] bg-[#2b3422] px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-[#9aa581]">
+                {session.phaseShort}{session.totalWeeks ? ` · Week ${session.weekNumber} of ${session.totalWeeks}` : ''}
+              </p>
+              <p className="mt-1 text-[14px] leading-relaxed text-[#dfe6cf]">{session.phaseLine}</p>
+            </div>
+          )}
           <p className="mt-4 text-[16px] leading-relaxed text-[#cfccba]">{session.reason}</p>
           {!rest && session.emphasisReason && (
             <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{session.emphasisReason}</p>
