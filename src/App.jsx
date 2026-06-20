@@ -504,28 +504,8 @@ export default function App() {
         ) : null
       })()}
 
-      <div key={focus || 'none'} className="focus-swap">
-        {focus ? (
-          <FocusCard
-            focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
-            state={state} dateIso={today}
-            onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
-            onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
-            onSteps={(v) => patch({ steps: v })}
-            onStartTrain={() => setTraining(true)} train={trainCall}
-            onStartHair={(slot) => setHairFlow(slot)}
-            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
-            onWater={setWater}
-            onWeight={saveWeight} />
-        ) : (
-          <div className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-6 text-center">
-            <p className="font-display text-lg text-[#23211c]">Nothing for you right now.</p>
-            <p className="mt-1 text-sm text-[#8a8474]">You’re on top of it. Come back when it’s time for the next move.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Quiet progress — tap any to jump, no pressure */}
+      {/* Quiet progress — tap any to jump, no pressure. Sits above the focus card
+          so tapping a tile changes the card directly beneath it. */}
       <div className="mt-6">
         <div className="mb-2 flex items-baseline justify-between">
           <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
@@ -576,6 +556,27 @@ export default function App() {
             )
           })}
         </div>
+      </div>
+
+      <div key={focus || 'none'} className="focus-swap mt-5">
+        {focus ? (
+          <FocusCard
+            focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
+            state={state} dateIso={today}
+            onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
+            onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
+            onSteps={(v) => patch({ steps: v })}
+            onStartTrain={() => setTraining(true)} train={trainCall}
+            onStartHair={(slot) => setHairFlow(slot)}
+            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
+            onWater={setWater}
+            onWeight={saveWeight} />
+        ) : (
+          <div className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-6 text-center">
+            <p className="font-display text-lg text-[#23211c]">Nothing for you right now.</p>
+            <p className="mt-1 text-sm text-[#8a8474]">You’re on top of it. Come back when it’s time for the next move.</p>
+          </div>
+        )}
       </div>
 
       <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} />
@@ -635,7 +636,7 @@ const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
-    <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
+    <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
       <h2 className="font-display mb-3 text-xl font-semibold text-[#23211c]">{FOCUS_TITLE[focus]}</h2>
 
       {focus === 'skin' && (
