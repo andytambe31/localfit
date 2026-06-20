@@ -408,11 +408,11 @@ export default function App() {
   }
 
   const areas = [
-    { id: 'skin', label: 'Skin', done: r.skincareAM && (hour < 17 || r.skincarePM), attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
+    { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
     { id: 'movement', label: 'Train', done: w.did, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
     { id: 'diet', label: 'Diet', done: dayTotals(day).protein >= (profile.proteinTarget || PROTEIN_TARGET_DEFAULT) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
-    { id: 'hair', label: 'Hair', done: r.haircareAM && (hour < 17 || r.haircarePM), attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
+    { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
   ]
 
   const setWater = (delta) => patch({ water: Math.max(0, (day.water || 0) + delta) })
@@ -503,7 +503,13 @@ export default function App() {
                 {(urgent || attention) && (
                   <span className={`absolute -top-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${urgent ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Now</span>
                 )}
-                <span className={`mx-auto mb-1.5 block h-2 w-2 rounded-full ${a.done ? 'bg-[#3d4a32]' : urgent || attention ? 'bg-[#7d8a5f]' : 'bg-[#d8d1c2]'}`} />
+                {a.done ? (
+                  <span className="mx-auto mb-1.5 grid h-4 w-4 place-items-center rounded-full bg-[#3d4a32]">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                  </span>
+                ) : (
+                  <span className={`mx-auto mb-1.5 block h-4 w-4 rounded-full border-2 ${urgent || attention ? 'border-[#7d8a5f]' : 'border-[#d8d1c2]'}`} />
+                )}
                 <span className="text-[12px] font-medium text-[#4a463c]">{a.label}</span>
               </button>
             )
