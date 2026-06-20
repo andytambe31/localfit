@@ -7,7 +7,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, tdee, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -443,7 +443,7 @@ export default function App() {
         <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{coach.support}</p>
       </section>
 
-      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} tdee={tdee(state)} />
+      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} cal={calorieBreakdown(state)} />
 
       {(() => {
         const checkin = weeklyCheckin(state, today)
@@ -719,7 +719,8 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset,
   const items = pantryFor(effectivePantry(state), loc)
   const log = day.food || []
   const pPct = Math.min(100, Math.round((totals.protein / proteinTarget) * 100))
-  const over = ct && totals.kcal > ct.ceiling
+  const zone = ct && totals.count ? calorieZone(totals.kcal, ct.ceiling) : null
+  const zoneCls = { green: 'text-[#5b6745]', yellow: 'text-[#866a1c]', red: 'text-[#b0552a]' }
   // Group the log by auto-assigned meal (older entries may lack `meal` → derive).
   // Pantry grouped by category so we show one group at a time (not a long list).
   const groups = [...new Set(items.map(groupOf))].sort((a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b))
@@ -750,13 +751,14 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset,
             {Math.round(totals.protein)}<span className="text-[15px] font-normal text-[#8a8474]"> / {proteinTarget}g protein</span>
           </span>
           {ct
-            ? <span className={`text-[13px] ${over ? 'text-[#b0552a]' : 'text-[#8a8474]'}`}>{totals.kcal} / {ct.ceiling} cal</span>
+            ? <span className={`text-[13px] ${zone ? zoneCls[zone] : 'text-[#8a8474]'}`}>{totals.kcal} / {ct.ceiling} cal</span>
             : <span className="text-[12px] text-[#b08a3a]">log weight for a calorie target</span>}
         </div>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
           <div className="h-full rounded-full bg-[#3d4a32] transition-all" style={{ width: `${pPct}%` }} />
         </div>
-        {over && <p className="mt-1 text-[12px] text-[#b0552a]">Over your ceiling — ease off the calories.</p>}
+        {zone === 'yellow' && <p className="mt-1 text-[12px] text-[#866a1c]">A touch over target — still a deficit. Just don't drift higher.</p>}
+        {zone === 'red' && <p className="mt-1 text-[12px] text-[#b0552a]">Well over target — today's deficit is mostly gone. Rein it in.</p>}
       </div>
 
       {/* location toggle */}
@@ -1248,7 +1250,7 @@ function NumInput({ value, placeholder, step, onCommit }) {
 }
 // Dedicated bodyweight focal card near the top of the dashboard: latest weight,
 // trend vs last entry, one-tap log/update, and the trend chart once there's data.
-function WeightCard({ weightLog, today, day, onSave, tdee }) {
+function WeightCard({ weightLog, today, day, onSave, cal }) {
   const [editing, setEditing] = useState(false)
   const tdeeLabel = { low: 'estimated', medium: 'calibrating', high: 'calibrated' }
   const tdeeCls = { low: 'bg-[#f3efe6] text-[#8a8474]', medium: 'bg-[#f6eed8] text-[#866a1c]', high: 'bg-[#eef0e6] text-[#3d4a32]' }
@@ -1289,11 +1291,16 @@ function WeightCard({ weightLog, today, day, onSave, tdee }) {
           <button onClick={() => setEditing(false)} className="ml-auto text-[13px] text-[#8a8474]">Cancel</button>
         </div>
       )}
-      {tdee && (
-        <p className="mt-2 flex items-center gap-1.5 text-[12px] text-[#8a8474]">
-          Maintenance ~{tdee.value.toLocaleString()} cal/day
-          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tdeeCls[tdee.confidence]}`}>{tdeeLabel[tdee.confidence]}</span>
-        </p>
+      {cal && (
+        <div className="mt-2.5 border-t border-[#ede7d9] pt-2.5">
+          <p className="flex items-center gap-1.5 text-[12px] text-[#6f6a5d]">
+            <span>Maintenance <span className="font-semibold text-[#3a382f]">~{cal.maintenance.toLocaleString()}</span> cal/day</span>
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tdeeCls[cal.confidence]}`}>{tdeeLabel[cal.confidence]}</span>
+          </p>
+          <p className="mt-1 text-[12px] text-[#6f6a5d]">
+            Target <span className="font-semibold text-[#3d4a32]">{cal.target.toLocaleString()}</span> · deficit {cal.deficit}/day · ~{cal.weeklyLoss} kg/week
+          </p>
+        </div>
       )}
       {sorted.length >= 2 && <div className="mt-2"><WeightChart log={sorted} /></div>}
     </section>

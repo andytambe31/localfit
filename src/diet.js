@@ -181,6 +181,23 @@ export function calorieTarget(state, opts = {}) {
   }
 }
 
+// The full picture for display: maintenance, target, deficit, expected weekly loss.
+export function calorieBreakdown(state) {
+  const ct = calorieTarget(state)
+  if (!ct) return null
+  const deficit = ct.tdee - ct.ceiling
+  return { maintenance: ct.tdee, target: ct.ceiling, deficit, weeklyLoss: Math.round((deficit * 7 / 7700) * 100) / 100, confidence: ct.confidence }
+}
+
+// A calorie day isn't pass/fail — it's a zone. Eating a bit over target is fine
+// (still a deficit); only real overshoot is "red". Being under target stays green.
+//   green ≤ target+80 · yellow target+80…+230 · red beyond
+export function calorieZone(kcal, target) {
+  if (kcal <= target + 80) return 'green'
+  if (kcal <= target + 230) return 'yellow'
+  return 'red'
+}
+
 // --- day tally ---------------------------------------------------------------
 export function dayTotals(day) {
   const log = day?.food || []
@@ -293,13 +310,17 @@ export function dayCritique(state, dateIso, proteinTarget = PROTEIN_TARGET_DEFAU
     if (!proteinOk) worsen('warn')
   } else {
     const room = ct.ceiling - totals.kcal
-    if (room < 0) {
-      headline = `You're ${-room} cal over your ceiling — that's the line. Don't eat more to chase protein; close it out and start earlier tomorrow.`
+    const zone = calorieZone(totals.kcal, ct.ceiling)
+    if (zone === 'red') {
+      headline = `${totals.kcal} cal — well past your ${ct.ceiling} target; today's deficit is mostly gone. Stop eating and reset tomorrow.`
       worsen('bad')
+    } else if (zone === 'yellow') {
+      headline = `${totals.kcal} cal — a touch over target (${ct.ceiling}), but still a deficit. Fine — just don't drift higher.${proteinOk ? '' : ` ${short}g protein to go — lean sources only.`}`
+      worsen('warn')
     } else if (proteinOk) {
-      headline = `On track — ${Math.round(totals.protein)}g protein and ${room} cal under your ceiling.`
+      headline = `On track — ${Math.round(totals.protein)}g protein and calories in the green (${totals.kcal} of ${ct.ceiling}).`
     } else if (room < 150) {
-      headline = `Only ~${room} cal of room and ${short}g short on protein. Fit a lean protein only — whey, egg whites, chicken — and do NOT go over the ceiling for it.`
+      headline = `${room} cal of room and ${short}g short on protein. Lean protein only — whey, egg whites, chicken.`
       worsen('warn')
     } else {
       headline = `${room} cal of room and ${short}g protein to go — close it with a lean source (whey, chicken, Greek yogurt).`
