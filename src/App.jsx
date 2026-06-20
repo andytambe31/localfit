@@ -400,14 +400,15 @@ export default function App() {
     hairAttn = hairSlot === 'pm' && hour >= 22 ? 'urgent' : 'attention'
   }
 
-  // Movement goal depends on the day: a training day wants a lift, a rest day
-  // wants steps. Done = goal met; otherwise the tile fills toward it via steps
-  // (capped under full on a training day, since a lift is still owed).
+  // Movement goal depends on the day. Rest day → steps ARE the goal, so the ring
+  // fills with steps. Training day → the lift is the goal (the ring is mostly
+  // empty until trained); steps are only a small secondary contribution (≤30%),
+  // so hitting steps alone never makes it look close to done.
   const trainedToday = w.did || w.session?.status === 'done'
   const stepTarget = profile.stepTarget || 10000
   const stepFrac = Math.min(1, (day.steps || 0) / stepTarget)
   const moveDone = trainCall.rest ? (day.steps || 0) >= stepTarget : trainedToday
-  const moveProgress = trainCall.rest ? stepFrac : Math.min(0.9, stepFrac)
+  const moveProgress = trainCall.rest ? stepFrac : 0.3 * stepFrac
   const waterTarget = profile.waterTarget || 8
 
   const areas = [
