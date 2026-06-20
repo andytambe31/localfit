@@ -5,7 +5,8 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions } from './train'
 import { weeklyCheckin } from './adapt'
-import { hairPlanForDay, HAIR_DOW_LABEL, rollerDay } from './hair'
+import { hairDue } from './hair'
+import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
@@ -51,10 +52,11 @@ function recordActivity() {
 const clone = (o) => JSON.parse(JSON.stringify(o))
 const defaultDay = () => ({
   steps: 0, workout: { did: false, type: '' }, weight: null,
-  routines: { skincareAM: false, skincarePM: false, haircare: false },
+  routines: { skincareAM: false, skincarePM: false, haircare: false, haircareAM: false, haircarePM: false },
   water: 0, meals: { breakfast: null, lunch: null, dinner: null }, mealNote: '',
   food: [], // running protein-first food log (diet feature)
   skincare: { am: null, pm: null },
+  hair: { am: null, pm: null },
 })
 function deepMerge(t, p) {
   for (const [k, v] of Object.entries(p || {})) {
@@ -72,6 +74,7 @@ export default function App() {
   const [override, setOverride] = useState(null)
   const [view, setView] = useState('home') // 'home' | 'rewards'
   const [flow, setFlow] = useState(null) // 'am' | 'pm' | null — guided skincare takeover
+  const [hairFlow, setHairFlow] = useState(null) // 'am' | 'pm' | null — guided hair takeover
   const [training, setTraining] = useState(false) // guided gym session takeover
   const [manageProducts, setManageProducts] = useState(false)
   const [booting, setBooting] = useState(true) // opening splash
@@ -86,7 +89,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || training || manageProducts || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -237,6 +240,12 @@ export default function App() {
     const routineKey = slot === 'am' ? 'skincareAM' : 'skincarePM'
     patch({ skincare: { [slot]: log }, routines: { [routineKey]: true } })
     setFlow(null)
+  }
+  // Guided hair routine finished — log the steps; haircare stays true for scoring.
+  function completeHairRoutine(slot, log) {
+    const routineKey = slot === 'am' ? 'haircareAM' : 'haircarePM'
+    patch({ hair: { [slot]: log }, routines: { [routineKey]: true, haircare: true } })
+    setHairFlow(null)
   }
 
   // Persist the whole training session into today's workout (wholesale, so set
@@ -389,12 +398,21 @@ export default function App() {
     skinAttn = skinSlot === 'pm' && hour >= 22 ? 'urgent' : 'attention'
   }
 
+  // Hair mirrors skin: AM/PM slots, window-gated, launches its own story flow.
+  const hairSlot = inPmWindow ? 'pm' : 'am'
+  const hairSlotDone = hairSlot === 'am' ? r.haircareAM : r.haircarePM
+  const hairDueInfo = hairDue(today, state)
+  let hairAttn = 'idle'
+  if (!skinLocked && !hairSlotDone && (hairSlot === 'am' ? hairDueInfo.amPending : hairDueInfo.pmPending)) {
+    hairAttn = hairSlot === 'pm' && hour >= 22 ? 'urgent' : 'attention'
+  }
+
   const areas = [
     { id: 'skin', label: 'Skin', done: r.skincareAM && (hour < 17 || r.skincarePM), attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
     { id: 'movement', label: 'Train', done: w.did, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
     { id: 'diet', label: 'Diet', done: dayTotals(day).protein >= (profile.proteinTarget || PROTEIN_TARGET_DEFAULT) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
-    { id: 'hair', label: 'Hair', done: r.haircare },
+    { id: 'hair', label: 'Hair', done: r.haircareAM && (hour < 17 || r.haircarePM), attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
   ]
 
   const setWater = (delta) => patch({ water: Math.max(0, (day.water || 0) + delta) })
@@ -445,7 +463,7 @@ export default function App() {
           onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
           onSteps={(v) => patch({ steps: v })}
           onStartTrain={() => setTraining(true)} train={trainCall}
-          onHair={() => patch({ routines: { haircare: !r.haircare } })}
+          onStartHair={(slot) => setHairFlow(slot)}
           onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
           onWater={setWater}
           onWeight={saveWeight} />
@@ -480,7 +498,7 @@ export default function App() {
               : attention ? 'border-[#aebb8f] bg-[#eef0e6]'
               : 'border-[#e6dfd0] bg-[#fbf9f3] hover:bg-[#f3efe6]'
             return (
-              <button key={a.id} onClick={() => (a.id === 'skin' ? setFlow(skinSlot) : setOverride(a.id))}
+              <button key={a.id} onClick={() => (a.id === 'skin' ? setFlow(skinSlot) : a.id === 'hair' ? setHairFlow(hairSlot) : setOverride(a.id))}
                 className={`relative rounded-2xl border px-1 py-3 text-center transition ${tile}`}>
                 {(urgent || attention) && (
                   <span className={`absolute -top-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${urgent ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Now</span>
@@ -512,6 +530,12 @@ export default function App() {
           onPersist={writeSession}
           onClose={() => setTraining(false)} />
       )}
+      {hairFlow && (
+        <HairFlow
+          slot={hairFlow} dateIso={today} state={state}
+          onComplete={completeHairRoutine}
+          onClose={() => setHairFlow(null)} />
+      )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
           onSave={(owned) => { updateProfile({ skincare: { ...profile.skincare, ownedProducts: owned } }); setManageProducts(false) }} />
@@ -534,7 +558,7 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onHair, onLogFood, onRemoveFood, onAddFood, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -558,7 +582,12 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
         </div>
       )}
 
-      {focus === 'hair' && <HairCard state={state} dateIso={dateIso} done={r.haircare} onDone={onHair} />}
+      {focus === 'hair' && (
+        <div className="space-y-2">
+          <SkinStart label="Start morning hair" done={r.haircareAM} primary={hour < 17} locked={!(hour >= 6 && hour < 12)} hint="Opens 6 AM" onClick={() => onStartHair('am')} />
+          <SkinStart label="Start evening hair" done={r.haircarePM} primary={hour >= 17} locked={hour < 18} hint="Opens 6 PM" onClick={() => onStartHair('pm')} />
+        </div>
+      )}
 
       {focus === 'water' && (
         <div>
@@ -594,31 +623,6 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
         </div>
       )}
     </section>
-  )
-}
-
-// Hair: today's scheduled routine (minoxidil daily, derma roller weekly).
-function HairCard({ state, dateIso, done, onDone }) {
-  const plan = hairPlanForDay(dateIso, state)
-  return (
-    <div className="space-y-3">
-      <div>
-        <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
-        <p className="font-display text-[20px] font-semibold text-[#23211c]">{plan.title}</p>
-      </div>
-      <div className="space-y-2">
-        {plan.steps.map((s) => (
-          <div key={s.id} className={`rounded-2xl border px-3.5 py-2.5 ${s.note ? 'border-[#e7d4b6] bg-[#f7ecd6]' : 'border-[#e6dfd0] bg-[#fbf9f3]'}`}>
-            <p className="text-[14px] font-semibold text-[#3a382f]">{s.title}</p>
-            <p className="mt-0.5 text-[13px] leading-snug text-[#6f6a5d]">{s.instruction}</p>
-          </div>
-        ))}
-      </div>
-      <button onClick={onDone} className={`w-full rounded-full px-4 py-2.5 text-[14px] font-semibold transition active:scale-[0.99] ${done ? 'border border-[#d8d1c2] text-[#5b6745]' : 'bg-[#3d4a32] text-[#f4f1e8]'}`}>
-        {done ? 'Done today ✓' : 'Mark done'}
-      </button>
-      <p className="text-[11px] text-[#a39c8d]">Minoxidil daily; derma roller weekly on {HAIR_DOW_LABEL[rollerDay(state)]} (no minoxidil that night).</p>
-    </div>
   )
 }
 
