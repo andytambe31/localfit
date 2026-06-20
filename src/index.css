@@ -60,6 +60,10 @@ button:active { transform: scale(0.97); }
 .sk-back    { animation: skBack .26s cubic-bezier(.22,.61,.36,1) both; }
 .sk-skip    { animation: skFade .22s ease both; }
 
+/* Dashboard focus swap: the focus card re-animates each time you switch tiles. */
+@keyframes focusSwap { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.focus-swap { animation: focusSwap .24s cubic-bezier(.22,.61,.36,1) both; }
+
 /* Opening splash: wordmark settles in, then the whole screen fades to the app. */
 @keyframes splashWord { 0% { opacity: 0; transform: translateY(8px) scale(0.985); letter-spacing: .08em; } 60% { opacity: 1; } 100% { opacity: 1; transform: none; letter-spacing: -.015em; } }
 @keyframes splashRule { 0% { transform: scaleX(0); opacity: 0; } 100% { transform: scaleX(1); opacity: 1; } }
@@ -76,7 +80,7 @@ button:active { transform: scale(0.97); }
 .score-ring-arc { transition: stroke-dashoffset .9s cubic-bezier(.22,.61,.36,1); }
 
 @media (prefers-reduced-motion: reduce) {
-  button, .fade-in, .sk-takeover-in, .sk-takeover-out, .sk-advance, .sk-back, .sk-skip,
+  button, .fade-in, .sk-takeover-in, .sk-takeover-out, .sk-advance, .sk-back, .sk-skip, .focus-swap,
   .splash-word, .splash-rule, .splash-out, .pulse-attention, .score-ring-arc { animation: none !important; transition: none !important; }
   button:active { transform: none; }
 }

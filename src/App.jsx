@@ -146,6 +146,17 @@ export default function App() {
     if (local) {
       ensureProfile(local.profile ||= {})
       if (Array.isArray(local.pantry)) local.pantry = local.pantry.filter((it) => !it.seed) // drop legacy seed items
+      // One-time migration: diary entries are frozen snapshots, so foods logged
+      // before `sugar` existed read 0. Backfill from the pantry by id (scaled by
+      // the entry's qty). Idempotent — only fills entries missing the field.
+      const _byId = Object.fromEntries(effectivePantry(local).map((p) => [p.id, p]))
+      for (const d of Object.values(local.days || {})) {
+        for (const e of d.food || []) {
+          const p = _byId[e.id], q = e.qty || 1
+          if (e.sugar == null) e.sugar = p && p.sugar ? Math.round(p.sugar * q * 10) / 10 : 0
+          if (e.fiber == null) e.fiber = p && p.fiber ? Math.round(p.fiber * q * 10) / 10 : 0
+        }
+      }
       saveLocal(local)
       setState(local)
     } else {
@@ -492,24 +503,26 @@ export default function App() {
         ) : null
       })()}
 
-      {focus ? (
-        <FocusCard
-          focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
-          state={state} dateIso={today}
-          onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
-          onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
-          onSteps={(v) => patch({ steps: v })}
-          onStartTrain={() => setTraining(true)} train={trainCall}
-          onStartHair={(slot) => setHairFlow(slot)}
-          onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
-          onWater={setWater}
-          onWeight={saveWeight} />
-      ) : (
-        <div className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-6 text-center">
-          <p className="font-display text-lg text-[#23211c]">Nothing for you right now.</p>
-          <p className="mt-1 text-sm text-[#8a8474]">You’re on top of it. Come back when it’s time for the next move.</p>
-        </div>
-      )}
+      <div key={focus || 'none'} className="focus-swap">
+        {focus ? (
+          <FocusCard
+            focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
+            state={state} dateIso={today}
+            onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
+            onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
+            onSteps={(v) => patch({ steps: v })}
+            onStartTrain={() => setTraining(true)} train={trainCall}
+            onStartHair={(slot) => setHairFlow(slot)}
+            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
+            onWater={setWater}
+            onWeight={saveWeight} />
+        ) : (
+          <div className="mt-5 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-6 text-center">
+            <p className="font-display text-lg text-[#23211c]">Nothing for you right now.</p>
+            <p className="mt-1 text-sm text-[#8a8474]">You’re on top of it. Come back when it’s time for the next move.</p>
+          </div>
+        )}
+      </div>
 
       {/* Quiet progress — tap any to jump, no pressure */}
       <div className="mt-6">
