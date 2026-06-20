@@ -7,7 +7,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import ComponentBuilder from './ComponentBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
@@ -798,6 +798,13 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
         </div>
         {zone === 'yellow' && <p className="mt-1 text-[12px] text-[#866a1c]">A touch over target — still a deficit. Just don't drift higher.</p>}
         {zone === 'red' && <p className="mt-1 text-[12px] text-[#b0552a]">Well over target — today's deficit is mostly gone. Rein it in.</p>}
+        {totals.count > 0 && (
+          <p className="mt-1.5 text-[12px] text-[#8a8474]">
+            {Math.round(totals.carbs)}g carbs · {Math.round(totals.fat)}g fat ·{' '}
+            <span className={totals.fiber >= FIBER_TARGET ? 'text-[#5b6745]' : ''}>{Math.round(totals.fiber)}g fiber</span> ·{' '}
+            <span className={totals.sugar >= 50 ? 'text-[#b0552a]' : ''}>{Math.round(totals.sugar)}g sugar</span>
+          </p>
+        )}
       </div>
 
       {/* location toggle */}
@@ -982,13 +989,18 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
         </div>
 
         <div className="mt-2 grid grid-cols-4 gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-2.5 text-center">
-          {[['Carbs', totals.carbs], ['Fat', totals.fat], ['Fiber', totals.fiber], ['Sugar', totals.sugar]].map(([lbl, v]) => (
+          {[['Carbs', totals.carbs, null], ['Fat', totals.fat, null], ['Fiber', totals.fiber, FIBER_TARGET], ['Sugar', totals.sugar, null]].map(([lbl, v, target]) => (
             <div key={lbl}>
               <p className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{lbl}</p>
-              <p className="text-[15px] font-semibold text-[#23211c]">{Math.round(v)}<span className="text-[11px] font-normal text-[#8a8474]">g</span></p>
+              <p className="text-[15px] font-semibold text-[#23211c]">{Math.round(v)}<span className="text-[11px] font-normal text-[#8a8474]">{target ? ` / ${target}g` : 'g'}</span></p>
             </div>
           ))}
         </div>
+        {totals.count > 0 && totals.fiber < FIBER_TARGET && (
+          <p className="mt-1.5 px-1 text-[12px] text-[#8a7a4a]">
+            Fiber's at {Math.round(totals.fiber)}g — aim for ~{FIBER_TARGET}g. Add berries, oats, beans, or veg to close the gap; it blunts hunger and steadies blood sugar.
+          </p>
+        )}
 
         <div className={`mt-3 rounded-2xl px-4 py-3 ${critBg}`}>
           <p className="text-[14px] font-medium leading-snug">{crit.headline}</p>

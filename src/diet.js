@@ -95,6 +95,9 @@ export function effectivePantry(state) {
 
 export const isSeedFood = (id) => !!DEFAULT_BY_ID[id]
 
+// Daily fiber goal (g). ~14g per 1000 kcal → ~30g is the widely-cited target.
+export const FIBER_TARGET = 30
+
 // Units offered when adding a food / a component part, and the location chips.
 export const FOOD_UNITS = ['each', 'serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
 export const FOOD_LOCS = [['home', 'Home'], ['office', 'Office'], ['outside', 'Outside'], ['both', 'Everywhere']]
