@@ -1231,8 +1231,8 @@ function Chip({ on, disabled, onClick, children, hint, small }) {
 function ProgressRing({ value }) {
   const r = 7, c = 2 * Math.PI * r, pct = Math.max(0, Math.min(1, value || 0))
   return (
-    <span className="mx-auto mb-1.5 block">
-      <svg width="18" height="18" viewBox="0 0 18 18" className="-rotate-90">
+    <span className="mb-1.5 flex justify-center">
+      <svg width="16" height="16" viewBox="0 0 18 18" className="-rotate-90">
         <circle cx="9" cy="9" r={r} fill="none" stroke="#e0d9c9" strokeWidth="2.5" />
         <circle cx="9" cy="9" r={r} fill="none" stroke="#3d4a32" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
       </svg>
