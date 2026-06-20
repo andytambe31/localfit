@@ -102,76 +102,63 @@ export default function App() {
       document.documentElement.style.overflow = ''
     }
   }, [overlayOpen])
-  const [syncing, setSyncing] = useState(false)
-  const [pending, setPending] = useState(false) // unsynced local changes
-  const [lastSync, setLastSync] = useState(null) // epoch ms of last successful sync
-  const [syncErr, setSyncErr] = useState(false)  // last sync attempt failed
+  // Data is localStorage-first — every change is saved to the device instantly.
+  // There's no backend; durability comes from a manual Export to Files (iCloud
+  // Drive). `pending` = changes made since the last export; lastBackup tracks it.
+  const [pending, setPending] = useState(false)
+  const [lastBackup, setLastBackup] = useState(() => Number(localStorage.getItem('localfit-last-backup')) || null)
+  const [backupOpen, setBackupOpen] = useState(false)
+  const scheduleSync = () => {} // sync retired; kept as a no-op so write paths stay clean
 
-  // Push the local copy to the backend and adopt the merged truth. The server
-  // merges day-by-day (newest wins), so this is safe to fire any time. An 8s
-  // timeout means a blocked request fails fast (so the manual button can report it).
-  const doSync = useCallback(async () => {
-    const local = loadLocal(); if (!local) return
-    ensureProfile(local.profile ||= {}) // never sync away the skincare/profile defaults
-    setSyncing(true)
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 8000)
+  // Export the whole local state as a JSON file → the iOS share sheet ("Save to
+  // Files"), or a download elsewhere. Marks the data as backed up.
+  async function exportData() {
+    const data = loadLocal() || state
+    const json = JSON.stringify(data)
+    const name = `localfit-backup-${isoToday()}.json`
     try {
-      const res = await fetch(`${API_BASE}/api/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(local), signal: ctrl.signal })
-      if (!res.ok) throw new Error('sync')
-      const merged = await res.json()
-      saveLocal(merged); setState(merged)
-      setPending(false); setLastSync(Date.now()); setSyncErr(false)
-    } catch {
-      setSyncErr(true) // surfaced on the manual Sync button; auto-retry still runs
-    } finally {
-      clearTimeout(timer); setSyncing(false)
-    }
-  }, [])
-  const scheduleSync = useCallback(() => { clearTimeout(_syncTimer); _syncTimer = setTimeout(doSync, 1500) }, [doSync])
+      const file = new File([json], name, { type: 'application/json' })
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'localfit backup' })
+      } else {
+        const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
+        const a = document.createElement('a'); a.href = url; a.download = name
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+      }
+      const now = Date.now()
+      localStorage.setItem('localfit-last-backup', String(now))
+      setLastBackup(now); setPending(false)
+    } catch { /* user cancelled the share sheet — leave state as-is */ }
+  }
+  // Restore from a backup file's text (replaces this device's data, with a confirm).
+  function importData(text) {
+    let data
+    try { data = JSON.parse(text) } catch { window.alert("That file isn't valid JSON."); return }
+    if (!data || typeof data !== 'object' || !data.days) { window.alert("That doesn't look like a localfit backup."); return }
+    if (!window.confirm("Replace this device's data with the backup? Anything not exported will be overwritten.")) return
+    ensureProfile(data.profile ||= {})
+    saveLocal(data); setState(data); setBackupOpen(false)
+  }
 
   useEffect(() => {
     const local = loadLocal()
     if (local) {
       ensureProfile(local.profile ||= {})
-      // Retire any earlier placeholder pantry: the seed now lives in code, so
-      // synced state should only ever hold custom adds. Strip seed items before
-      // the first sync so they never travel to the backend.
-      if (Array.isArray(local.pantry)) local.pantry = local.pantry.filter((it) => !it.seed)
-      saveLocal(local) // persist the ensured defaults before any sync reads storage
+      if (Array.isArray(local.pantry)) local.pantry = local.pantry.filter((it) => !it.seed) // drop legacy seed items
+      saveLocal(local)
       setState(local)
-      doSync() // push offline changes, pull merged truth
     } else {
-      // No local copy (first run, or it was lost/cleared) → restore from the backend.
-      fetch(`${API_BASE}/api/state`).then((r) => (r.ok ? r.json() : null)).then((b) => {
-        const init = b || DEFAULT_STATE; ensureProfile(init.profile ||= {})
-        setState(init); saveLocal(init)
-      }).catch(() => { setState(DEFAULT_STATE); saveLocal(DEFAULT_STATE) })
+      // First run / storage cleared → start fresh. Restore a prior backup via Import.
+      const init = DEFAULT_STATE; ensureProfile(init.profile ||= {})
+      setState(init); saveLocal(init)
     }
-    // Record this session's foreground activity (feeds sleep inference — the long
-    // overnight quiet gap ≈ sleep). Rides the existing heartbeat/visibility flow.
+    // Record foreground activity (feeds sleep inference from the overnight gap).
     recordActivity()
-    // Automatic resync: when the network returns, when the app regains focus,
-    // and on a periodic heartbeat — so the backend always has the latest.
-    const onOnline = () => doSync()
-    const onVisible = () => { if (document.visibilityState === 'visible') { recordActivity(); doSync() } }
-    window.addEventListener('online', onOnline)
+    const onVisible = () => { if (document.visibilityState === 'visible') recordActivity() }
     document.addEventListener('visibilitychange', onVisible)
-    const heartbeat = setInterval(() => { recordActivity(); if (navigator.onLine !== false) doSync() }, 60000)
-    return () => {
-      window.removeEventListener('online', onOnline)
-      document.removeEventListener('visibilitychange', onVisible)
-      clearInterval(heartbeat)
-    }
-  }, [doSync])
-
-  // Warn before leaving / reloading if changes haven't been backed up to the server.
-  useEffect(() => {
-    if (!pending) return
-    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [pending])
+    const heartbeat = setInterval(recordActivity, 60000)
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(heartbeat) }
+  }, [])
 
   function patch(p) {
     setState((prev) => {
@@ -436,17 +423,17 @@ export default function App() {
       <div className="mb-3 flex items-baseline justify-between">
         <span className="font-display text-lg font-semibold tracking-tight text-[#20201d]">localfit</span>
         <div className="flex items-center gap-2">
-          <SyncButton syncing={syncing} pending={pending} syncErr={syncErr} lastSync={lastSync} onSync={doSync} />
+          <BackupButton pending={pending} lastBackup={lastBackup} onOpen={() => setBackupOpen(true)} />
           <span className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">{prettyToday(today)}</span>
         </div>
       </div>
-      {pending && !syncing && (
-        <div className="mb-4 flex items-center gap-2 rounded-xl border border-[#e7d4b6] bg-[#f7ecd6] px-3 py-2 text-[12px] text-[#8a5a1e]">
+      {(!lastBackup || Date.now() - lastBackup > 7 * 86400000) && (
+        <button onClick={() => setBackupOpen(true)} className="mb-4 flex w-full items-center gap-2 rounded-xl border border-[#e7d4b6] bg-[#f7ecd6] px-3 py-2 text-left text-[12px] text-[#8a5a1e]">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" />
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
           </svg>
-          <span>Not backed up yet — these changes live only on this device. Keep the app open or reconnect to sync.</span>
-        </div>
+          <span>{lastBackup ? "It's been a while — back up your data to Files so you don't lose it." : 'Your data lives only on this device. Tap to export a backup to Files.'}</span>
+        </button>
       )}
 
       {/* The coach speaks — directive, one thing at a time */}
@@ -555,6 +542,9 @@ export default function App() {
           slot={hairFlow} dateIso={today} state={state}
           onComplete={completeHairRoutine}
           onClose={() => setHairFlow(null)} />
+      )}
+      {backupOpen && (
+        <BackupSheet lastBackup={lastBackup} pending={pending} onExport={exportData} onImport={importData} onClose={() => setBackupOpen(false)} />
       )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
@@ -1864,35 +1854,50 @@ function RewardsSection({ state, profile, today, onClaim }) {
   )
 }
 
-// Tappable manual sync: pushes localStorage to the backend (which merges newest-
-// wins) and reports the result — syncing / synced + when / failed-tap-to-retry.
-function SyncButton({ syncing, pending, syncErr, lastSync, onSync }) {
+// Header button → opens the backup sheet. Warns (amber) when a backup is overdue.
+function BackupButton({ pending, lastBackup, onOpen }) {
+  const warn = pending || !lastBackup || Date.now() - lastBackup > 7 * 86400000
+  return (
+    <button onClick={onOpen}
+      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider transition active:scale-95 ${warn ? 'border-[#e7c4a6] bg-[#f7ecd6] text-[#a85b1e]' : 'border-[#cfd6bd] bg-[#eef0e6] text-[#3d4a32]'}`}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+      <span>Backup</span>
+    </button>
+  )
+}
+
+// Backup sheet: export the whole state to Files, or import a backup to restore.
+function BackupSheet({ lastBackup, pending, onExport, onImport, onClose }) {
+  const fileRef = useRef(null)
   const ago = (t) => {
-    if (!t) return ''
+    if (!t) return 'never'
     const s = Math.round((Date.now() - t) / 1000)
     if (s < 60) return 'just now'
     if (s < 3600) return `${Math.floor(s / 60)}m ago`
-    return `${Math.floor(s / 3600)}h ago`
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+    return `${Math.floor(s / 86400)}d ago`
   }
-  const state = syncing ? 'syncing' : syncErr ? 'error' : pending ? 'pending' : lastSync ? 'ok' : 'idle'
-  const cls = {
-    syncing: 'border-[#cfd6bd] bg-[#eef0e6] text-[#3d4a32]',
-    error: 'border-[#e7c4a6] bg-[#f7ecd6] text-[#a85b1e]',
-    pending: 'border-[#e7c4a6] bg-[#f7ecd6] text-[#a85b1e]',
-    ok: 'border-[#cfd6bd] bg-[#eef0e6] text-[#3d4a32]',
-    idle: 'border-[#e0d9c9] bg-[#f3efe6] text-[#6f6a5d]',
-  }[state]
-  const label = { syncing: 'Syncing…', error: 'Sync failed — retry', pending: 'Sync now', ok: `Synced ${ago(lastSync)}`, idle: 'Sync' }[state]
-  return (
-    <button onClick={onSync} disabled={syncing}
-      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition active:scale-95 ${cls}`}>
-      {state === 'syncing'
-        ? <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
-        : state === 'error' || state === 'pending'
-          ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
-          : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
-      <span className="uppercase tracking-wider">{label}</span>
-    </button>
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 px-4 pb-4 fade-in" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-3xl bg-[#fbf9f3] p-5 shadow-[0_24px_60px_-20px_rgba(35,41,31,0.6)]" onClick={(e) => e.stopPropagation()}>
+        <p className="font-display text-[19px] font-semibold text-[#23211c]">Back up your data</p>
+        <p className="mt-1 text-[13px] leading-snug text-[#6f6a5d]">Everything lives on this device. Export a copy to <span className="font-medium">Files (iCloud Drive)</span> so a lost or wiped phone never costs you your progress.</p>
+        <p className="mt-2 text-[12px] text-[#8a8474]">Last backup: <span className={!lastBackup || pending ? 'font-medium text-[#a85b1e]' : ''}>{ago(lastBackup)}</span>{pending && lastBackup ? ' · changes since' : ''}</p>
+
+        <button onClick={onExport} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[#3d4a32] px-6 py-3 text-[15px] font-semibold text-[#f4f1e8] active:scale-[0.99]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
+          Export — Save to Files
+        </button>
+        <button onClick={() => fileRef.current?.click()} className="mt-2 flex w-full items-center justify-center gap-2 rounded-full border border-[#d8d1c2] bg-[#f3efe6] px-6 py-3 text-[15px] font-semibold text-[#4a463c] active:scale-[0.99]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21V9" /><path d="m7 14 5-5 5 5" /><path d="M5 3h14" /></svg>
+          Import — Restore from a file
+        </button>
+        <input ref={fileRef} type="file" accept="application/json,.json" className="hidden"
+          onChange={async (e) => { const f = e.target.files?.[0]; if (f) onImport(await f.text()); e.target.value = '' }} />
+        <button onClick={onClose} className="mt-2 w-full py-2 text-[13px] text-[#8a8474]">Close</button>
+      </div>
+    </div>,
+    document.body
   )
 }
 function SyncIndicator({ status }) {
