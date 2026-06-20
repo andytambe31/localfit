@@ -7,7 +7,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import ComponentBuilder from './ComponentBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
@@ -109,6 +109,7 @@ export default function App() {
   const [pending, setPending] = useState(false)
   const [lastBackup, setLastBackup] = useState(() => Number(localStorage.getItem('localfit-last-backup')) || null)
   const [backupOpen, setBackupOpen] = useState(false)
+  const [foodReview, setFoodReview] = useState(false) // dashboard shortcut → today's food
   const scheduleSync = () => {} // sync retired; kept as a no-op so write paths stay clean
 
   // Export the whole local state as a JSON file → the iOS share sheet ("Save to
@@ -526,7 +527,15 @@ export default function App() {
 
       {/* Quiet progress — tap any to jump, no pressure */}
       <div className="mt-6">
-        <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
+        <div className="mb-2 flex items-baseline justify-between">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
+          {dayTotals(day).count > 0 && (
+            <button onClick={() => setFoodReview(true)} className="flex items-center gap-1 text-[12px] font-medium text-[#3d4a32]">
+              See today's food
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-5 gap-2">
           {areas.map((a) => {
             const urgent = a.attn === 'urgent', attention = a.attn === 'attention'
@@ -600,6 +609,10 @@ export default function App() {
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
           onSave={(owned) => { updateProfile({ skincare: { ...profile.skincare, ownedProducts: owned } }); setManageProducts(false) }} />
+      )}
+      {foodReview && (
+        <FoodReview state={state} dateIso={today} day={day} proteinTarget={profile.proteinTarget || PROTEIN_TARGET_DEFAULT}
+          onRemove={removeFood} onReset={resetFood} onMove={moveFood} onClose={() => setFoodReview(false)} />
       )}
     </div>
     </>
@@ -815,7 +828,7 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
           <p className="mt-1.5 text-[12px] text-[#8a8474]">
             {Math.round(totals.carbs)}g carbs · {Math.round(totals.fat)}g fat ·{' '}
             <span className={totals.fiber >= FIBER_TARGET ? 'text-[#5b6745]' : ''}>{Math.round(totals.fiber)}g fiber</span> ·{' '}
-            <span className={totals.sugar >= 50 ? 'text-[#b0552a]' : ''}>{Math.round(totals.sugar)}g sugar</span>
+            <span className={totals.sugar > SUGAR_LIMIT ? 'text-[#b0552a]' : ''}>{Math.round(totals.sugar)} / {SUGAR_LIMIT}g sugar</span>
           </p>
         )}
       </div>
@@ -1002,16 +1015,26 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
         </div>
 
         <div className="mt-2 grid grid-cols-4 gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-2.5 text-center">
-          {[['Carbs', totals.carbs, null], ['Fat', totals.fat, null], ['Fiber', totals.fiber, FIBER_TARGET], ['Sugar', totals.sugar, null]].map(([lbl, v, target]) => (
+          {[
+            { lbl: 'Carbs', v: totals.carbs, target: null, tone: '' },
+            { lbl: 'Fat', v: totals.fat, target: null, tone: '' },
+            { lbl: 'Fiber', v: totals.fiber, target: FIBER_TARGET, tone: totals.fiber >= FIBER_TARGET ? 'text-[#5b6745]' : '' },
+            { lbl: 'Sugar', v: totals.sugar, target: SUGAR_LIMIT, tone: totals.sugar > SUGAR_LIMIT ? 'text-[#b0552a]' : '' },
+          ].map(({ lbl, v, target, tone }) => (
             <div key={lbl}>
               <p className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{lbl}</p>
-              <p className="text-[15px] font-semibold text-[#23211c]">{Math.round(v)}<span className="text-[11px] font-normal text-[#8a8474]">{target ? ` / ${target}g` : 'g'}</span></p>
+              <p className={`text-[15px] font-semibold ${tone || 'text-[#23211c]'}`}>{Math.round(v)}<span className="text-[11px] font-normal text-[#8a8474]">{target ? ` / ${target}g` : 'g'}</span></p>
             </div>
           ))}
         </div>
         {totals.count > 0 && totals.fiber < FIBER_TARGET && (
           <p className="mt-1.5 px-1 text-[12px] text-[#8a7a4a]">
             Fiber's at {Math.round(totals.fiber)}g — aim for ~{FIBER_TARGET}g. Add berries, oats, beans, or veg to close the gap; it blunts hunger and steadies blood sugar.
+          </p>
+        )}
+        {totals.sugar > SUGAR_LIMIT && (
+          <p className="mt-1.5 px-1 text-[12px] text-[#b0552a]">
+            Sugar's at {Math.round(totals.sugar)}g — over the {SUGAR_LIMIT}g cap. Fruit is fine; it's the desserts and sweetened drinks to rein in.
           </p>
         )}
 

@@ -97,6 +97,9 @@ export const isSeedFood = (id) => !!DEFAULT_BY_ID[id]
 
 // Daily fiber goal (g). ~14g per 1000 kcal → ~30g is the widely-cited target.
 export const FIBER_TARGET = 30
+// Daily sugar ceiling (g, total — fruit counts). Sits above the AHA ~36g
+// added-sugar guidance since whole fruit is fine; a soft cap for the deficit.
+export const SUGAR_LIMIT = 50
 
 // Units offered when adding a food / a component part, and the location chips.
 export const FOOD_UNITS = ['each', 'serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
