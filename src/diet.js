@@ -107,21 +107,77 @@ function latest(log, key) {
   return [...log].sort((a, b) => a.date.localeCompare(b.date)).at(-1)[key]
 }
 
-// Daily calorie ceiling via Katch-McArdle (lean-mass BMR — no age needed since we
-// have body fat). Returns null when bodyweight is unknown, so the UI runs
-// protein-only until a weight is logged. activity ~ desk job + 10k steps + lifts.
-export function calorieTarget(state, opts = {}) {
+const _day = (iso) => new Date(iso + 'T00:00:00')
+
+// Observed TDEE from real logs: average calories + the deficit implied by the
+// smoothed weight trend (linear regression), over a rolling 28 days anchored on
+// the latest weigh-in. Needs ~14 weigh-ins + 10 calorie-logged days, else null.
+//   dailyDeficit = -slope(kg/day) × 7700;  TDEE = avgCalories + dailyDeficit
+function observedTDEE(state) {
+  const wl = [...(state.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+  if (wl.length < 2) return null
+  const anchor = _day(wl.at(-1).date)
+  const start = new Date(anchor); start.setDate(start.getDate() - 28)
+  const pts = wl.filter((w) => _day(w.date) >= start)
+  if (pts.length < 14) return null
+  const t0 = _day(pts[0].date).getTime()
+  const xs = pts.map((p) => (_day(p.date).getTime() - t0) / 86400000)
+  const ys = pts.map((p) => p.kg)
+  const n = xs.length, sx = xs.reduce((a, b) => a + b, 0), sy = ys.reduce((a, b) => a + b, 0)
+  const sxx = xs.reduce((a, b) => a + b * b, 0), sxy = xs.reduce((a, b, i) => a + b * ys[i], 0)
+  const denom = n * sxx - sx * sx
+  if (denom === 0) return null
+  const slope = (n * sxy - sx * sy) / denom // kg/day; negative = losing
+  const days = state.days || {}
+  let cal = 0, calDays = 0
+  for (const dt of Object.keys(days)) {
+    const d = _day(dt); if (d < start || d > anchor) continue
+    const food = days[dt].food || []; if (!food.length) continue
+    cal += food.reduce((a, x) => a + (x.kcal || 0), 0); calDays++
+  }
+  if (calDays < 10) return null
+  const avgCal = cal / calDays
+  return { value: Math.round(avgCal + (-slope * 7700)), avgCal: Math.round(avgCal), weighIns: n, calDays }
+}
+
+// Two-stage TDEE: a formula estimate (Katch-McArdle when body fat is known, else
+// Mifflin-St Jeor), blended toward the observed value as usable data accrues.
+// confidence: low (formula only) · medium (threshold met) · high (28d of data).
+export function tdee(state) {
   const kg = latest(state.weightLog, 'kg')
   if (!kg) return null
   const bf = latest(state.bodyFatLog, 'pct')
-  const lbm = bf != null ? kg * (1 - bf / 100) : kg * 0.75 // fall back to ~25% bf
-  const bmr = 370 + 21.6 * lbm
-  const tdee = bmr * (opts.activity || state.profile?.activity || 1.45)
-  // Deficit is adjustable — the weekly check-in can tighten it when fat loss stalls.
+  const activity = state.profile?.activity || 1.45
+  let bmr, method
+  if (bf != null) { bmr = 370 + 21.6 * (kg * (1 - bf / 100)); method = 'Katch-McArdle' }
+  else {
+    const h = state.profile?.height || 170, age = state.profile?.age || 30
+    bmr = 10 * kg + 6.25 * h - 5 * age + (state.profile?.sex === 'female' ? -161 : 5)
+    method = 'Mifflin-St Jeor'
+  }
+  const formula = Math.round(bmr * activity)
+  const obs = observedTDEE(state)
+  let value = formula, confidence = 'low'
+  if (obs) {
+    const usable = Math.min(obs.weighIns, obs.calDays)
+    const w = Math.max(0, Math.min(1, (usable - 7) / (24 - 7))) // ramp formula→observed
+    const safeObs = Math.max(formula * 0.65, Math.min(formula * 1.5, obs.value)) // guard noise
+    value = Math.round(formula * (1 - w) + safeObs * w)
+    confidence = obs.weighIns >= 24 && obs.calDays >= 20 ? 'high' : 'medium'
+  }
+  return { value, formula, observed: obs ? obs.value : null, confidence, method, kg, bf }
+}
+
+// Daily calorie ceiling = blended TDEE − deficit. Auto-calibrates as data accrues.
+// Returns null when bodyweight is unknown (UI runs protein-only until then).
+export function calorieTarget(state, opts = {}) {
+  const t = tdee(state)
+  if (!t) return null
   const deficit = opts.deficit ?? state.profile?.deficit ?? 500
   return {
-    ceiling: Math.round((tdee - deficit) / 10) * 10,
-    tdee: Math.round(tdee), bmr: Math.round(bmr), lbm: Math.round(lbm * 10) / 10, kg, bf,
+    ceiling: Math.round((t.value - deficit) / 10) * 10,
+    tdee: t.value, confidence: t.confidence,
+    lbm: t.bf != null ? Math.round(t.kg * (1 - t.bf / 100) * 10) / 10 : null, kg: t.kg, bf: t.bf,
   }
 }
 

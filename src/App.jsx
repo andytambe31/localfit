@@ -7,7 +7,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, tdee, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -443,7 +443,7 @@ export default function App() {
         <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{coach.support}</p>
       </section>
 
-      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />
+      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} tdee={tdee(state)} />
 
       {(() => {
         const checkin = weeklyCheckin(state, today)
@@ -1248,8 +1248,10 @@ function NumInput({ value, placeholder, step, onCommit }) {
 }
 // Dedicated bodyweight focal card near the top of the dashboard: latest weight,
 // trend vs last entry, one-tap log/update, and the trend chart once there's data.
-function WeightCard({ weightLog, today, day, onSave }) {
+function WeightCard({ weightLog, today, day, onSave, tdee }) {
   const [editing, setEditing] = useState(false)
+  const tdeeLabel = { low: 'estimated', medium: 'calibrating', high: 'calibrated' }
+  const tdeeCls = { low: 'bg-[#f3efe6] text-[#8a8474]', medium: 'bg-[#f6eed8] text-[#866a1c]', high: 'bg-[#eef0e6] text-[#3d4a32]' }
   const sorted = [...(weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
   const latest = sorted.at(-1)
   const prev = sorted.length >= 2 ? sorted.at(-2) : null
@@ -1286,6 +1288,12 @@ function WeightCard({ weightLog, today, day, onSave }) {
           <span className="text-[13px] text-[#8a8474]">kg</span>
           <button onClick={() => setEditing(false)} className="ml-auto text-[13px] text-[#8a8474]">Cancel</button>
         </div>
+      )}
+      {tdee && (
+        <p className="mt-2 flex items-center gap-1.5 text-[12px] text-[#8a8474]">
+          Maintenance ~{tdee.value.toLocaleString()} cal/day
+          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tdeeCls[tdee.confidence]}`}>{tdeeLabel[tdee.confidence]}</span>
+        </p>
       )}
       {sorted.length >= 2 && <div className="mt-2"><WeightChart log={sorted} /></div>}
     </section>
