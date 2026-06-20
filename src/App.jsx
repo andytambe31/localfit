@@ -401,16 +401,20 @@ export default function App() {
   }
 
   // Movement goal depends on the day: a training day wants a lift, a rest day
-  // wants steps. So the tile is "done" when the day's actual goal is met.
+  // wants steps. Done = goal met; otherwise the tile fills toward it via steps
+  // (capped under full on a training day, since a lift is still owed).
   const trainedToday = w.did || w.session?.status === 'done'
-  const stepsHit = (day.steps || 0) >= (profile.stepTarget || 10000)
-  const moveDone = trainCall.rest ? stepsHit : trainedToday
+  const stepTarget = profile.stepTarget || 10000
+  const stepFrac = Math.min(1, (day.steps || 0) / stepTarget)
+  const moveDone = trainCall.rest ? (day.steps || 0) >= stepTarget : trainedToday
+  const moveProgress = trainCall.rest ? stepFrac : Math.min(0.9, stepFrac)
+  const waterTarget = profile.waterTarget || 8
 
   const areas = [
     { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
-    { id: 'movement', label: 'Train', done: moveDone, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
+    { id: 'movement', label: 'Train', done: moveDone, progress: moveProgress, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
     { id: 'diet', label: 'Diet', progress: Math.min(1, dayTotals(day).protein / (profile.proteinTarget || PROTEIN_TARGET_DEFAULT)) },
-    { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
+    { id: 'water', label: 'Water', done: (day.water || 0) >= waterTarget, progress: Math.min(1, (day.water || 0) / waterTarget) },
     { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
   ]
 
@@ -502,12 +506,12 @@ export default function App() {
                 {(urgent || attention) && (
                   <span className={`absolute -top-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${urgent ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Now</span>
                 )}
-                {a.progress != null ? (
-                  <ProgressRing value={a.progress} />
-                ) : a.done ? (
+                {a.done ? (
                   <span className="mx-auto mb-1.5 grid h-4 w-4 place-items-center rounded-full bg-[#3d4a32]">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
                   </span>
+                ) : a.progress != null ? (
+                  <ProgressRing value={a.progress} />
                 ) : (
                   <span className={`mx-auto mb-1.5 block h-4 w-4 rounded-full border-2 ${urgent || attention ? 'border-[#7d8a5f]' : 'border-[#d8d1c2]'}`} />
                 )}
