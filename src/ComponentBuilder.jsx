@@ -11,7 +11,7 @@ import { FOOD_UNITS, FOOD_LOCS, GROUP_ORDER } from './diet'
  *   onSave({ name, loc, group, components, portion }) · onCancel()
  * -------------------------------------------------------------------------- */
 let _k = 0
-const keyed = (c) => ({ key: `c${_k++}`, name: '', unit: 'serving', default: '1', kcal: '', protein: '', carbs: '', fat: '', ...c })
+const keyed = (c) => ({ key: `c${_k++}`, name: '', unit: 'serving', default: '1', kcal: '', protein: '', carbs: '', fat: '', fiber: '', sugar: '', ...c })
 
 export default function ComponentBuilder({ initial = {}, editId = null, onSave, onCancel }) {
   const [name, setName] = useState(initial.name || '')
@@ -22,8 +22,9 @@ export default function ComponentBuilder({ initial = {}, editId = null, onSave, 
 
   const num = (v) => (v === '' || v == null ? 0 : Number(v) || 0)
   const total = useMemo(() => parts.reduce((a, p) => ({
-    kcal: a.kcal + num(p.kcal), protein: a.protein + num(p.protein), carbs: a.carbs + num(p.carbs), fat: a.fat + num(p.fat),
-  }), { kcal: 0, protein: 0, carbs: 0, fat: 0 }), [parts])
+    kcal: a.kcal + num(p.kcal), protein: a.protein + num(p.protein), carbs: a.carbs + num(p.carbs),
+    fat: a.fat + num(p.fat), fiber: a.fiber + num(p.fiber), sugar: a.sugar + num(p.sugar),
+  }), { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }), [parts])
   const r1 = (n) => Math.round(n * 10) / 10
 
   const setPart = (key, patch) => setParts((ps) => ps.map((p) => (p.key === key ? { ...p, ...patch } : p)))
@@ -37,7 +38,7 @@ export default function ComponentBuilder({ initial = {}, editId = null, onSave, 
     const components = named.map((p) => ({
       id: p.id, name: p.name.trim(), unit: p.unit,
       default: Math.max(1, Number(p.default) || 1),
-      kcal: num(p.kcal), protein: num(p.protein), carbs: num(p.carbs), fat: num(p.fat),
+      kcal: num(p.kcal), protein: num(p.protein), carbs: num(p.carbs), fat: num(p.fat), fiber: num(p.fiber), sugar: num(p.sugar),
     }))
     onSave({ name: name.trim(), loc, group, components })
   }
@@ -97,11 +98,13 @@ export default function ComponentBuilder({ initial = {}, editId = null, onSave, 
                     {FOOD_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
-                <div className="mt-2 grid grid-cols-4 gap-2">
+                <div className="mt-2 grid grid-cols-3 gap-2">
                   <Macro label="cal" value={p.kcal} onChange={(v) => setPart(p.key, { kcal: v })} />
                   <Macro label="protein" value={p.protein} onChange={(v) => setPart(p.key, { protein: v })} />
                   <Macro label="carbs" value={p.carbs} onChange={(v) => setPart(p.key, { carbs: v })} />
                   <Macro label="fat" value={p.fat} onChange={(v) => setPart(p.key, { fat: v })} />
+                  <Macro label="fiber" value={p.fiber} onChange={(v) => setPart(p.key, { fiber: v })} />
+                  <Macro label="sugar" value={p.sugar} onChange={(v) => setPart(p.key, { sugar: v })} />
                 </div>
               </div>
             ))}
@@ -114,7 +117,7 @@ export default function ComponentBuilder({ initial = {}, editId = null, onSave, 
       <div className="absolute inset-x-0 bottom-0 border-t border-[#e2dccd] bg-[#f1ede4]/95 px-5 py-4 backdrop-blur">
         <div className="mx-auto flex max-w-xl items-center justify-between">
           <div className="text-[13px] text-[#6f6a5d]">
-            Baseline · <span className="font-semibold text-[#23211c]">{Math.round(total.kcal)} cal</span> · {r1(total.protein)}g P · {r1(total.carbs)}g C · {r1(total.fat)}g F
+            Baseline · <span className="font-semibold text-[#23211c]">{Math.round(total.kcal)} cal</span> · {r1(total.protein)}g P · {r1(total.carbs)}g C · {r1(total.fat)}g F · {r1(total.fiber)}g fib · {r1(total.sugar)}g sug
           </div>
           <button onClick={save} disabled={!canSave}
             className={`rounded-full px-5 py-2.5 text-[14px] font-semibold ${canSave ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#d8d1c2] text-[#fbf9f3]'}`}>Save food</button>

@@ -306,11 +306,11 @@ export default function App() {
   }
   // Quick-add a brand-new food: creates a pantry item (provisional if no macros
   // yet — backfilled later) and logs it in one go.
-  function addFood({ name, portion, kcal, protein, carbs, fat, group, loc }) {
+  function addFood({ name, portion, kcal, protein, carbs, fat, fiber, sugar, group, loc }) {
     const useLoc = loc || day.foodLoc || defaultLocation(today)
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
     const item = { id, name, portion: portion || '1 serving', loc: useLoc, group: group || undefined,
-      kcal: kcal || 0, protein: protein || 0, carbs: carbs || 0, fat: fat || 0, fiber: 0,
+      kcal: kcal || 0, protein: protein || 0, carbs: carbs || 0, fat: fat || 0, fiber: fiber || 0, sugar: sugar || 0,
       provisional: !((kcal || 0) > 0 || (protein || 0) > 0), custom: true }
     setState((prev) => {
       const next = clone(prev)
@@ -332,7 +332,7 @@ export default function App() {
     const fields = {
       name, loc: loc || day.foodLoc || defaultLocation(today), group: group || undefined,
       portion: (components || []).map((c) => c.name).filter(Boolean).join(' + ') || '1 serving',
-      kcal: b.kcal, protein: b.protein, carbs: b.carbs, fat: b.fat, fiber: 0,
+      kcal: b.kcal, protein: b.protein, carbs: b.carbs, fat: b.fat, fiber: b.fiber, sugar: b.sugar,
       mods: built.mods, custom: true,
       provisional: !(b.kcal > 0 || b.protein > 0),
     }
@@ -981,6 +981,15 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
           </div>
         </div>
 
+        <div className="mt-2 grid grid-cols-4 gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-2.5 text-center">
+          {[['Carbs', totals.carbs], ['Fat', totals.fat], ['Fiber', totals.fiber], ['Sugar', totals.sugar]].map(([lbl, v]) => (
+            <div key={lbl}>
+              <p className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{lbl}</p>
+              <p className="text-[15px] font-semibold text-[#23211c]">{Math.round(v)}<span className="text-[11px] font-normal text-[#8a8474]">g</span></p>
+            </div>
+          ))}
+        </div>
+
         <div className={`mt-3 rounded-2xl px-4 py-3 ${critBg}`}>
           <p className="text-[14px] font-medium leading-snug">{crit.headline}</p>
           {crit.points?.length > 0 && (
@@ -1072,6 +1081,8 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
   const [protein, setProtein] = useState('')
   const [carbs, setCarbs] = useState('')
   const [fat, setFat] = useState('')
+  const [fiber, setFiber] = useState('')
+  const [sugar, setSugar] = useState('')
   const [group, setGroup] = useState('Snacks')
   const [foodLoc, setFoodLoc] = useState(defaultLoc || 'home')
   const num = (v) => (v === '' ? undefined : Number(v))
@@ -1087,11 +1098,13 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
           {FOOD_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
         </select>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <MacroField label="cal" value={kcal} onChange={setKcal} />
         <MacroField label="protein" value={protein} onChange={setProtein} />
         <MacroField label="carbs" value={carbs} onChange={setCarbs} />
         <MacroField label="fat" value={fat} onChange={setFat} />
+        <MacroField label="fiber" value={fiber} onChange={setFiber} />
+        <MacroField label="sugar" value={sugar} onChange={setSugar} />
       </div>
       <div>
         <p className="mb-1 text-[10px] uppercase tracking-wider text-[#a39c8d]">Where</p>
@@ -1106,7 +1119,7 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
         </div>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: `${(amount || '1').trim()} ${unit}`, kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), group, loc: foodLoc })}
+        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: `${(amount || '1').trim()} ${unit}`, kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), fiber: num(fiber), sugar: num(sugar), group, loc: foodLoc })}
           className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add &amp; log</button>
         <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
       </div>
