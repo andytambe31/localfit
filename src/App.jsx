@@ -1393,6 +1393,39 @@ function ScoreRing({ score, label }) {
   )
 }
 
+// ---- consistent pillar scoring: rolling 7-day adherence (incl. today) --------
+// Each pillar is a per-day quality in [0,1], averaged over the last 7 days that
+// actually have data — so partial app history doesn't tank the score, and all
+// pillars share the same window. null until there's a logged day.
+const skinQ = (d) => ((d.routines?.skincareAM ? 1 : 0) + (d.routines?.skincarePM ? 1 : 0)) / 2
+const hairQ = (d) => ((d.routines?.haircareAM ? 1 : 0) + (d.routines?.haircarePM ? 1 : 0)) / 2
+const moveQ = (d, profile) => {
+  const trained = (d.workout?.did && d.workout.type !== 'Rest') || d.workout?.session?.status === 'done'
+  return trained ? 1 : Math.min(1, (d.steps || 0) / (profile.stepTarget || 10000))
+}
+const dayLogged = (d) => !!(d && (d.routines?.skincareAM || d.routines?.skincarePM || d.routines?.haircareAM || d.routines?.haircarePM || d.workout?.did || (d.food && d.food.length) || d.steps || d.water))
+function pillar(days, today, quality) {
+  let sum = 0, cnt = 0
+  for (let i = 0; i < 7; i++) {
+    const d = days[shiftIso(today, -i)]
+    if (!dayLogged(d)) continue
+    sum += quality(d); cnt++
+  }
+  return cnt ? Math.round((sum / cnt) * 10) : null
+}
+// Diet pillar: daily protein/calorie score averaged over food-logged days (7d).
+function dietPillar(state, today, proteinTarget) {
+  const days = state.days || {}
+  let sum = 0, cnt = 0
+  for (let i = 0; i < 7; i++) {
+    const iso = shiftIso(today, -i)
+    if (!(days[iso]?.food?.length)) continue
+    const s = foodScore(state, iso, proteinTarget)
+    if (s != null) { sum += s; cnt++ }
+  }
+  return cnt ? Math.round(sum / cnt) : null
+}
+
 function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) {
   const [estimating, setEstimating] = useState(false)
   const [editingSleep, setEditingSleep] = useState(false)
@@ -1403,13 +1436,12 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) 
   const deadline = profile.bodyFatDeadline || '2026-12-31'
   const daysLeft = Math.max(0, Math.ceil((Date.parse(deadline) - Date.parse(today)) / 86400000))
 
-  const skinDays = countLastN(days, today, 14, (d) => d.routines?.skincareAM && d.routines?.skincarePM)
-  const hairDays = countLastN(days, today, 14, (d) => d.routines?.haircare)
-  const skinScore = ratio10(skinDays, 12)
-  const hairScore = ratio10(hairDays, 4)
+  // All five pillars on the same rolling-7-day footing.
+  const skinScore = pillar(days, today, skinQ)
+  const hairScore = pillar(days, today, hairQ)
+  const moveSc = pillar(days, today, (d) => moveQ(d, profile))
+  const dietSc = dietPillar(state, today, profile.proteinTarget || PROTEIN_TARGET_DEFAULT)
   const slpScore = sleepScore(state, today, profile) // null until there's data
-  const dietSc = foodScore(state, today, profile.proteinTarget || PROTEIN_TARGET_DEFAULT) // protein + calorie score; null until food logged
-  const moveSc = moveScore(state, today, profile) // null until a day is present
   const lastSleep = lastNightSleep(state, today)
 
   // The five pillars shown as rings. Each carries a directive weakest-link nudge.
@@ -1728,12 +1760,13 @@ const REWARDS = [
 ]
 function strongDay(d, profile) {
   if (!d) return false
-  const r = d.routines || {}, w = d.workout || {}, meals = d.meals || {}
+  const r = d.routines || {}, w = d.workout || {}
   const skin = r.skincareAM && r.skincarePM
   const water = (d.water || 0) >= (profile.waterTarget || 8)
-  const move = (w.type && w.type !== '') || (d.steps || 0) >= (profile.stepTarget || 10000)
-  const dietLogged = ['breakfast', 'lunch', 'dinner'].filter((m) => meals[m] != null).length >= 2
-  return skin && water && move && dietLogged
+  const trained = (w.did && w.type !== 'Rest') || w.session?.status === 'done'
+  const move = trained || (d.steps || 0) >= (profile.stepTarget || 10000)
+  const diet = (d.food?.length || 0) > 0 // logged your food today (new model)
+  return skin && water && move && diet
 }
 function currentStreak(days, today, profile) {
   let n = 0
@@ -1743,12 +1776,13 @@ function currentStreak(days, today, profile) {
   return n
 }
 function dayGaps(d, profile) {
-  const r = (d && d.routines) || {}, w = (d && d.workout) || {}, meals = (d && d.meals) || {}
+  const r = (d && d.routines) || {}, w = (d && d.workout) || {}
   const gaps = []
   if (!(r.skincareAM && r.skincarePM)) gaps.push('skincare')
   if (!((d?.water || 0) >= (profile.waterTarget || 8))) gaps.push('water')
-  if (!((w.type && w.type !== '') || (d?.steps || 0) >= (profile.stepTarget || 10000))) gaps.push('movement')
-  if (['breakfast', 'lunch', 'dinner'].filter((m) => meals[m] != null).length < 2) gaps.push('log your meals')
+  const trained = (w.did && w.type !== 'Rest') || w.session?.status === 'done'
+  if (!(trained || (d?.steps || 0) >= (profile.stepTarget || 10000))) gaps.push('movement')
+  if (!((d?.food?.length || 0) > 0)) gaps.push('log your food')
   return gaps
 }
 
