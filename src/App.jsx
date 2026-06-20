@@ -407,9 +407,15 @@ export default function App() {
     hairAttn = hairSlot === 'pm' && hour >= 22 ? 'urgent' : 'attention'
   }
 
+  // Movement goal depends on the day: a training day wants a lift, a rest day
+  // wants steps. So the tile is "done" when the day's actual goal is met.
+  const trainedToday = w.did || w.session?.status === 'done'
+  const stepsHit = (day.steps || 0) >= (profile.stepTarget || 10000)
+  const moveDone = trainCall.rest ? stepsHit : trainedToday
+
   const areas = [
     { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
-    { id: 'movement', label: 'Train', done: w.did, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
+    { id: 'movement', label: 'Train', done: moveDone, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
     { id: 'diet', label: 'Diet', progress: Math.min(1, dayTotals(day).protein / (profile.proteinTarget || PROTEIN_TARGET_DEFAULT)) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
     { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
