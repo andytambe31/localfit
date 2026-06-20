@@ -1007,6 +1007,18 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
 
 // Quick-add a new food. Protein optional — without it, the item logs provisional
 // and gets its numbers filled later (matches the offline "name only" decision).
+// A single macro number field. Defined at module scope (NOT inside AddFoodForm)
+// so it isn't recreated every render — recreating it remounts the input and drops
+// focus after each keystroke.
+function MacroField({ label, value, onChange }) {
+  return (
+    <label className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{label}</span>
+      <input value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" placeholder="—"
+        className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-[#3d4a32]" />
+    </label>
+  )
+}
 function AddFoodForm({ onAdd, onCancel }) {
   const [name, setName] = useState('')
   const [portion, setPortion] = useState('')
@@ -1015,13 +1027,6 @@ function AddFoodForm({ onAdd, onCancel }) {
   const [carbs, setCarbs] = useState('')
   const [fat, setFat] = useState('')
   const num = (v) => (v === '' ? undefined : Number(v))
-  const Macro = ({ label, value, set }) => (
-    <label className="flex flex-col gap-0.5">
-      <span className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{label}</span>
-      <input value={value} onChange={(e) => set(e.target.value)} inputMode="decimal" placeholder="—"
-        className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-[#3d4a32]" />
-    </label>
-  )
   return (
     <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Food name"
@@ -1029,10 +1034,10 @@ function AddFoodForm({ onAdd, onCancel }) {
       <input value={portion} onChange={(e) => setPortion(e.target.value)} placeholder="Portion (e.g. 1 bowl)"
         className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
       <div className="grid grid-cols-4 gap-2">
-        <Macro label="cal" value={kcal} set={setKcal} />
-        <Macro label="protein" value={protein} set={setProtein} />
-        <Macro label="carbs" value={carbs} set={setCarbs} />
-        <Macro label="fat" value={fat} set={setFat} />
+        <MacroField label="cal" value={kcal} onChange={setKcal} />
+        <MacroField label="protein" value={protein} onChange={setProtein} />
+        <MacroField label="carbs" value={carbs} onChange={setCarbs} />
+        <MacroField label="fat" value={fat} onChange={setFat} />
       </div>
       <div className="flex items-center gap-2 pt-1">
         <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat) })}
