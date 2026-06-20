@@ -1020,9 +1020,11 @@ function MacroField({ label, value, onChange }) {
   )
 }
 const FOOD_LOCS = [['home', 'Home'], ['office', 'Office'], ['outside', 'Outside'], ['both', 'Everywhere']]
+const FOOD_UNITS = ['serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
 function AddFoodForm({ defaultLoc, onAdd, onCancel }) {
   const [name, setName] = useState('')
-  const [portion, setPortion] = useState('')
+  const [amount, setAmount] = useState('1')
+  const [unit, setUnit] = useState('serving')
   const [kcal, setKcal] = useState('')
   const [protein, setProtein] = useState('')
   const [carbs, setCarbs] = useState('')
@@ -1034,8 +1036,14 @@ function AddFoodForm({ defaultLoc, onAdd, onCancel }) {
     <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Food name"
         className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
-      <input value={portion} onChange={(e) => setPortion(e.target.value)} placeholder="Portion (e.g. 1 bowl)"
-        className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+      <div className="flex gap-2">
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="1" aria-label="Portion amount"
+          className="w-16 shrink-0 rounded-lg border border-[#ddd5c5] bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-[#3d4a32]" />
+        <select value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="Portion unit"
+          className="min-w-0 flex-1 rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm text-[#23211c] outline-none focus:border-[#3d4a32]">
+          {FOOD_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </div>
       <div className="grid grid-cols-4 gap-2">
         <MacroField label="cal" value={kcal} onChange={setKcal} />
         <MacroField label="protein" value={protein} onChange={setProtein} />
@@ -1055,7 +1063,7 @@ function AddFoodForm({ defaultLoc, onAdd, onCancel }) {
         </div>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), group, loc: foodLoc })}
+        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: `${(amount || '1').trim()} ${unit}`, kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), group, loc: foodLoc })}
           className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add &amp; log</button>
         <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
       </div>
