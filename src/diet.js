@@ -96,7 +96,7 @@ export function effectivePantry(state) {
 export const isSeedFood = (id) => !!DEFAULT_BY_ID[id]
 
 // Units offered when adding a food / a component part, and the location chips.
-export const FOOD_UNITS = ['serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
+export const FOOD_UNITS = ['each', 'serving', 'g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'piece', 'slice', 'scoop', 'bowl', 'plate', 'bar', 'can', 'container', 'small', 'medium', 'large', 'handful']
 export const FOOD_LOCS = [['home', 'Home'], ['office', 'Office'], ['outside', 'Outside'], ['both', 'Everywhere']]
 
 // --- location ----------------------------------------------------------------
