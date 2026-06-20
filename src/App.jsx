@@ -305,10 +305,10 @@ export default function App() {
   }
   // Quick-add a brand-new food: creates a pantry item (provisional if no macros
   // yet — backfilled later) and logs it in one go.
-  function addFood({ name, portion, kcal, protein, carbs, fat, group }) {
-    const loc = day.foodLoc || defaultLocation(today)
+  function addFood({ name, portion, kcal, protein, carbs, fat, group, loc }) {
+    const useLoc = loc || day.foodLoc || defaultLocation(today)
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
-    const item = { id, name, portion: portion || '1 serving', loc: loc === 'outside' ? 'both' : loc, group: group || undefined,
+    const item = { id, name, portion: portion || '1 serving', loc: useLoc, group: group || undefined,
       kcal: kcal || 0, protein: protein || 0, carbs: carbs || 0, fat: fat || 0, fiber: 0,
       provisional: !((kcal || 0) > 0 || (protein || 0) > 0), custom: true }
     setState((prev) => {
@@ -792,7 +792,7 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onLoc, onReset,
 
       {/* quick-add */}
       {adding
-        ? <AddFoodForm onAdd={(f) => { onAdd(f); setAdding(false) }} onCancel={() => setAdding(false)} />
+        ? <AddFoodForm defaultLoc={loc} onAdd={(f) => { onAdd(f); setAdding(false) }} onCancel={() => setAdding(false)} />
         : <button onClick={() => setAdding(true)} className="text-[13px] font-medium text-[#3d4a32]">+ Add food</button>}
 
       {/* today's food → its own screen (keeps the dashboard light) */}
@@ -1019,7 +1019,8 @@ function MacroField({ label, value, onChange }) {
     </label>
   )
 }
-function AddFoodForm({ onAdd, onCancel }) {
+const FOOD_LOCS = [['home', 'Home'], ['office', 'Office'], ['outside', 'Outside'], ['both', 'Everywhere']]
+function AddFoodForm({ defaultLoc, onAdd, onCancel }) {
   const [name, setName] = useState('')
   const [portion, setPortion] = useState('')
   const [kcal, setKcal] = useState('')
@@ -1027,6 +1028,7 @@ function AddFoodForm({ onAdd, onCancel }) {
   const [carbs, setCarbs] = useState('')
   const [fat, setFat] = useState('')
   const [group, setGroup] = useState('Snacks')
+  const [foodLoc, setFoodLoc] = useState(defaultLoc || 'home')
   const num = (v) => (v === '' ? undefined : Number(v))
   return (
     <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
@@ -1041,13 +1043,19 @@ function AddFoodForm({ onAdd, onCancel }) {
         <MacroField label="fat" value={fat} onChange={setFat} />
       </div>
       <div>
+        <p className="mb-1 text-[10px] uppercase tracking-wider text-[#a39c8d]">Where</p>
+        <div className="flex flex-wrap gap-1.5">
+          {FOOD_LOCS.map(([v, lbl]) => <Chip key={v} small on={foodLoc === v} onClick={() => setFoodLoc(v)}>{lbl}</Chip>)}
+        </div>
+      </div>
+      <div>
         <p className="mb-1 text-[10px] uppercase tracking-wider text-[#a39c8d]">Category</p>
         <div className="flex flex-wrap gap-1.5">
           {GROUP_ORDER.filter((g) => g !== 'Other').map((g) => <Chip key={g} small on={group === g} onClick={() => setGroup(g)}>{g}</Chip>)}
         </div>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), group })}
+        <button disabled={!name.trim()} onClick={() => onAdd({ name: name.trim(), portion: portion.trim(), kcal: num(kcal), protein: num(protein), carbs: num(carbs), fat: num(fat), group, loc: foodLoc })}
           className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add &amp; log</button>
         <button onClick={onCancel} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
       </div>
