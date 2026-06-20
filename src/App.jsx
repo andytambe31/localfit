@@ -104,22 +104,28 @@ export default function App() {
   }, [overlayOpen])
   const [syncing, setSyncing] = useState(false)
   const [pending, setPending] = useState(false) // unsynced local changes
+  const [lastSync, setLastSync] = useState(null) // epoch ms of last successful sync
+  const [syncErr, setSyncErr] = useState(false)  // last sync attempt failed
 
-  // Push the local copy to the backend and adopt the merged truth. No-op offline.
+  // Push the local copy to the backend and adopt the merged truth. The server
+  // merges day-by-day (newest wins), so this is safe to fire any time. An 8s
+  // timeout means a blocked request fails fast (so the manual button can report it).
   const doSync = useCallback(async () => {
     const local = loadLocal(); if (!local) return
     ensureProfile(local.profile ||= {}) // never sync away the skincare/profile defaults
     setSyncing(true)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
     try {
-      const res = await fetch(`${API_BASE}/api/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(local) })
+      const res = await fetch(`${API_BASE}/api/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(local), signal: ctrl.signal })
       if (!res.ok) throw new Error('sync')
       const merged = await res.json()
       saveLocal(merged); setState(merged)
-      setPending(false) // backend now has the latest
+      setPending(false); setLastSync(Date.now()); setSyncErr(false)
     } catch {
-      // stay pending; auto-retry (heartbeat / reconnect / focus) covers it
+      setSyncErr(true) // surfaced on the manual Sync button; auto-retry still runs
     } finally {
-      setSyncing(false)
+      clearTimeout(timer); setSyncing(false)
     }
   }, [])
   const scheduleSync = useCallback(() => { clearTimeout(_syncTimer); _syncTimer = setTimeout(doSync, 1500) }, [doSync])
@@ -430,7 +436,7 @@ export default function App() {
       <div className="mb-3 flex items-baseline justify-between">
         <span className="font-display text-lg font-semibold tracking-tight text-[#20201d]">localfit</span>
         <div className="flex items-center gap-2">
-          <SyncIndicator status={syncing ? 'syncing' : pending ? 'unsynced' : 'synced'} />
+          <SyncButton syncing={syncing} pending={pending} syncErr={syncErr} lastSync={lastSync} onSync={doSync} />
           <span className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">{prettyToday(today)}</span>
         </div>
       </div>
@@ -1858,6 +1864,37 @@ function RewardsSection({ state, profile, today, onClaim }) {
   )
 }
 
+// Tappable manual sync: pushes localStorage to the backend (which merges newest-
+// wins) and reports the result — syncing / synced + when / failed-tap-to-retry.
+function SyncButton({ syncing, pending, syncErr, lastSync, onSync }) {
+  const ago = (t) => {
+    if (!t) return ''
+    const s = Math.round((Date.now() - t) / 1000)
+    if (s < 60) return 'just now'
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`
+    return `${Math.floor(s / 3600)}h ago`
+  }
+  const state = syncing ? 'syncing' : syncErr ? 'error' : pending ? 'pending' : lastSync ? 'ok' : 'idle'
+  const cls = {
+    syncing: 'border-[#cfd6bd] bg-[#eef0e6] text-[#3d4a32]',
+    error: 'border-[#e7c4a6] bg-[#f7ecd6] text-[#a85b1e]',
+    pending: 'border-[#e7c4a6] bg-[#f7ecd6] text-[#a85b1e]',
+    ok: 'border-[#cfd6bd] bg-[#eef0e6] text-[#3d4a32]',
+    idle: 'border-[#e0d9c9] bg-[#f3efe6] text-[#6f6a5d]',
+  }[state]
+  const label = { syncing: 'Syncing…', error: 'Sync failed — retry', pending: 'Sync now', ok: `Synced ${ago(lastSync)}`, idle: 'Sync' }[state]
+  return (
+    <button onClick={onSync} disabled={syncing}
+      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition active:scale-95 ${cls}`}>
+      {state === 'syncing'
+        ? <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+        : state === 'error' || state === 'pending'
+          ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
+          : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+      <span className="uppercase tracking-wider">{label}</span>
+    </button>
+  )
+}
 function SyncIndicator({ status }) {
   // Syncing → spinning arrows. Unsynced → amber alert. Synced → constant check.
   if (status === 'syncing') {
