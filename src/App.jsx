@@ -410,7 +410,7 @@ export default function App() {
   const areas = [
     { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
     { id: 'movement', label: 'Train', done: w.did, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
-    { id: 'diet', label: 'Diet', done: dayTotals(day).protein >= (profile.proteinTarget || PROTEIN_TARGET_DEFAULT) },
+    { id: 'diet', label: 'Diet', progress: Math.min(1, dayTotals(day).protein / (profile.proteinTarget || PROTEIN_TARGET_DEFAULT)) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= profile.waterTarget },
     { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
   ]
@@ -503,7 +503,9 @@ export default function App() {
                 {(urgent || attention) && (
                   <span className={`absolute -top-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${urgent ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Now</span>
                 )}
-                {a.done ? (
+                {a.progress != null ? (
+                  <ProgressRing value={a.progress} />
+                ) : a.done ? (
                   <span className="mx-auto mb-1.5 grid h-4 w-4 place-items-center rounded-full bg-[#3d4a32]">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
                   </span>
@@ -1216,6 +1218,19 @@ function Chip({ on, disabled, onClick, children, hint, small }) {
       className={`rounded-full font-medium transition active:scale-95 ${pad} ${
         on ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#e0d9c9] bg-[#f3efe6] text-[#4a463c] hover:bg-[#ebe6da]'
       }`}>{children}</button>
+  )
+}
+// A small circular progress ring (0–1) — used for the Diet tile's protein fill,
+// which never flips to a binary "done", just fills as the day goes.
+function ProgressRing({ value }) {
+  const r = 7, c = 2 * Math.PI * r, pct = Math.max(0, Math.min(1, value || 0))
+  return (
+    <span className="mx-auto mb-1.5 block">
+      <svg width="18" height="18" viewBox="0 0 18 18" className="-rotate-90">
+        <circle cx="9" cy="9" r={r} fill="none" stroke="#e0d9c9" strokeWidth="2.5" />
+        <circle cx="9" cy="9" r={r} fill="none" stroke="#3d4a32" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
+      </svg>
+    </span>
   )
 }
 function RoundBtn({ onClick, children }) {
