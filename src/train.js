@@ -438,14 +438,15 @@ export const MAIN_LIFTS = ['bench_press', 'squat', 'rdl', 'shoulder_press', 'bar
 const epley = (w, r) => (w || 0) * (1 + (r || 0) / 30)
 
 // For each main lift: the best set ever logged (by e1RM), the first logged set,
-// the date of the PR, session count, and the strength gained since the start.
-// Lifts with no history are still returned (best: null) so the section is complete.
+// the date of the PR, session count, the heaviest weight ever loaded (for plate
+// milestones), and the strength gained since the start. Lifts with no history are
+// still returned (best: null) so the section is complete.
 export function bestLifts(state) {
   const days = state.days || {}
   const dates = Object.keys(days).sort() // ascending → first seen is earliest
   return MAIN_LIFTS.map((id) => {
     const meta = EXERCISES[id]
-    let best = null, first = null, sessions = 0
+    let best = null, first = null, sessions = 0, topWeight = 0
     for (const date of dates) {
       const ex = days[date].workout?.session?.exercises?.find((e) => e.id === id)
       const sets = (ex?.sets || []).filter((s) => s.reps > 0 && s.weight > 0)
@@ -453,6 +454,7 @@ export function bestLifts(state) {
       sessions++
       let top = null
       for (const s of sets) {
+        if (s.weight > topWeight) topWeight = s.weight
         const e = epley(s.weight, s.reps)
         if (!top || e > top.e1rm) top = { weight: s.weight, reps: s.reps, e1rm: e, date }
       }
@@ -461,10 +463,39 @@ export function bestLifts(state) {
     }
     return {
       id, name: meta.name, day: meta.day, muscle: meta.muscle,
-      best, first, sessions,
+      best, first, sessions, topWeight,
       trend: best && first ? Math.round(best.e1rm - first.e1rm) : 0,
     }
   })
+}
+
+// ---- strength milestones (measured against top weight loaded) ----------------
+// Barbell lifts use plate landmarks (45 lb plates on a 45 lb bar → 135/225/315/405);
+// the DB press and cable pulldown use round-number weight targets instead.
+export const LIFT_MILESTONES = {
+  bench_press: [95, 135, 185, 225, 275, 315],
+  squat: [95, 135, 185, 225, 315, 405],
+  rdl: [135, 185, 225, 315, 405, 495],
+  barbell_row: [95, 135, 185, 225, 275],
+  shoulder_press: [25, 35, 45, 55, 70, 85],
+  lat_pulldown: [90, 120, 150, 180, 210, 240],
+}
+const BARBELL_LIFTS = new Set(['bench_press', 'squat', 'rdl', 'barbell_row'])
+// "1 plate", "2 plates"… only for barbell lifts where (w−45) is a clean multiple of 90.
+export function plateLabel(id, w) {
+  if (!BARBELL_LIFTS.has(id)) return null
+  const p = (w - 45) / 90
+  return Number.isInteger(p) && p >= 1 ? `${p} plate${p > 1 ? 's' : ''}` : null
+}
+// Progress toward the next milestone, given the heaviest weight loaded so far.
+export function liftProgress(id, topWeight = 0) {
+  const ladder = LIFT_MILESTONES[id] || []
+  const tw = topWeight || 0
+  const passed = ladder.filter((w) => tw >= w)
+  const next = ladder.find((w) => tw < w) ?? null
+  const base = passed.length ? passed[passed.length - 1] : 0
+  const frac = next ? Math.max(0, Math.min(1, (tw - base) / (next - base))) : 1
+  return { ladder, passed, next, base, frac, maxed: next == null }
 }
 
 // Rough wall-clock for a built session, in minutes: warm-up + working sets

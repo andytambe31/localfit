@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
-import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts } from './train'
+import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin } from './adapt'
@@ -1459,6 +1459,7 @@ function LiftsView({ state, onClose }) {
                 ) : (
                   <p className="mt-1.5 text-[13px] text-[#a39c8d]">No sets logged yet</p>
                 )}
+                <LiftMilestones id={l.id} topWeight={l.topWeight || 0} />
               </div>
             ))}
           </div>
@@ -1466,6 +1467,40 @@ function LiftsView({ state, onClose }) {
       </div>
     </div>,
     document.body
+  )
+}
+
+// Plate-milestone progress for one lift: a bar to the next landmark + the full
+// ladder as pips (cleared = filled olive, next = outlined, future = faint).
+function LiftMilestones({ id, topWeight }) {
+  const p = liftProgress(id, topWeight)
+  if (!p.ladder.length) return null
+  const label = (w) => `${w} lb${plateLabel(id, w) ? ` · ${plateLabel(id, w)}` : ''}`
+  return (
+    <div className="mt-3 border-t border-[#efe9dc] pt-3">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-[#8a8474]">
+          {p.maxed ? 'Every milestone cleared.' : topWeight > 0 ? `Next: ${label(p.next)}` : `First target: ${label(p.next)}`}
+        </span>
+        {!p.maxed && topWeight > 0 && <span className="font-medium text-[#3d4a32]">{p.next - topWeight} lb to go</span>}
+      </div>
+      {!p.maxed && (
+        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
+          <div className="h-full rounded-full bg-[#3d4a32] transition-all" style={{ width: `${Math.round(p.frac * 100)}%` }} />
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-1">
+        {p.ladder.map((w) => {
+          const hit = topWeight >= w, isNext = w === p.next
+          return (
+            <span key={w} className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+              hit ? 'bg-[#3d4a32] text-[#f4f1e8]' : isNext ? 'border border-[#9aa581] text-[#5b6745]' : 'border border-[#e0d9c9] text-[#b3ac9c]'}`}>
+              {plateLabel(id, w) || `${w}`}
+            </span>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
