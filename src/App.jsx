@@ -5,6 +5,7 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions } from './train'
 import { trainingPhase } from './periodize'
+import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE } from './supps'
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
@@ -28,6 +29,7 @@ const ensureProfile = (p = {}) => {
   p.waterTarget ??= 8; p.bodyFatTarget ??= 12; p.bodyFatDeadline ??= '2026-12-31'
   p.sleepTargetHours ??= 7; p.bedGoal ??= '23:30'; p.wakeGoal ??= '07:30'
   p.trainStart ??= isoToday() // anchors the periodization macrocycle (Monday-aligned in the engine)
+  p.supps ??= { enabled: [...DEFAULT_SUPPS] } // daily supplement stack, folded into AM/PM routines
   p.skincare ??= {}
   p.skincare.ownedProducts ??= [...DEFAULT_OWNED]
   p.skincare.startedDate ??= isoToday()
@@ -248,6 +250,11 @@ export default function App() {
     const routineKey = slot === 'am' ? 'skincareAM' : 'skincarePM'
     patch({ skincare: { [slot]: log }, routines: { [routineKey]: true } })
     setFlow(null)
+  }
+  // Supplements ride on the AM/PM routine but log to their own bucket so they
+  // never skew the skincare score.
+  function completeSupps(slot, log) {
+    patch({ supps: { [slot]: log } })
   }
   // Guided hair routine finished — log the steps; haircare stays true for scoring.
   function completeHairRoutine(slot, log) {
@@ -588,7 +595,7 @@ export default function App() {
       {flow && (
         <SkincareFlow
           slot={flow} dateIso={today} state={state}
-          onComplete={completeRoutine}
+          onComplete={completeRoutine} onSupps={completeSupps}
           onClose={() => setFlow(null)}
           onManage={() => { setFlow(null); setManageProducts(true) }} />
       )}
@@ -1717,6 +1724,7 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) 
         </div>
         <p className="text-[13px] text-[#8a8474]">By {fmtFull(deadline)} · {daysLeft} days left</p>
         {bfStatus && <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bfStatus}</p>}
+        <p className="mt-2 rounded-xl bg-[#eef0e6] px-3 py-2 text-[12px] leading-snug text-[#5b6745]">{LOOSE_SKIN_NOTE}</p>
         <button onClick={() => setEstimating(true)} className="mt-3 rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-medium text-[#f4f1e8] active:scale-95">
           {latest ? 'Re-estimate body fat' : 'Estimate body fat'}
         </button>

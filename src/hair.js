@@ -60,7 +60,8 @@ export function hairPlanForDay(dateIso, state) {
   am.push(step('peptide_am', 'Peptide scalp serum', 'A few drops of the Multi-Peptide serum to the thinning areas; work it in with the fingertips.'))
   am.push(step('minox_am', 'Minoxidil 5%', 'Half a cap of foam (or 1 mL solution) to the thinning crown + hairline, on the dry scalp. Spread evenly, wash your hands after.', { tag: 'Daily' }))
   am.push(step('massage_am', 'Scalp massage', 'Three minutes of firm circular massage — drives blood flow and helps the minoxidil absorb.', { hold: 180 }))
-  am.push(step('supplement', 'Hair supplement', 'Take your hair supplement with breakfast — biotin, saw palmetto, collagen.'))
+  // Hair supplement now lives in the consolidated supplements flow (supps.js),
+  // folded into the morning routine — so it isn't prompted twice.
 
   // ---- PM ----
   const pm = []

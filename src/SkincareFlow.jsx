@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { planForDay } from './skincare'
+import { suppPlanForDay } from './supps'
 
 /* ---------- guided skincare flow: full-screen takeover, one step per card ----------
  * Story-style: tap the left/right edges to move between steps; Done/Skip log the
@@ -7,8 +8,12 @@ import { planForDay } from './skincare'
  *   slot: 'am' | 'pm'; dateIso: today's ISO; state: full app state (read-only)
  *   onComplete(slot, log) · onClose() · onManage()
  */
-export default function SkincareFlow({ slot, dateIso, state, onComplete, onClose, onManage }) {
-  const steps = useMemo(() => planForDay(dateIso, state)[slot], [dateIso, state, slot])
+export default function SkincareFlow({ slot, dateIso, state, onComplete, onSupps, onClose, onManage }) {
+  // Skincare steps + supplement steps folded onto the same AM/PM routine. Supps
+  // are logged separately (onSupps) so they never skew the skincare score.
+  const suppSteps = useMemo(() => suppPlanForDay(dateIso, state)[slot], [dateIso, state, slot])
+  const suppIds = useMemo(() => new Set(suppSteps.map((s) => s.id)), [suppSteps])
+  const steps = useMemo(() => [...planForDay(dateIso, state)[slot], ...suppSteps], [dateIso, state, slot, suppSteps])
   const [i, setI] = useState(0)
   const [marks, setMarks] = useState({}) // { [stepId]: 'done' | 'skipped' }
   const [anim, setAnim] = useState('in') // how the current card arrived: 'in'|'done'|'skip'|'back'
@@ -21,7 +26,12 @@ export default function SkincareFlow({ slot, dateIso, state, onComplete, onClose
   const requestFinish = () => {
     if (closing) return
     setClosing('finish')
-    setTimeout(() => onComplete(slot, { steps: marks, ts: Date.now() }), 240)
+    setTimeout(() => {
+      const skinMarks = {}, suppMarks = {}
+      for (const [id, v] of Object.entries(marks)) (suppIds.has(id) ? suppMarks : skinMarks)[id] = v
+      onComplete(slot, { steps: skinMarks, ts: Date.now() })
+      if (suppSteps.length) onSupps?.(slot, { steps: suppMarks, ts: Date.now() })
+    }, 240)
   }
 
   const cardAnim = anim === 'skip' ? 'sk-skip' : anim === 'back' ? 'sk-back' : 'sk-advance'
@@ -136,6 +146,7 @@ function ProgressBar({ steps, i, title, total }) {
 
 // Olive tag text for a step, or '' for plain daily steps.
 function stepTag(step) {
+  if (step.tag) return step.tag
   if (step.overdue) return 'Overdue'
   if (step.id === 'bha') return 'Exfoliation night'
   if (step.id === 'retinoid') return 'Retinoid night'
