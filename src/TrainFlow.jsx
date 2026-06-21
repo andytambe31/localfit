@@ -212,6 +212,7 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
       <h2 className="mt-2 font-display text-[28px] font-semibold leading-[1.12] text-[#f4f1e8]">{ex.name}</h2>
       <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{t.note}</p>
       {ex.cue && <p className="mt-3 rounded-xl border border-[#3a4230] bg-[#272d20] px-3 py-2 text-[13px] leading-snug text-[#cfccba]"><span className="font-semibold text-[#9aa581]">Cue · </span>{ex.cue}</p>}
+      {ex.db && <p className="mt-2 rounded-xl border border-[#5a4f2c] bg-[#322d1d] px-3 py-2 text-[13px] leading-snug text-[#e3d9b4]"><span className="font-semibold">Log one dumbbell · </span>enter the weight of a single dumbbell, not both added together.</p>}
 
       <div className="mt-4 space-y-2">
         {ex.sets.map((set, i) => (

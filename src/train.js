@@ -25,8 +25,8 @@ import { trainingPhase } from './periodize'
 export const EXERCISES = {
   // --- PUSH ---
   bench_press:        { name: 'Barbell Bench Press',        day: 'push', muscle: 'chest',     role: 'compound',   sets: 4, repLow: 6,  repHigh: 10, inc: 5 },
-  incline_db_press:   { name: 'Incline Dumbbell Press',     day: 'push', muscle: 'chest',     role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5 },
-  shoulder_press:     { name: 'Seated DB Shoulder Press',   day: 'push', muscle: 'shoulders', role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5 },
+  incline_db_press:   { name: 'Incline Dumbbell Press',     day: 'push', muscle: 'chest',     role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
+  shoulder_press:     { name: 'Seated DB Shoulder Press',   day: 'push', muscle: 'shoulders', role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
   lateral_raise:      { name: 'Cable Lateral Raise',        day: 'push', muscle: 'shoulders', role: 'isolation',  sets: 3, repLow: 12, repHigh: 18, inc: 5,  emph: ['side-delts'] },
   cable_fly:          { name: 'Cable Chest Fly',            day: 'push', muscle: 'chest',     role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5 },
   triceps_pushdown:   { name: 'Triceps Rope Pushdown',      day: 'push', muscle: 'triceps',   role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5 },
@@ -38,9 +38,9 @@ export const EXERCISES = {
   seated_row:         { name: 'Seated Cable Row',           day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 10, repHigh: 14, inc: 5,  emph: ['lats'] },
   rear_delt_fly:      { name: 'Reverse Pec-Deck Fly',       day: 'pull', muscle: 'shoulders', role: 'isolation',  sets: 3, repLow: 12, repHigh: 18, inc: 5,  emph: ['rear-delts'] },
   face_pull:          { name: 'Cable Face Pull',            day: 'pull', muscle: 'shoulders', role: 'isolation',  sets: 3, repLow: 15, repHigh: 20, inc: 5,  emph: ['rear-delts'] },
-  shrug:              { name: 'Dumbbell Shrug',             day: 'pull', muscle: 'traps',     role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['neck'] },
-  db_curl:            { name: 'Incline Dumbbell Curl',      day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 3, repLow: 8,  repHigh: 12, inc: 5 },
-  hammer_curl:        { name: 'Hammer Curl',                day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 3, repLow: 10, repHigh: 14, inc: 5,  emph: ['forearms'] },
+  shrug:              { name: 'Dumbbell Shrug',             day: 'pull', muscle: 'traps',     role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['neck'], db: true },
+  db_curl:            { name: 'Incline Dumbbell Curl',      day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
+  hammer_curl:        { name: 'Hammer Curl',                day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 3, repLow: 10, repHigh: 14, inc: 5,  emph: ['forearms'], db: true },
   wrist_curl:         { name: 'Seated Wrist Curl',          day: 'pull', muscle: 'forearms',  role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  emph: ['forearms'] },
   back_ext:           { name: 'Back Extension',             day: 'pull', muscle: 'lower-back',role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['lower-back'] },
 
@@ -55,6 +55,9 @@ export const EXERCISES = {
   calf_raise:         { name: 'Standing Calf Raise',        day: 'legs', muscle: 'calves',    role: 'isolation',  sets: 4, repLow: 10, repHigh: 15, inc: 10, emph: ['calves'] },
   tib_raise:          { name: 'Tibialis Raise',             day: 'legs', muscle: 'tibialis',  role: 'isolation',  sets: 3, repLow: 15, repHigh: 20, inc: 5,  emph: ['tibialis'] },
 }
+
+// Two-dumbbell lifts: log ONE dumbbell's weight (the convention), not the pair.
+export const DB_EXERCISES = new Set(['incline_db_press', 'shoulder_press', 'db_curl', 'hammer_curl', 'shrug'])
 
 // Per day-type: the spine of the session. `core` always runs; `emphasisPool`
 // holds extra isolation work pulled in when a lagging part is emphasized.
@@ -350,7 +353,7 @@ export function buildSession(state, todayIso, opts = {}) {
     const meta = EXERCISES[id]
     const target = targetFor(state, id, todayIso, phase)
     return {
-      id, name: meta.name, muscle: meta.muscle, role: meta.role,
+      id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db,
       // rep range shown reflects the phase (heavy week => low reps)
       repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
       emphasized: (meta.emph || []).includes(emphasis),
@@ -462,7 +465,7 @@ export function bestLifts(state) {
       if (!best || top.e1rm > best.e1rm) best = top
     }
     return {
-      id, name: meta.name, day: meta.day, muscle: meta.muscle,
+      id, name: meta.name, day: meta.day, muscle: meta.muscle, db: !!meta.db,
       best, first, sessions, topWeight,
       trend: best && first ? Math.round(best.e1rm - first.e1rm) : 0,
     }

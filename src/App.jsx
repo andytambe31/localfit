@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
-import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel } from './train'
+import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin } from './adapt'
@@ -128,7 +128,8 @@ export default function App() {
     try {
       const file = new File([json], name, { type: 'application/json' })
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'localfit backup' })
+        // Files only — passing title/text makes iOS save a stray .txt alongside the JSON.
+        await navigator.share({ files: [file] })
       } else {
         const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
         const a = document.createElement('a'); a.href = url; a.download = name
@@ -164,6 +165,17 @@ export default function App() {
           if (e.sugar == null) e.sugar = p && p.sugar ? Math.round(p.sugar * q * 10) / 10 : 0
           if (e.fiber == null) e.fiber = p && p.fiber ? Math.round(p.fiber * q * 10) / 10 : 0
         }
+      }
+      // One-time migration: dumbbell-lift weights were logged as the summed pair;
+      // halve them to the per-dumbbell convention. Guarded so it runs exactly once.
+      if (!local.profile.dbHalveV1) {
+        for (const d of Object.values(local.days || {})) {
+          for (const ex of d.workout?.session?.exercises || []) {
+            if (!DB_EXERCISES.has(ex.id)) continue
+            for (const s of ex.sets || []) if (s.weight > 0) s.weight = Math.round((s.weight / 2) * 2) / 2
+          }
+        }
+        local.profile.dbHalveV1 = true
       }
       saveLocal(local)
       setState(local)
@@ -1440,7 +1452,7 @@ function LiftsView({ state, onClose }) {
             {lifts.map((l) => (
               <div key={l.id} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
                 <div className="flex items-baseline justify-between">
-                  <p className="font-display text-[17px] font-semibold text-[#23211c]">{l.name}</p>
+                  <p className="font-display text-[17px] font-semibold text-[#23211c]">{l.name}{l.db && <span className="ml-1.5 text-[11px] font-normal text-[#a39c8d]">· per dumbbell</span>}</p>
                   <span className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{dayLabel[l.day] || l.day}</span>
                 </div>
                 {l.best ? (
