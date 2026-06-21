@@ -469,7 +469,7 @@ export default function App() {
   const areas = [
     { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
     { id: 'movement', label: 'Train', done: moveDone, progress: moveProgress, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
-    { id: 'diet', label: 'Diet', progress: Math.min(1, dayTotals(day).protein / (profile.proteinTarget || PROTEIN_TARGET_DEFAULT)) },
+    { id: 'diet', label: 'Diet', done: !!day.dietClosed, progress: Math.min(1, dayTotals(day).protein / (profile.proteinTarget || PROTEIN_TARGET_DEFAULT)) },
     { id: 'water', label: 'Water', done: (day.water || 0) >= waterTarget, progress: Math.min(1, (day.water || 0) / waterTarget) },
     { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
   ]
@@ -576,7 +576,7 @@ export default function App() {
             onSteps={(v) => patch({ steps: v })}
             onStartTrain={() => setTraining(true)} train={trainCall}
             onStartHair={(slot) => setHairFlow(slot)}
-            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood}
+            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
             onWater={setWater}
             onWeight={saveWeight} />
         ) : (
@@ -645,7 +645,7 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -696,7 +696,7 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
 
       {focus === 'diet' && (
         <DietCard state={state} dateIso={dateIso} day={day}
-          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} />
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} onToggleDone={onToggleDietDone} />
       )}
 
       {focus === 'movement' && (
@@ -819,7 +819,7 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
-function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove }) {
+function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove, onToggleDone }) {
   const [adding, setAdding] = useState(false)
   const [builder, setBuilder] = useState(null) // { initial, editId } → ComponentBuilder
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
@@ -922,6 +922,23 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
           </span>
         </button>
+      )}
+
+      {/* done-for-the-day: stops the food nudges + marks the diet tile complete */}
+      {onToggleDone && (
+        day.dietClosed ? (
+          <div className="flex items-center justify-between rounded-2xl bg-[#eef0e6] px-4 py-2.5">
+            <span className="flex items-center gap-2 text-[13px] font-medium text-[#3d4a32]">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              Done eating for today
+            </span>
+            <button onClick={onToggleDone} className="text-[12px] font-medium text-[#8a8474]">Reopen</button>
+          </div>
+        ) : (
+          <button onClick={onToggleDone} className="w-full rounded-2xl border border-[#d8d1c2] bg-[#fbf9f3] px-4 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
+            Mark done for the day
+          </button>
+        )
       )}
 
       {qtyItem && (
@@ -1334,25 +1351,7 @@ function SuppsModal({ profile, onClose, onSave }) {
     setName(''); setSlot('am'); setWithFood(true); setAdding(false)
   }
 
-  const Row = ({ s }) => {
-    const on = enabled.has(s.id)
-    return (
-      <div className="flex items-center justify-between gap-3 py-2.5">
-        <div className="min-w-0">
-          <p className="text-[14px] font-semibold text-[#23211c]">{s.name}</p>
-          <p className="text-[12px] text-[#8a8474]">{s.slot === 'pm' ? 'Evening' : 'Morning'}{s.withFood ? ' · with food' : ''}{s.custom ? ' · custom' : ''}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {s.custom && <button onClick={() => removeCustom(s.id)} aria-label="Remove" className="text-[18px] leading-none text-[#b3ac9c]">×</button>}
-          <button onClick={() => toggle(s.id)} className={`rounded-full px-3 py-1.5 text-[12px] font-medium ${on ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#d8d1c2] bg-white text-[#4a463c]'}`}>
-            {on ? 'In stack' : 'Add'}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-[#f4f1ea] p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between">
@@ -1365,12 +1364,12 @@ function SuppsModal({ profile, onClose, onSave }) {
 
         <p className="mt-5 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Morning</p>
         <div className="divide-y divide-[#ece6da]">
-          {list.filter((s) => s.slot !== 'pm').map((s) => <Row key={s.id} s={s} />)}
+          {list.filter((s) => s.slot !== 'pm').map((s) => <SuppRow key={s.id} s={s} on={enabled.has(s.id)} onToggle={toggle} onRemove={removeCustom} />)}
         </div>
         <p className="mt-5 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Evening</p>
         <div className="divide-y divide-[#ece6da]">
           {list.filter((s) => s.slot === 'pm').length
-            ? list.filter((s) => s.slot === 'pm').map((s) => <Row key={s.id} s={s} />)
+            ? list.filter((s) => s.slot === 'pm').map((s) => <SuppRow key={s.id} s={s} on={enabled.has(s.id)} onToggle={toggle} onRemove={removeCustom} />)
             : <p className="py-2.5 text-[13px] text-[#8a8474]">Nothing in the evening yet.</p>}
         </div>
 
@@ -1396,6 +1395,24 @@ function SuppsModal({ profile, onClose, onSave }) {
           <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
           <button onClick={() => onSave({ enabled: [...enabled], custom })} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
         </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+function SuppRow({ s, on, onToggle, onRemove }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-[14px] font-semibold text-[#23211c]">{s.name}</p>
+        <p className="text-[12px] text-[#8a8474]">{s.slot === 'pm' ? 'Evening' : 'Morning'}{s.withFood ? ' · with food' : ''}{s.custom ? ' · custom' : ''}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {s.custom && <button onClick={() => onRemove(s.id)} aria-label="Remove" className="text-[18px] leading-none text-[#b3ac9c]">×</button>}
+        <button onClick={() => onToggle(s.id)} className={`rounded-full px-3 py-1.5 text-[12px] font-medium ${on ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#d8d1c2] bg-white text-[#4a463c]'}`}>
+          {on ? 'In stack' : 'Add'}
+        </button>
       </div>
     </div>
   )
