@@ -1503,7 +1503,7 @@ function DiaryView({ state, profile, today, onClose }) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
         </button>
         <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Diary</h1>
-        <p className="mt-1 text-[13px] text-[#8a8474]">How complete each day was across everything you track.{avg != null ? ` Averaging ${avg}% over ${scored.length} days.` : ''}</p>
+        <p className="mt-1 text-[13px] text-[#8a8474]">How complete each day was — diet, movement and sleep count most.{avg != null ? ` Averaging ${avg}% over ${scored.length} days.` : ''}</p>
 
         {scored.length === 0 ? (
           <p className="mt-6 text-[14px] leading-relaxed text-[#8a8474]">No days logged yet. As you complete routines, meals, steps and lifts, each day fills in here.</p>
@@ -1889,15 +1889,22 @@ function dietPillar(state, today, proteinTarget) {
 function diaryScore(state, iso, profile) {
   const d = state.days?.[iso]
   if (!dayLogged(d)) return null
-  const parts = [skinQ(d), hairQ(d), moveQ(d, profile)]
-  parts.push(d.food?.length ? (foodScore(state, iso, profile.proteinTarget || PROTEIN_TARGET_DEFAULT) ?? 0) / 10 : 0)
-  parts.push(Math.min(1, (d.water || 0) / (profile.waterTarget || 8)))
+  // Diet, movement and sleep are the body-composition drivers → weighted 3×;
+  // skin, hair, water and supplements are supporting habits → weighted 1×.
+  const parts = [
+    { v: skinQ(d), w: 1 },
+    { v: hairQ(d), w: 1 },
+    { v: moveQ(d, profile), w: 3 },
+    { v: d.food?.length ? (foodScore(state, iso, profile.proteinTarget || PROTEIN_TARGET_DEFAULT) ?? 0) / 10 : 0, w: 3 },
+    { v: Math.min(1, (d.water || 0) / (profile.waterTarget || 8)), w: 1 },
+  ]
   const due = suppsDue(iso, state)
   const supTotal = due.amCount + due.pmCount
-  if (supTotal > 0) parts.push((due.amTaken + due.pmTaken) / supTotal)
+  if (supTotal > 0) parts.push({ v: (due.amTaken + due.pmTaken) / supTotal, w: 1 })
   const mins = d.sleep?.minutes
-  if (mins) parts.push(Math.min(1, mins / ((profile.sleepTargetHours || 7) * 60)))
-  const avg = parts.reduce((a, b) => a + b, 0) / parts.length
+  if (mins) parts.push({ v: Math.min(1, mins / ((profile.sleepTargetHours || 7) * 60)), w: 3 })
+  const wsum = parts.reduce((a, p) => a + p.w, 0)
+  const avg = parts.reduce((a, p) => a + p.v * p.w, 0) / wsum
   return Math.max(0, Math.min(1, avg))
 }
 
