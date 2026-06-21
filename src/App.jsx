@@ -5,7 +5,7 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions } from './train'
 import { trainingPhase } from './periodize'
-import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE } from './supps'
+import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
@@ -82,6 +82,7 @@ export default function App() {
   const [hairFlow, setHairFlow] = useState(null) // 'am' | 'pm' | null — guided hair takeover
   const [training, setTraining] = useState(false) // guided gym session takeover
   const [manageProducts, setManageProducts] = useState(false)
+  const [manageSupps, setManageSupps] = useState(false)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
 
@@ -94,7 +95,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -586,7 +587,7 @@ export default function App() {
         )}
       </div>
 
-      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} />
+      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} onManageSupps={() => setManageSupps(true)} />
 
       <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
@@ -613,6 +614,10 @@ export default function App() {
       )}
       {backupOpen && (
         <BackupSheet lastBackup={lastBackup} pending={pending} onExport={exportData} onImport={importData} onClose={() => setBackupOpen(false)} />
+      )}
+      {manageSupps && (
+        <SuppsModal profile={profile} onClose={() => setManageSupps(false)}
+          onSave={({ enabled, custom }) => { updateProfile({ supps: { enabled, custom } }); setManageSupps(false) }} />
       )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
@@ -1306,6 +1311,96 @@ function ProductsModal({ profile, onClose, onSave }) {
   )
 }
 
+// Manage the daily supplement stack: toggle which are in the routine, add custom
+// ones, set each to morning/evening + with-food. Saves to profile.supps.
+function SuppsModal({ profile, onClose, onSave }) {
+  const [enabled, setEnabled] = useState(() => new Set(profile.supps?.enabled || DEFAULT_SUPPS))
+  const [custom, setCustom] = useState(() => [...(profile.supps?.custom || [])])
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [slot, setSlot] = useState('am')
+  const [withFood, setWithFood] = useState(true)
+
+  const list = [...SUPPLEMENTS, ...custom]
+  const toggle = (id) => setEnabled((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const removeCustom = (id) => { setCustom((c) => c.filter((x) => x.id !== id)); setEnabled((s) => { const n = new Set(s); n.delete(id); return n }) }
+  const addCustom = () => {
+    const nm = name.trim()
+    if (!nm) return
+    const id = 'supp_' + nm.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
+    const supp = { id, name: nm, slot, withFood, custom: true,
+      instruction: `${nm} — ${slot === 'am' ? 'morning' : 'evening'}${withFood ? ', with food' : ''}.` }
+    setCustom((c) => [...c, supp]); setEnabled((s) => new Set(s).add(id))
+    setName(''); setSlot('am'); setWithFood(true); setAdding(false)
+  }
+
+  const Row = ({ s }) => {
+    const on = enabled.has(s.id)
+    return (
+      <div className="flex items-center justify-between gap-3 py-2.5">
+        <div className="min-w-0">
+          <p className="text-[14px] font-semibold text-[#23211c]">{s.name}</p>
+          <p className="text-[12px] text-[#8a8474]">{s.slot === 'pm' ? 'Evening' : 'Morning'}{s.withFood ? ' · with food' : ''}{s.custom ? ' · custom' : ''}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {s.custom && <button onClick={() => removeCustom(s.id)} aria-label="Remove" className="text-[18px] leading-none text-[#b3ac9c]">×</button>}
+          <button onClick={() => toggle(s.id)} className={`rounded-full px-3 py-1.5 text-[12px] font-medium ${on ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#d8d1c2] bg-white text-[#4a463c]'}`}>
+            {on ? 'In stack' : 'Add'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-[#f4f1ea] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-2xl font-semibold text-[#23211c]">Your supplements</h3>
+            <p className="mt-1 text-[13px] text-[#8a8474]">What's in your stack rides on your morning &amp; evening routine.</p>
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
+        </div>
+
+        <p className="mt-5 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Morning</p>
+        <div className="divide-y divide-[#ece6da]">
+          {list.filter((s) => s.slot !== 'pm').map((s) => <Row key={s.id} s={s} />)}
+        </div>
+        <p className="mt-5 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Evening</p>
+        <div className="divide-y divide-[#ece6da]">
+          {list.filter((s) => s.slot === 'pm').length
+            ? list.filter((s) => s.slot === 'pm').map((s) => <Row key={s.id} s={s} />)
+            : <p className="py-2.5 text-[13px] text-[#8a8474]">Nothing in the evening yet.</p>}
+        </div>
+
+        {adding ? (
+          <div className="mt-4 space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Supplement name"
+              className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Chip small on={slot === 'am'} onClick={() => setSlot('am')}>Morning</Chip>
+              <Chip small on={slot === 'pm'} onClick={() => setSlot('pm')}>Evening</Chip>
+              <Chip small on={withFood} onClick={() => setWithFood((v) => !v)}>With food</Chip>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button disabled={!name.trim()} onClick={addCustom} className="rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40">Add</button>
+              <button onClick={() => { setAdding(false); setName('') }} className="px-2 py-1.5 text-[13px] text-[#8a8474]">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAdding(true)} className="mt-4 text-[13px] font-medium text-[#3d4a32]">+ Add a supplement</button>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
+          <button onClick={() => onSave({ enabled: [...enabled], custom })} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- coach: authoritative, time + state aware ---------- */
 function dietDone(hour, meals) {
   const need = hour < 11 ? ['breakfast'] : hour < 16 ? ['breakfast', 'lunch'] : ['breakfast', 'lunch', 'dinner']
@@ -1623,7 +1718,7 @@ function dietPillar(state, today, proteinTarget) {
   return cnt ? Math.round(sum / cnt) : null
 }
 
-function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) {
+function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, onManageSupps }) {
   const [estimating, setEstimating] = useState(false)
   const [editingSleep, setEditingSleep] = useState(false)
   const days = state.days || {}
@@ -1725,6 +1820,13 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep }) 
         <p className="text-[13px] text-[#8a8474]">By {fmtFull(deadline)} · {daysLeft} days left</p>
         {bfStatus && <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bfStatus}</p>}
         <p className="mt-2 rounded-xl bg-[#eef0e6] px-3 py-2 text-[12px] leading-snug text-[#5b6745]">{LOOSE_SKIN_NOTE}</p>
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-[12px] text-[#8a8474]">
+            {(() => { const due = suppsDue(today, state); const am = due.amCount - due.amTaken, pm = due.pmCount - due.pmTaken; const left = am + pm
+              return left > 0 ? `${left} supplement${left > 1 ? 's' : ''} left today` : 'Supplements taken today' })()}
+          </span>
+          {onManageSupps && <button onClick={onManageSupps} className="text-[12px] font-medium text-[#3d4a32]">Manage supplements →</button>}
+        </div>
         <button onClick={() => setEstimating(true)} className="mt-3 rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-medium text-[#f4f1e8] active:scale-95">
           {latest ? 'Re-estimate body fat' : 'Estimate body fat'}
         </button>

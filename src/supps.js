@@ -37,11 +37,17 @@ const toStep = (s) => ({
   tag: 'Supplement', kind: 'supplement', withFood: !!s.withFood, slot: s.slot,
 })
 
+// Seeded stack plus any custom supplements the user added in the manage screen.
+export function allSupps(state) {
+  const custom = state?.profile?.supps?.custom
+  return [...SUPPLEMENTS, ...(Array.isArray(custom) ? custom : [])]
+}
+
 // Enabled supplements for this profile (defaults to the full seeded stack).
 function enabledSupps(state) {
   const en = state?.profile?.supps?.enabled
   const set = new Set(Array.isArray(en) ? en : DEFAULT_SUPPS)
-  return SUPPLEMENTS.filter((s) => set.has(s.id))
+  return allSupps(state).filter((s) => set.has(s.id))
 }
 
 // Routine-style supplement cards per slot, appended to the AM/PM skincare flow.
