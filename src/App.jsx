@@ -84,6 +84,7 @@ export default function App() {
   const [manageProducts, setManageProducts] = useState(false)
   const [manageSupps, setManageSupps] = useState(false)
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
+  const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
 
@@ -96,7 +97,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -567,14 +568,18 @@ export default function App() {
         </div>
       </div>
 
-      <button onClick={() => setLiftsOpen(true)}
-        className="mt-3 flex w-full items-center justify-between rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-2.5 text-left active:scale-[0.99]">
-        <span className="flex items-center gap-2 text-[13px] font-medium text-[#4a463c]">
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button onClick={() => setDiaryOpen(true)}
+          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+          Diary
+        </button>
+        <button onClick={() => setLiftsOpen(true)}
+          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v3" /><path d="M3 10v4M21 10v4" /></svg>
-          Your lifts · personal records
-        </span>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-      </button>
+          Your lifts
+        </button>
+      </div>
 
       <div key={focus || 'none'} className="focus-swap mt-5">
         {focus ? (
@@ -638,6 +643,7 @@ export default function App() {
           onRemove={removeFood} onReset={resetFood} onMove={moveFood} onClose={() => setFoodReview(false)} />
       )}
       {liftsOpen && <LiftsView state={state} onClose={() => setLiftsOpen(false)} />}
+      {diaryOpen && <DiaryView state={state} profile={profile} today={today} onClose={() => setDiaryOpen(false)} />}
     </div>
     </>
   )
@@ -1463,6 +1469,85 @@ function LiftsView({ state, onClose }) {
   )
 }
 
+// Diary: a continuous, scroll-back heatmap of how successful each day was. One
+// cell per day, shaded pale→deep olive by diaryScore; weeks stacked newest-first.
+const DIARY_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const diaryDow = (iso) => (new Date(iso + 'T00:00:00').getDay() + 6) % 7 // Mon=0..Sun=6
+const diaryShade = (s) => s == null ? 'bg-[#eceadd]'
+  : s >= 0.85 ? 'bg-[#3d4a32]' : s >= 0.65 ? 'bg-[#6b7a4c]' : s >= 0.45 ? 'bg-[#94a36f]' : s >= 0.25 ? 'bg-[#c2c8a4]' : 'bg-[#e3e1d0]'
+
+function DiaryView({ state, profile, today, onClose }) {
+  const logged = Object.keys(state.days || {}).filter((k) => dayLogged(state.days[k])).sort()
+  const firstIso = logged[0] || shiftIso(today, -27)
+  const startMon = shiftIso(firstIso, -diaryDow(firstIso)) // back to that week's Monday
+
+  // Every day from startMon → today, then pad the last week out to Sunday.
+  const days = []
+  for (let cur = startMon; cur <= today; cur = shiftIso(cur, 1)) {
+    days.push({ iso: cur, score: diaryScore(state, cur, profile), today: cur === today })
+  }
+  while (days.length % 7 !== 0) days.push({ iso: shiftIso(startMon, days.length), future: true })
+  const weeks = []
+  for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7))
+  weeks.reverse() // newest week on top
+
+  const monthOf = (iso) => { const [y, m] = iso.split('-'); return DIARY_MON[+m - 1] + (y !== today.slice(0, 4) ? ` '${y.slice(2)}` : '') }
+  const scored = days.filter((d) => d.score != null)
+  const avg = scored.length ? Math.round((scored.reduce((a, d) => a + d.score, 0) / scored.length) * 100) : null
+
+  let lastMonth = null
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-6">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Diary</h1>
+        <p className="mt-1 text-[13px] text-[#8a8474]">How complete each day was across everything you track.{avg != null ? ` Averaging ${avg}% over ${scored.length} days.` : ''}</p>
+
+        {scored.length === 0 ? (
+          <p className="mt-6 text-[14px] leading-relaxed text-[#8a8474]">No days logged yet. As you complete routines, meals, steps and lifts, each day fills in here.</p>
+        ) : (
+          <>
+            {/* column headers */}
+            <div className="mt-5 flex items-center gap-1.5">
+              <span className="w-7 shrink-0" />
+              <div className="grid flex-1 grid-cols-7 gap-1">
+                {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i} className="text-center text-[10px] text-[#b3ac9c]">{d}</span>)}
+              </div>
+            </div>
+            <div className="mt-1 space-y-1">
+              {weeks.map((wk) => {
+                const mlabel = monthOf(wk[0].iso)
+                const show = mlabel !== lastMonth ? (lastMonth = mlabel) : ''
+                return (
+                  <div key={wk[0].iso} className="flex items-center gap-1.5">
+                    <span className="w-7 shrink-0 text-right text-[10px] leading-none text-[#a39c8d]">{show}</span>
+                    <div className="grid flex-1 grid-cols-7 gap-1">
+                      {wk.map((c) => (
+                        <div key={c.iso}
+                          title={c.future ? '' : `${c.iso}${c.score != null ? ` · ${Math.round(c.score * 100)}%` : ' · no data'}`}
+                          className={`aspect-square rounded-[4px] ${c.future ? 'opacity-0' : diaryShade(c.score)} ${c.today ? 'ring-2 ring-[#23211c] ring-offset-1 ring-offset-[#f1ede4]' : ''}`} />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {/* legend */}
+            <div className="mt-5 flex items-center justify-end gap-1.5 text-[11px] text-[#a39c8d]">
+              <span>Less</span>
+              {['bg-[#e3e1d0]', 'bg-[#c2c8a4]', 'bg-[#94a36f]', 'bg-[#6b7a4c]', 'bg-[#3d4a32]'].map((c) => <span key={c} className={`h-3 w-3 rounded-[3px] ${c}`} />)}
+              <span>More</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function SuppRow({ s, on, onToggle, onRemove }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2.5">
@@ -1795,6 +1880,25 @@ function dietPillar(state, today, proteinTarget) {
     if (s != null) { sum += s; cnt++ }
   }
   return cnt ? Math.round(sum / cnt) : null
+}
+
+// A single day's overall "success" 0..1 across everything tracked — skin, hair,
+// movement (steps/lifts), diet, water, supplements, and sleep when recorded.
+// Returns null when the day has no activity at all, so the diary shows a blank
+// cell (no data) rather than a zero (tracked but nothing done).
+function diaryScore(state, iso, profile) {
+  const d = state.days?.[iso]
+  if (!dayLogged(d)) return null
+  const parts = [skinQ(d), hairQ(d), moveQ(d, profile)]
+  parts.push(d.food?.length ? (foodScore(state, iso, profile.proteinTarget || PROTEIN_TARGET_DEFAULT) ?? 0) / 10 : 0)
+  parts.push(Math.min(1, (d.water || 0) / (profile.waterTarget || 8)))
+  const due = suppsDue(iso, state)
+  const supTotal = due.amCount + due.pmCount
+  if (supTotal > 0) parts.push((due.amTaken + due.pmTaken) / supTotal)
+  const mins = d.sleep?.minutes
+  if (mins) parts.push(Math.min(1, mins / ((profile.sleepTargetHours || 7) * 60)))
+  const avg = parts.reduce((a, b) => a + b, 0) / parts.length
+  return Math.max(0, Math.min(1, avg))
 }
 
 function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, onManageSupps }) {
