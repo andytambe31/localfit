@@ -83,6 +83,7 @@ export default function App() {
   const [training, setTraining] = useState(false) // guided gym session takeover
   const [manageProducts, setManageProducts] = useState(false)
   const [manageSupps, setManageSupps] = useState(false)
+  const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
 
@@ -115,7 +116,6 @@ export default function App() {
   const [lastBackup, setLastBackup] = useState(() => Number(localStorage.getItem('localfit-last-backup')) || null)
   const [backupOpen, setBackupOpen] = useState(false)
   const [foodReview, setFoodReview] = useState(false) // dashboard shortcut → today's food
-  const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view
   const scheduleSync = () => {} // sync retired; kept as a no-op so write paths stay clean
 
   // Export the whole local state as a JSON file → the iOS share sheet ("Save to
