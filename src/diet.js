@@ -78,6 +78,16 @@ export const DEFAULT_PANTRY = [
   { id: 'dark_chocolate_toffee', name: 'Dark Chocolate Toffee', loc: 'both',   category: 'dessert',  portion: '3 pieces', kcal: 140, protein: 1.5, carbs: 15, fat: 9,  fiber: 1, sugar: 13 },
   { id: 'diet_coke',             name: 'Diet Coke',             loc: 'both',   category: 'beverage', portion: '1 can',    kcal: 0,   protein: 0,   carbs: 0,  fat: 0,  fiber: 0, sugar: 0 },
   { id: 'coke_zero',             name: 'Coke Zero',             loc: 'both',   category: 'beverage', portion: '1 can',    kcal: 0,   protein: 0,   carbs: 0,  fat: 0,  fiber: 0, sugar: 0 },
+  // Condiments & add-ins — small loggable extras and recipe ingredients.
+  { id: 'sugar',                 name: 'Sugar',                 loc: 'both',   category: 'condiment', portion: '1 tsp',  kcal: 16,  protein: 0,   carbs: 4.2, fat: 0,    fiber: 0, sugar: 4.2 },
+  { id: 'honey',                 name: 'Honey / Maple',         loc: 'both',   category: 'condiment', portion: '1 tsp',  kcal: 21,  protein: 0,   carbs: 6,   fat: 0,    fiber: 0, sugar: 6 },
+  { id: 'peanut_butter',         name: 'Peanut Butter',         loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 95,  protein: 4,   carbs: 3,   fat: 8,    fiber: 1, sugar: 1 },
+  { id: 'olive_oil',             name: 'Olive Oil',             loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 119, protein: 0,   carbs: 0,   fat: 14,   fiber: 0, sugar: 0 },
+  { id: 'butter',                name: 'Butter',                loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 102, protein: 0.1, carbs: 0,   fat: 11.5, fiber: 0, sugar: 0 },
+  { id: 'bbq_sauce',             name: 'BBQ Sauce',             loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 30,  protein: 0,   carbs: 7,   fat: 0,    fiber: 0, sugar: 6 },
+  { id: 'ketchup',               name: 'Ketchup',               loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 17,  protein: 0,   carbs: 4.5, fat: 0,    fiber: 0, sugar: 3.7 },
+  { id: 'mayo',                  name: 'Mayonnaise',            loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 94,  protein: 0.1, carbs: 0.1, fat: 10,   fiber: 0, sugar: 0 },
+  { id: 'soy_sauce',             name: 'Soy Sauce',             loc: 'both',   category: 'condiment', portion: '1 tbsp', kcal: 8,   protein: 1,   carbs: 1,   fat: 0,    fiber: 0, sugar: 0 },
 ]
 const DEFAULT_BY_ID = Object.fromEntries(DEFAULT_PANTRY.map((it) => [it.id, it]))
 
@@ -415,7 +425,7 @@ export function buildFromComponents(components = []) {
   const mods = []
   for (const c of components) {
     if (!c) continue
-    const def = Math.max(1, Number(c.default) || 1)
+    const def = Number(c.default) > 0 ? Number(c.default) : 1 // allow fractional servings (0.5)
     const k = Number(c.kcal) || 0, p = Number(c.protein) || 0, cb = Number(c.carbs) || 0, f = Number(c.fat) || 0
     const fib = Number(c.fiber) || 0, sug = Number(c.sugar) || 0
     base.kcal += k; base.protein += p; base.carbs += cb; base.fat += f; base.fiber += fib; base.sugar += sug

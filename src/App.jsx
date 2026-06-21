@@ -10,7 +10,7 @@ import { weeklyCheckin } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
-import ComponentBuilder from './ComponentBuilder'
+import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
@@ -974,10 +974,11 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
         <QtyEditor item={qtyItem}
           onLog={(loggedItem, q) => { onLog(loggedItem, q); setQtyItem(null) }}
           onEdit={(it) => { setQtyItem(null); setBuilder({ initial: { name: it.name, loc: it.loc, group: groupOf(it), components: componentsFromItem(it) }, editId: it.id }) }}
+          onDuplicate={(it) => { setQtyItem(null); setBuilder({ initial: { name: `${it.name} copy`, loc: it.loc, group: groupOf(it), components: componentsFromItem(it) }, editId: null }) }}
           onClose={() => setQtyItem(null)} />
       )}
       {builder && (
-        <ComponentBuilder initial={builder.initial} editId={builder.editId}
+        <RecipeBuilder initial={builder.initial} editId={builder.editId} pantry={effectivePantry(state)}
           onSave={(payload) => { onSaveCustom(payload, builder.editId); setBuilder(null) }}
           onCancel={() => setBuilder(null)} />
       )}
@@ -1012,7 +1013,7 @@ function PantryButton({ item, onTap, onLongPress }) {
 
 // Quantity editor (bottom sheet): set how many servings of an item to log in one
 // go, with a live macro preview. The serving label is the item's own unit.
-function QtyEditor({ item, onLog, onEdit, onClose }) {
+function QtyEditor({ item, onLog, onEdit, onDuplicate, onClose }) {
   const [qty, setQty] = useState(1)
   const [mods, setMods] = useState(() => Object.fromEntries((item.mods || []).map((m) => [m.id, m.default])))
   const q = qty > 0 ? Math.round(qty * 100) / 100 : 1
@@ -1066,7 +1067,10 @@ function QtyEditor({ item, onLog, onEdit, onClose }) {
         <button onClick={log} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[15px] font-semibold text-[#f4f1e8]">Log it</button>
         <div className="mt-2 flex items-center justify-between">
           <button onClick={onClose} className="py-2 text-[13px] text-[#8a8474]">Cancel</button>
-          {onEdit && <button onClick={() => onEdit(item)} className="py-2 text-[13px] font-medium text-[#3d4a32]">Customize parts →</button>}
+          <div className="flex items-center gap-4">
+            {onDuplicate && <button onClick={() => onDuplicate(item)} className="py-2 text-[13px] font-medium text-[#8a8474]">Duplicate</button>}
+            {onEdit && <button onClick={() => onEdit(item)} className="py-2 text-[13px] font-medium text-[#3d4a32]">Customize →</button>}
+          </div>
         </div>
       </div>
     </div>,
@@ -1268,7 +1272,7 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
       </div>
       {onBuild && (
         <button onClick={() => onBuild({ name: name.trim(), loc: foodLoc, group })} className="text-[12px] font-medium text-[#3d4a32]">
-          Multiple parts (e.g. hummus + baguette)? Build it →
+          Build a recipe from your foods (e.g. berries + yogurt) →
         </button>
       )}
       <p className="text-[11px] leading-snug text-[#a39c8d]">Leave numbers blank to log provisionally and fill them in later.</p>
