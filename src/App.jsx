@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
-import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions } from './train'
+import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin } from './adapt'
@@ -95,7 +95,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -115,6 +115,7 @@ export default function App() {
   const [lastBackup, setLastBackup] = useState(() => Number(localStorage.getItem('localfit-last-backup')) || null)
   const [backupOpen, setBackupOpen] = useState(false)
   const [foodReview, setFoodReview] = useState(false) // dashboard shortcut → today's food
+  const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view
   const scheduleSync = () => {} // sync retired; kept as a no-op so write paths stay clean
 
   // Export the whole local state as a JSON file → the iOS share sheet ("Save to
@@ -566,6 +567,15 @@ export default function App() {
         </div>
       </div>
 
+      <button onClick={() => setLiftsOpen(true)}
+        className="mt-3 flex w-full items-center justify-between rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-2.5 text-left active:scale-[0.99]">
+        <span className="flex items-center gap-2 text-[13px] font-medium text-[#4a463c]">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v3" /><path d="M3 10v4M21 10v4" /></svg>
+          Your lifts · personal records
+        </span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+      </button>
+
       <div key={focus || 'none'} className="focus-swap mt-5">
         {focus ? (
           <FocusCard
@@ -627,6 +637,7 @@ export default function App() {
         <FoodReview state={state} dateIso={today} day={day} proteinTarget={profile.proteinTarget || PROTEIN_TARGET_DEFAULT}
           onRemove={removeFood} onReset={resetFood} onMove={moveFood} onClose={() => setFoodReview(false)} />
       )}
+      {liftsOpen && <LiftsView state={state} onClose={() => setLiftsOpen(false)} />}
     </div>
     </>
   )
@@ -1395,6 +1406,57 @@ function SuppsModal({ profile, onClose, onSave }) {
           <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
           <button onClick={() => onSave({ enabled: [...enabled], custom })} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
         </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// Full-screen PR board: the best set on each main lift, with date + how far it's
+// come. Best set is picked by estimated 1RM but shown literally as weight × reps.
+function LiftsView({ state, onClose }) {
+  const lifts = bestLifts(state)
+  const hasAny = lifts.some((l) => l.best)
+  const dayLabel = { push: 'Push', pull: 'Pull', legs: 'Legs' }
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-6">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Your lifts</h1>
+        <p className="mt-1 text-[13px] text-[#8a8474]">Best set on each main lift, and how far it's come.</p>
+
+        {!hasAny ? (
+          <p className="mt-6 text-[14px] leading-relaxed text-[#8a8474]">No working sets logged yet. Once you finish a session, your bench, squat, RDL, press, row and pulldown records will show here.</p>
+        ) : (
+          <div className="mt-5 space-y-3">
+            {lifts.map((l) => (
+              <div key={l.id} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+                <div className="flex items-baseline justify-between">
+                  <p className="font-display text-[17px] font-semibold text-[#23211c]">{l.name}</p>
+                  <span className="text-[10px] uppercase tracking-wider text-[#a39c8d]">{dayLabel[l.day] || l.day}</span>
+                </div>
+                {l.best ? (
+                  <>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                      <span className="font-display text-[26px] font-semibold text-[#3d4a32]">{l.best.weight}<span className="text-[15px] font-normal text-[#8a8474]"> lb × {l.best.reps}</span></span>
+                      <span className="text-[12px] text-[#a39c8d]">≈ {Math.round(l.best.e1rm)} lb 1RM</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-[#8a8474]">
+                      <span>PR on {fmtMD(l.best.date)}</span>
+                      {l.sessions > 1 && l.trend > 0 && <span className="font-medium text-[#5b6745]">▲ +{l.trend} lb since {fmtMD(l.first.date)}</span>}
+                      {l.sessions > 1 && l.trend <= 0 && <span>{l.sessions} sessions logged</span>}
+                      {l.sessions === 1 && <span>first session on record</span>}
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-1.5 text-[13px] text-[#a39c8d]">No sets logged yet</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>,
     document.body

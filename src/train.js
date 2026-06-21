@@ -429,6 +429,44 @@ export function recentSessions(state, limit = 6) {
   return out
 }
 
+// ---- personal records: best set on each main lift ---------------------------
+
+// The big movers we track PRs on (one hinge/squat/press/pull per pattern).
+export const MAIN_LIFTS = ['bench_press', 'squat', 'rdl', 'shoulder_press', 'barbell_row', 'lat_pulldown']
+// Epley estimated 1-rep max — used only to RANK sets (so 225×3 beats 185×8);
+// the card still shows the literal best set.
+const epley = (w, r) => (w || 0) * (1 + (r || 0) / 30)
+
+// For each main lift: the best set ever logged (by e1RM), the first logged set,
+// the date of the PR, session count, and the strength gained since the start.
+// Lifts with no history are still returned (best: null) so the section is complete.
+export function bestLifts(state) {
+  const days = state.days || {}
+  const dates = Object.keys(days).sort() // ascending → first seen is earliest
+  return MAIN_LIFTS.map((id) => {
+    const meta = EXERCISES[id]
+    let best = null, first = null, sessions = 0
+    for (const date of dates) {
+      const ex = days[date].workout?.session?.exercises?.find((e) => e.id === id)
+      const sets = (ex?.sets || []).filter((s) => s.reps > 0 && s.weight > 0)
+      if (!sets.length) continue
+      sessions++
+      let top = null
+      for (const s of sets) {
+        const e = epley(s.weight, s.reps)
+        if (!top || e > top.e1rm) top = { weight: s.weight, reps: s.reps, e1rm: e, date }
+      }
+      if (!first) first = top
+      if (!best || top.e1rm > best.e1rm) best = top
+    }
+    return {
+      id, name: meta.name, day: meta.day, muscle: meta.muscle,
+      best, first, sessions,
+      trend: best && first ? Math.round(best.e1rm - first.e1rm) : 0,
+    }
+  })
+}
+
 // Rough wall-clock for a built session, in minutes: warm-up + working sets
 // (compounds cost more per set for the heavier rest) + cooldown stretches.
 // This is what makes a leg day "know" it needs ~an hour and a push day less.
