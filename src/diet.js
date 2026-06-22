@@ -296,11 +296,11 @@ const GROUP_BY_CAT = {
   fruit: 'Fruit', vegetable: 'Veg',
   dairy: 'Dairy', dairy_alt: 'Dairy',
   beverage: 'Drinks',
-  protein_snack: 'Snacks', dessert: 'Snacks', side: 'Snacks',
+  protein_snack: 'Snacks', dessert: 'Snacks', side: 'Sides',
   supplement: 'Supplements',
   dip: 'Extras', condiment: 'Extras',
 }
-export const GROUP_ORDER = ['Meals', 'Protein', 'Supplements', 'Fruit', 'Veg', 'Dairy', 'Drinks', 'Snacks', 'Extras', 'Other']
+export const GROUP_ORDER = ['Meals', 'Protein', 'Sides', 'Fruit', 'Veg', 'Dairy', 'Drinks', 'Snacks', 'Supplements', 'Extras', 'Other']
 // Custom adds carry an explicit `group`; seed items derive it from their category.
 export function groupOf(item) { return item.group || GROUP_BY_CAT[item.category] || 'Other' }
 
