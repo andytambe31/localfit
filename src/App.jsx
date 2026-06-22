@@ -1528,6 +1528,7 @@ const diaryShade = (s) => s == null ? 'bg-[#eceadd]'
   : s >= 0.85 ? 'bg-[#3d4a32]' : s >= 0.65 ? 'bg-[#6b7a4c]' : s >= 0.45 ? 'bg-[#94a36f]' : s >= 0.25 ? 'bg-[#c2c8a4]' : 'bg-[#e3e1d0]'
 
 function DiaryView({ state, profile, today, onClose }) {
+  const [lens, setLens] = useState('overall') // overall | diet | workouts
   const logged = Object.keys(state.days || {}).filter((k) => dayLogged(state.days[k])).sort()
   const firstIso = logged[0] || shiftIso(today, -27)
   const startMon = shiftIso(firstIso, -diaryDow(firstIso)) // back to that week's Monday
@@ -1555,6 +1556,12 @@ function DiaryView({ state, profile, today, onClose }) {
         </button>
         <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Diary</h1>
         <p className="mt-1 text-[13px] text-[#8a8474]">How complete each day was — diet, movement and sleep count most.{avg != null ? ` Averaging ${avg}% over ${scored.length} days.` : ''}</p>
+
+        <div className="mt-4 flex gap-1 rounded-full border border-[#e0d9c9] bg-[#fbf9f3] p-1">
+          {[['overall', 'Overall'], ['diet', 'Diet'], ['workouts', 'Workouts']].map(([v, l]) => (
+            <button key={v} onClick={() => setLens(v)} className={`flex-1 rounded-full px-3 py-1.5 text-[13px] font-medium transition ${lens === v ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'text-[#6f6a5d]'}`}>{l}</button>
+          ))}
+        </div>
 
         {scored.length === 0 ? (
           <p className="mt-6 text-[14px] leading-relaxed text-[#8a8474]">No days logged yet. As you complete routines, meals, steps and lifts, each day fills in here.</p>
@@ -1591,11 +1598,121 @@ function DiaryView({ state, profile, today, onClose }) {
               {['bg-[#e3e1d0]', 'bg-[#c2c8a4]', 'bg-[#94a36f]', 'bg-[#6b7a4c]', 'bg-[#3d4a32]'].map((c) => <span key={c} className={`h-3 w-3 rounded-[3px] ${c}`} />)}
               <span>More</span>
             </div>
+
+            {lens === 'diet' && <DietTrends state={state} profile={profile} />}
+            {lens === 'workouts' && <WorkoutTrends state={state} />}
           </>
         )}
       </div>
     </div>,
     document.body
+  )
+}
+
+// ---- diary trend panels (zoomed-in lenses) ----------------------------------
+function ChartCard({ title, sub, now, children }) {
+  return (
+    <div className="mt-6 border-t border-[#e6dfd0] pt-5">
+      <div className="mb-2 flex items-baseline justify-between">
+        <p className="text-[14px] font-semibold text-[#23211c]">{title}{sub ? <span className="ml-1.5 text-[11px] font-normal text-[#a39c8d]">{sub}</span> : null}</p>
+        {now && <span className="text-[12px] text-[#6f6a5d]">latest {now}</span>}
+      </div>
+      {children}
+    </div>
+  )
+}
+// Flexbox bar chart with an optional dashed target line.
+function Bars({ data, target, unit }) {
+  if (!data.length) return <p className="text-[12px] text-[#8a8474]">No data yet.</p>
+  const peak = (Math.max(target || 0, ...data.map((d) => d.value)) || 1) * 1.12
+  return (
+    <>
+      <div className="relative flex h-28 items-end gap-[3px]">
+        {target != null && <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[#b08a3a]" style={{ bottom: `${(target / peak) * 100}%` }} />}
+        {data.map((d, i) => (
+          <div key={i} title={`${d.label}: ${d.value}${unit || ''}`} className={`min-w-[4px] flex-1 rounded-t ${d.tone || 'bg-[#3d4a32]'}`} style={{ height: `${Math.max(3, (d.value / peak) * 100)}%` }} />
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] text-[#a39c8d]">
+        <span>{data[0].label}</span>{data.length > 1 && <span>{data.at(-1).label}</span>}
+      </div>
+    </>
+  )
+}
+// SVG line for a continuous series (bodyweight).
+function Sparkline({ points, unit }) {
+  if (points.length < 2) return <p className="text-[12px] text-[#8a8474]">Two or more entries needed for a trend.</p>
+  const vals = points.map((p) => p.value), min = Math.min(...vals), max = Math.max(...vals), range = max - min || 1
+  const W = 320, H = 90, pad = 8
+  const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (W - 2 * pad))
+  const ys = points.map((p) => pad + (1 - (p.value - min) / range) * (H - 2 * pad))
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${xs[i].toFixed(1)} ${ys[i].toFixed(1)}`).join(' ')
+  return (
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 90 }} preserveAspectRatio="none">
+        <path d={path} fill="none" stroke="#3d4a32" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        {points.map((p, i) => <circle key={i} cx={xs[i]} cy={ys[i]} r="2.5" fill="#3d4a32" />)}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] text-[#a39c8d]">
+        <span>{points[0].label} · {points[0].value}{unit}</span><span>{points.at(-1).label} · {points.at(-1).value}{unit}</span>
+      </div>
+    </>
+  )
+}
+function DietTrends({ state, profile }) {
+  const days = Object.keys(state.days || {}).sort()
+  const series = []
+  for (const d of days) { const day = state.days[d]; if (day?.food?.length) { const t = dayTotals(day); series.push({ date: d, kcal: t.kcal, protein: Math.round(t.protein) }) } }
+  const ceiling = calorieTarget(state)?.ceiling || null
+  const pT = profile.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const weights = (state.weightLog || []).slice().sort((a, b) => a.date.localeCompare(b.date))
+  if (!series.length && weights.length < 2) return <p className="mt-6 border-t border-[#e6dfd0] pt-5 text-[13px] text-[#8a8474]">Log meals and weigh-ins to see diet trends.</p>
+  const zoneTone = { green: 'bg-[#6b7a4c]', yellow: 'bg-[#c9a227]', red: 'bg-[#b0552a]' }
+  const calBars = series.map((s) => ({ label: fmtMD(s.date), value: s.kcal, tone: ceiling ? zoneTone[calorieZone(s.kcal, ceiling)] : 'bg-[#6b7a4c]' }))
+  const proBars = series.map((s) => ({ label: fmtMD(s.date), value: s.protein, tone: s.protein >= pT ? 'bg-[#3d4a32]' : 'bg-[#aab884]' }))
+  return (
+    <div>
+      <ChartCard title="Calories" sub={ceiling ? `ceiling ${ceiling}` : ''} now={series.at(-1) ? `${series.at(-1).kcal} cal` : ''}>
+        <Bars data={calBars} target={ceiling} unit=" cal" />
+      </ChartCard>
+      <ChartCard title="Protein" sub={`target ${pT}g`} now={series.at(-1) ? `${series.at(-1).protein}g` : ''}>
+        <Bars data={proBars} target={pT} unit="g" />
+      </ChartCard>
+      <ChartCard title="Bodyweight" now={weights.at(-1) ? `${weights.at(-1).kg} kg` : ''}>
+        <Sparkline points={weights.map((w) => ({ label: fmtMD(w.date), value: w.kg }))} unit=" kg" />
+      </ChartCard>
+    </div>
+  )
+}
+function WorkoutTrends({ state }) {
+  const days = Object.keys(state.days || {}).sort()
+  const byWeek = {}
+  for (const d of days) {
+    const s = state.days[d].workout?.session
+    if (!s || s.status !== 'done') continue
+    let vol = 0
+    for (const e of s.exercises || []) for (const st of e.sets || []) if (st.reps) vol += (st.weight || 0) * st.reps
+    const wk = shiftIso(d, -diaryDow(d))
+    byWeek[wk] = byWeek[wk] || { week: wk, volume: 0, sessions: 0 }
+    byWeek[wk].volume += Math.round(vol); byWeek[wk].sessions++
+  }
+  const weeks = Object.values(byWeek).sort((a, b) => a.week.localeCompare(b.week))
+  if (!weeks.length) return <p className="mt-6 border-t border-[#e6dfd0] pt-5 text-[13px] text-[#8a8474]">Complete a session to see workout trends.</p>
+  const volBars = weeks.map((w) => ({ label: fmtMD(w.week), value: w.volume }))
+  const totalSessions = weeks.reduce((a, w) => a + w.sessions, 0)
+  return (
+    <div>
+      <ChartCard title="Weekly volume" sub="total weight moved" now={`${weeks.at(-1).volume.toLocaleString()} lb`}>
+        <Bars data={volBars} unit=" lb" />
+      </ChartCard>
+      <div className="mt-6 border-t border-[#e6dfd0] pt-5">
+        <p className="mb-2 text-[14px] font-semibold text-[#23211c]">Sessions per week</p>
+        <div className="flex flex-wrap gap-1.5">
+          {weeks.map((w) => <span key={w.week} className="rounded-lg border border-[#e6dfd0] bg-[#fbf9f3] px-2.5 py-1 text-[12px] text-[#4a463c]">{fmtMD(w.week)}: <span className="font-semibold text-[#3d4a32]">{w.sessions}</span></span>)}
+        </div>
+        <p className="mt-2 text-[12px] text-[#8a8474]">{totalSessions} session{totalSessions > 1 ? 's' : ''} across {weeks.length} week{weeks.length > 1 ? 's' : ''}.</p>
+      </div>
+    </div>
   )
 }
 
