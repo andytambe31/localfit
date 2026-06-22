@@ -54,6 +54,7 @@ export const DEFAULT_PANTRY = [
   { id: 'stirfry_chicken',       name: 'Stir-fried Chicken & Veg', loc: 'home', category: 'homemade_meal', portion: '1 plate',  kcal: 440, protein: 52,  carbs: 13, fat: 20, fiber: 4, sugar: 5, ingredients: ['chicken_breast', 'broccoli', 'mushrooms', 'sriracha'] },
   { id: 'indian_chicken_breast', name: 'Indian-style Chicken Breast', loc: 'home', category: 'homemade_meal', portion: '1 serving', kcal: 435, protein: 48, carbs: 8, fat: 22, fiber: 2, sugar: 3, ingredients: ['chicken_breast'] },
   { id: 'indian_chicken_thighs', name: 'Indian-style Chicken Thighs', loc: 'home', category: 'homemade_meal', portion: '1 serving', kcal: 505, protein: 41, carbs: 8, fat: 33, fiber: 2, sugar: 3, ingredients: ['chicken_thigh'] },
+  { id: 'cajun_chicken_thighs',  name: 'Cajun Chicken Thighs', loc: 'both', category: 'homemade_meal', portion: '150g', kcal: 305, protein: 35, carbs: 2, fat: 17, fiber: 1, sugar: 0, ingredients: ['chicken_thigh'] },
   // Office
   { id: 'oikos_triple_zero',     name: 'Oikos Triple Zero',  loc: 'office', category: 'dairy',       portion: '1 container',  kcal: 90,  protein: 15, carbs: 7,  fat: 0,    fiber: 6,   sugar: 4 },
   { id: 'office_grilled_chicken',name: 'Office Grilled Chicken', loc: 'office', category: 'office_food', portion: '100g',    kcal: 165, protein: 31, carbs: 0,  fat: 4,    fiber: 0,   sugar: 0 },
