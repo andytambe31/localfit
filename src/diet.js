@@ -28,6 +28,7 @@ export const DEFAULT_PANTRY = [
   { id: 'avocado',          name: 'Avocado',            loc: 'home', category: 'fruit',      portion: '100g',            kcal: 160, protein: 2,   carbs: 8.5,  fat: 14.7, fiber: 6.7, sugar: 0.7 },
   { id: 'sweet_potato',     name: 'Sweet Potato',       loc: 'home', category: 'vegetable',  portion: '1 medium cooked', kcal: 112, protein: 2,   carbs: 26,   fat: 0.1,  fiber: 4,   sugar: 6 },
   { id: 'air_fried_potato', name: 'Air-Fried Potato Slices', loc: 'home', category: 'side',  portion: '100g (~12 slices)', kcal: 120, protein: 2, carbs: 18, fat: 5, fiber: 2, sugar: 1 },
+  { id: 'air_fried_sweet_potato', name: 'Air-Fried Sweet Potato', loc: 'home', category: 'side', portion: '1 medium (air-fried)', kcal: 152, protein: 2, carbs: 26, fat: 5, fiber: 4, sugar: 6 },
   { id: 'broccoli',         name: 'Broccoli',           loc: 'home', category: 'vegetable',  portion: '100g',            kcal: 34,  protein: 2.8, carbs: 7,    fat: 0.4,  fiber: 2.6, sugar: 1.7 },
   { id: 'mushrooms',        name: 'Mushrooms',          loc: 'home', category: 'vegetable',  portion: '100g',            kcal: 22,  protein: 3.1, carbs: 3.3,  fat: 0.3,  fiber: 1,   sugar: 2 },
   { id: 'baby_carrots',     name: 'Baby Carrots',       loc: 'home', category: 'vegetable',  portion: '100g',            kcal: 41,  protein: 0.9, carbs: 10,   fat: 0.2,  fiber: 2.8, sugar: 4.7 },
