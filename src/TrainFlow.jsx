@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildSession, estimateSessionMinutes, targetFor } from './train'
+import { buildSession, estimateSessionMinutes, targetFor, prefillSets } from './train'
 
 // On resume, re-derive targets for exercises you haven't logged yet, so a session
 // built before a data change / fix picks up the right pre-filled weights. Exercises
@@ -15,7 +15,7 @@ function refreshTargets(session, state, dateIso) {
       return {
         ...e, target: t,
         repLow: t.repLow ?? e.repLow, repHigh: t.repHigh ?? e.repHigh,
-        sets: Array.from({ length: t.sets }, () => ({ weight: t.weight, reps: null, done: false })),
+        sets: prefillSets(state, e.id, dateIso, t, phase),
       }
     }),
   }

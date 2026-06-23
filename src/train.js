@@ -326,6 +326,27 @@ function applyPhaseTarget(ex, std, phase) {
   return std // accumulate / progress = standard double progression
 }
 
+// Pre-fill the set scaffold: replay last time's warm-up ramp on the lower sets,
+// and put the progression target on the TOP set — so the session "builds up to the
+// new max." The top target is double progression: +1 rep at the same weight until
+// the rep cap, then +inc lb reset to the bottom (i.e. new max reps at last max
+// weight, or a new max weight). Deload/heavy weeks use the phase weight on every
+// set instead of a ramp.
+export function prefillSets(state, exId, todayIso, target, phase) {
+  const n = target.sets || 3
+  if (phase && (phase.deload || phase.heavy)) {
+    return Array.from({ length: n }, () => ({ weight: target.weight, reps: null, done: false }))
+  }
+  const prev = lastPerformed(state, exId, todayIso) // ascending ramp from last time
+  return Array.from({ length: n }, (_, i) => {
+    const isTop = i === n - 1
+    const w = isTop
+      ? target.weight // top set chases the new max (weight or +rep)
+      : (prev && prev.length ? (prev[i]?.weight ?? prev[prev.length - 1].weight) : target.weight)
+    return { weight: w, reps: null, done: false }
+  })
+}
+
 // ---- session assembly -------------------------------------------------------
 
 // Build the full authoritative session for the day. Returns either a rest
@@ -363,8 +384,9 @@ export function buildSession(state, todayIso, opts = {}) {
       emphasized: (meta.emph || []).includes(emphasis),
       cue: cueFor(id), rir: null, // form/intent cue + reps-in-reserve (effort)
       target,
-      // a blank, logged-as-you-go set scaffold the flow fills in
-      sets: Array.from({ length: target.sets }, () => ({ weight: target.weight, reps: null, done: false })),
+      // pre-fill each set with last time's weight for that set (your ramp), so you
+      // repeat/nudge rather than re-enter; the target note carries the progression.
+      sets: prefillSets(state, id, todayIso, target, phase),
     }
   })
 
