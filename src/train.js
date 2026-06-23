@@ -258,9 +258,9 @@ export function pickEmphasis(state, todayIso, dayType) {
 function lastPerformed(state, exId, todayIso) {
   const days = state.days || {}
   for (const date of Object.keys(days).sort().reverse()) {
-    if (date >= todayIso) continue
+    if (date > todayIso) continue
     const sess = days[date].workout?.session
-    if (!sess) continue
+    if (!sess || sess.status !== 'done') continue // only finished sessions are history; never the one being built
     if (sess.phase === 'deload' || sess.phase === 'intensify') continue
     const ex = sess.exercises?.find((e) => e.id === exId)
     const sets = (ex?.sets || []).filter((s) => s.reps > 0 && s.weight > 0)
