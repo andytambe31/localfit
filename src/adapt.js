@@ -5,6 +5,7 @@
  * user applies with one tap (auto-computed, visible, reversible).
  * -------------------------------------------------------------------------- */
 import { recentSessions } from './train'
+import { calorieTarget } from './diet'
 
 const day = (iso) => new Date(iso + 'T00:00:00')
 const latest = (log, key) => (log?.length ? [...log].sort((a, b) => a.date.localeCompare(b.date)).at(-1)[key] : null)
@@ -35,30 +36,75 @@ function neededRate(state, today) {
   return lose > 0 && weeksLeft > 0 ? lose / weeksLeft : 0
 }
 
+// Smoothed weight rate (kg/day) by linear regression over a window — filters the
+// daily noise (water, sodium, creatine) that a first-vs-last reading reacts to.
+function weightSlope(state, today, windowDays = 21) {
+  const log = [...(state.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+  const cutoff = day(today); cutoff.setDate(cutoff.getDate() - windowDays)
+  const pts = log.filter((e) => day(e.date) >= cutoff)
+  if (pts.length < 5) return null // too few weigh-ins to trust
+  const spanDays = (day(pts.at(-1).date) - day(pts[0].date)) / 86400000
+  if (spanDays < 10) return null // too short a window — still mostly water
+  const t0 = day(pts[0].date).getTime()
+  const xs = pts.map((p) => (day(p.date).getTime() - t0) / 86400000)
+  const ys = pts.map((p) => p.kg)
+  const n = xs.length, sx = xs.reduce((a, b) => a + b, 0), sy = ys.reduce((a, b) => a + b, 0)
+  const sxx = xs.reduce((a, b) => a + b * b, 0), sxy = xs.reduce((a, b, i) => a + b * ys[i], 0)
+  const denom = n * sxx - sx * sx
+  if (!denom) return null
+  return { slope: (n * sxy - sx * sy) / denom, n, spanDays: Math.round(spanDays) }
+}
+
+// Adaptive deficit coach: reads the smoothed fat-loss rate vs the pace you need
+// for the body-fat deadline, separates signal from noise, and prescribes a calorie
+// adjustment you can apply in one tap. Returns a status object for the card.
+export function deficitCoach(state, today) {
+  const profile = state.profile || {}
+  const ct = calorieTarget(state)
+  if (!ct) return { status: 'no-weight', headline: 'Log your weight', detail: 'Add a weigh-in to start tuning calories to your real rate.' }
+  const need = neededRate(state, today) // kg/week needed (>= 0)
+  if (need == null) return { status: 'no-bf', headline: 'Estimate body fat', detail: 'Log a body-fat estimate so I can set the pace you need.', ceiling: ct.ceiling }
+  const sl = weightSlope(state, today, 21)
+  if (!sl) return { status: 'building', headline: 'Building your trend', ceiling: ct.ceiling,
+    detail: 'Weigh in daily. After ~2 weeks I can read your real fat-loss rate and tune calories — short-term scale moves are mostly water (creatine, sodium, carbs), not fat.' }
+
+  const loss = Math.round(-sl.slope * 7 * 100) / 100 // kg/week, + = losing
+  const needWk = Math.round(need * 100) / 100
+  const gap = needWk - loss // + = losing too slow
+  const TOL = 0.15 // tolerance band so we don't chase noise
+  const curDeficit = profile.deficit ?? 500
+  const r25 = (n) => Math.round(n / 25) * 25
+  const clampDef = (d) => Math.max(250, Math.min(800, d))
+  const base = { loss, needWk, ceiling: ct.ceiling, spanDays: sl.spanDays, weighIns: sl.n }
+
+  if (needWk <= 0.02) return { ...base, status: 'at-goal', headline: 'At your target',
+    detail: "You're at or past your body-fat goal. Ease toward maintenance when you're ready." }
+
+  if (loss > needWk + 0.3) {
+    const newDef = clampDef(curDeficit - Math.min(200, r25((loss - needWk) * 1100)))
+    return { ...base, status: 'too-fast', headline: 'Dropping faster than needed',
+      detail: `Smoothed trend is ~${loss.toFixed(2)} kg/wk vs ~${needWk.toFixed(2)} needed. That pace risks muscle on a cut — eat a little more.`,
+      adjust: newDef < curDeficit ? { deficit: newDef, deltaCal: curDeficit - newDef, dir: 'up', newCeiling: ct.ceiling + (curDeficit - newDef) } : null }
+  }
+  if (gap > TOL) {
+    const newDef = clampDef(curDeficit + Math.min(200, r25(gap * 1100)))
+    const cut = newDef - curDeficit
+    return { ...base, status: 'behind', headline: loss <= 0.02 ? 'Trend has flattened' : 'Behind your December pace',
+      detail: `${loss <= 0.02 ? 'No real loss' : `Losing ~${loss.toFixed(2)} kg/wk`} over ${sl.spanDays} days, but you need ~${needWk.toFixed(2)} kg/wk. ${cut > 0 ? `Tighten the ceiling ~${cut} cal to close it.` : 'Hold calories and add steps.'} Judge it by this trend, not the morning scale.`,
+      adjust: cut > 0 ? { deficit: newDef, deltaCal: cut, dir: 'down', newCeiling: ct.ceiling - cut } : null }
+  }
+  return { ...base, status: 'on-track', headline: `On pace — ~${loss.toFixed(2)} kg/wk`,
+    detail: `Right on the ~${needWk.toFixed(2)} kg/wk you need for December. Hold the line — don't react to the daily scale.` }
+}
+
 export function weeklyCheckin(state, today) {
   const profile = state.profile || {}
   const last = profile.lastCheckin
   const daysSince = last ? (day(today) - day(last)) / 86400000 : 999
   const findings = []
   const changes = {}
-
-  // --- fat loss: trend vs the pace you need ---------------------------------
-  const trend = weightTrend(state)
-  const need = neededRate(state, today)
-  if (trend && need != null && need > 0) {
-    const losing = -trend.perWeek // positive when dropping
-    if (losing < need * 0.6) {
-      const stepTarget = (profile.stepTarget || 10000) + 1500
-      const deficit = Math.min(750, (profile.deficit || 500) + 100)
-      findings.push({ area: 'Fat loss', tone: 'warn',
-        text: `Losing ~${Math.max(0, losing).toFixed(2)} kg/wk but you need ~${need.toFixed(2)} for December. I'll raise your step goal to ${stepTarget.toLocaleString()} and tighten calories (~${deficit} deficit).` })
-      changes.stepTarget = stepTarget
-      changes.deficit = deficit
-    } else {
-      findings.push({ area: 'Fat loss', tone: 'good',
-        text: `On pace — losing ~${Math.max(0, losing).toFixed(2)} kg/wk against ~${need.toFixed(2)} needed. Hold steady.` })
-    }
-  }
+  // Fat-loss pace + calorie tuning now lives in the always-on deficitCoach card,
+  // so the weekly check-in focuses on lifts and routine adherence.
 
   // --- lifts: PRs vs stalling -----------------------------------------------
   const sess = recentSessions(state, 3)

@@ -6,7 +6,7 @@ import TrainFlow from './TrainFlow'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
-import { weeklyCheckin } from './adapt'
+import { weeklyCheckin, deficitCoach } from './adapt'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -518,6 +518,8 @@ export default function App() {
       </section>
 
       <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} cal={calorieBreakdown(state)} />
+
+      <DeficitCard state={state} today={today} onApply={updateProfile} />
 
       {(() => {
         const checkin = weeklyCheckin(state, today)
@@ -1863,6 +1865,39 @@ function NumInput({ value, placeholder, step, onCommit }) {
 }
 // Dedicated bodyweight focal card near the top of the dashboard: latest weight,
 // trend vs last entry, one-tap log/update, and the trend chart once there's data.
+// Adaptive deficit coach: reads the smoothed fat-loss trend vs the pace needed for
+// December, stays noise-aware (won't react to water/creatine), and offers a one-tap
+// calorie adjustment when the trend genuinely drifts.
+function DeficitCard({ state, today, onApply }) {
+  const c = deficitCoach(state, today)
+  if (!c || c.status === 'no-weight') return null // WeightCard already prompts for weight
+  const tone = c.status === 'behind' ? 'border-[#e7d4b6] bg-[#f7ecd6]'
+    : c.status === 'too-fast' ? 'border-[#dcae73] bg-[#fbf1e1]'
+    : c.status === 'on-track' || c.status === 'at-goal' ? 'border-[#cdd6b8] bg-[#eef0e6]'
+    : 'border-[#e6dfd0] bg-[#fbf9f3]'
+  const sign = (kgWk) => `${kgWk >= 0 ? '−' : '+'}${Math.abs(kgWk).toFixed(2)}` // weight change: losing shows −
+  return (
+    <section className={`mt-4 rounded-2xl border ${tone} px-4 py-3.5`}>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-[#7d8a5f]">Deficit coach</p>
+      <p className="mt-1 text-[15px] font-semibold text-[#23211c]">{c.headline}</p>
+      <p className="mt-1 text-[13px] leading-snug text-[#5b574c]">{c.detail}</p>
+      {c.loss != null && c.needWk != null && (
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-[#6f6a5d]">
+          <span>Trend <span className="font-semibold text-[#23211c]">{sign(c.loss)} kg/wk</span>{c.spanDays ? <span className="text-[#a39c8d]"> · {c.spanDays}d</span> : null}</span>
+          <span>Need <span className="font-semibold text-[#23211c]">−{c.needWk.toFixed(2)} kg/wk</span></span>
+          {c.ceiling ? <span>Ceiling <span className="font-semibold text-[#23211c]">{c.ceiling}</span></span> : null}
+        </div>
+      )}
+      {c.adjust && (
+        <button onClick={() => onApply({ deficit: c.adjust.deficit })}
+          className="mt-3 rounded-full bg-[#3d4a32] px-4 py-1.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-95">
+          {c.adjust.dir === 'down' ? `Tighten ${c.adjust.deltaCal} cal → ${c.adjust.newCeiling} ceiling` : `Add ${c.adjust.deltaCal} cal → ${c.adjust.newCeiling} ceiling`}
+        </button>
+      )}
+    </section>
+  )
+}
+
 function WeightCard({ weightLog, today, day, onSave, cal }) {
   const [editing, setEditing] = useState(false)
   const tdeeLabel = { low: 'estimated', medium: 'calibrating', high: 'calibrated' }
