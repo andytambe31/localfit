@@ -1,5 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildSession, estimateSessionMinutes } from './train'
+import { buildSession, estimateSessionMinutes, targetFor } from './train'
+
+// On resume, re-derive targets for exercises you haven't logged yet, so a session
+// built before a data change / fix picks up the right pre-filled weights. Exercises
+// with any logged reps are left exactly as-is.
+function refreshTargets(session, state, dateIso) {
+  if (!session?.exercises) return session
+  const phase = session.deload || session.heavy ? { deload: session.deload, heavy: session.heavy } : null
+  return {
+    ...session,
+    exercises: session.exercises.map((e) => {
+      if (e.sets?.some((s) => s.reps != null)) return e // user already worked this lift
+      const t = targetFor(state, e.id, dateIso, phase)
+      return {
+        ...e, target: t,
+        repLow: t.repLow ?? e.repLow, repHigh: t.repHigh ?? e.repHigh,
+        sets: Array.from({ length: t.sets }, () => ({ weight: t.weight, reps: null, done: false })),
+      }
+    }),
+  }
+}
 
 /* ---------- guided training session: full-screen, locked-in, resumable --------
  * A trainer that decides the day for you. Tap "Start session" and you're in until
@@ -17,7 +37,7 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
   const resuming = existing?.status === 'active'
 
   const [session, setSession] = useState(() => {
-    if (resuming) return existing
+    if (resuming) return refreshTargets(existing, state, dateIso)
     return buildSession(state, dateIso) // may be a rest recommendation
   })
   const [stage, setStage] = useState(resuming ? 'session' : 'gate')
