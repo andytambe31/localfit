@@ -249,10 +249,12 @@ export function pickEmphasis(state, todayIso, dayType) {
 
 // ---- progressive overload (double progression) ------------------------------
 
-// The most recent completed sets logged for an exercise, scanning backwards.
-// Skips deload + heavy weeks: those are prescribed OFF the standard ledger (light
-// or low-rep), so letting them set the baseline would corrupt the 8–12 double
-// progression. Legacy sessions carry no phase and count as normal weeks.
+// The most recent performed sets logged for an exercise, scanning backwards. A
+// set counts if it has reps + a weight — NOT gated on the `done` flag, since
+// older sessions stored real numbers with done:false (the flag only became
+// reliable once reps-entry auto-marked done). Skips deload + heavy weeks: those
+// are prescribed OFF the standard ledger (light/low-rep), so they shouldn't set
+// the baseline. Legacy sessions carry no phase and count as normal weeks.
 function lastPerformed(state, exId, todayIso) {
   const days = state.days || {}
   for (const date of Object.keys(days).sort().reverse()) {
@@ -261,7 +263,8 @@ function lastPerformed(state, exId, todayIso) {
     if (!sess) continue
     if (sess.phase === 'deload' || sess.phase === 'intensify') continue
     const ex = sess.exercises?.find((e) => e.id === exId)
-    if (ex && ex.sets?.some((s) => s.done && s.reps)) return ex.sets.filter((s) => s.done && s.reps)
+    const sets = (ex?.sets || []).filter((s) => s.reps > 0 && s.weight > 0)
+    if (sets.length) return sets
   }
   return null
 }
@@ -277,17 +280,18 @@ export function targetFor(state, exId, todayIso, phase = null) {
     std = { weight: null, reps: ex.repLow, sets: ex.sets, first: true,
       note: 'First time on record — log the weight you work with and we build from here.' }
   } else {
-    const topReps = Math.max(...last.map((s) => s.reps))
-    const topSet = last.find((s) => s.reps === topReps) || last[0]
-    const topWeight = topSet.weight || 0
-    const allAtTop = last.every((s) => s.reps >= ex.repHigh)
-    if (allAtTop) {
+    // Anchor on the heaviest working set (handles ramping sets like 40→55→70,
+    // where the most-reps set is the lightest). Tie-break by reps.
+    const top = last.reduce((a, b) => (((b.weight || 0) > (a.weight || 0)) || ((b.weight || 0) === (a.weight || 0) && (b.reps || 0) > (a.reps || 0)) ? b : a))
+    const topWeight = top.weight || 0
+    const topReps = top.reps || 0
+    if (topReps >= ex.repHigh) {
       std = { weight: topWeight + ex.inc, reps: ex.repLow, sets: ex.sets,
-        note: `Every set hit ${ex.repHigh}. Up to ${topWeight + ex.inc} lb, back to ${ex.repLow} reps.` }
+        note: `Last top set: ${topReps} reps at ${topWeight} lb — top of the range. Up to ${topWeight + ex.inc} lb, back to ${ex.repLow} reps.` }
     } else {
       const goalReps = Math.min(ex.repHigh, topReps + 1)
       std = { weight: topWeight, reps: goalReps, sets: ex.sets,
-        note: `Last top set: ${topReps} reps at ${topWeight} lb. Beat it — ${goalReps} reps.` }
+        note: `Last top set: ${topReps} reps at ${topWeight} lb. Beat it — ${goalReps} reps at ${topWeight} lb.` }
     }
   }
   return phase ? applyPhaseTarget(ex, std, phase) : std
