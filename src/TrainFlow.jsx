@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildSession, estimateSessionMinutes, targetFor, prefillSets } from './train'
+import { buildSession, estimateSessionMinutes, targetFor, prefillSets, swapOptions } from './train'
 
 // On resume, re-derive targets for exercises you haven't logged yet, so a session
 // built before a data change / fix picks up the right pre-filled weights. Exercises
@@ -31,15 +31,17 @@ function refreshTargets(session, state, dateIso) {
  *   onPersist(session)  — write the session to today (status active/done/abandoned)
  *   onClose()           — leave the takeover (pre-start, or after Finish)
  * --------------------------------------------------------------------------- */
-export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPersist, onClose }) {
+export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPersist, onSwap, swapTo, onClose }) {
   // Resume an in-flight session, else build a fresh plan for today.
   const existing = state.days?.[dateIso]?.workout?.session
   const resuming = existing?.status === 'active'
 
   const [session, setSession] = useState(() => {
     if (resuming) return refreshTargets(existing, state, dateIso)
-    return buildSession(state, dateIso) // may be a rest recommendation
+    return buildSession(state, dateIso, swapTo ? { dayType: swapTo } : {}) // swapTo = opened pre-swapped from the card
   })
+  // Opened with a card swap → owe the day it replaced (once).
+  useEffect(() => { if (!resuming && swapTo && session.swappedFrom) onSwap?.(session.swappedFrom) }, [])
   const [stage, setStage] = useState(resuming ? 'session' : 'gate')
   const [closing, setClosing] = useState(false)
   const [confirmFinish, setConfirmFinish] = useState(false)
@@ -59,6 +61,15 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
   const items = useMemo(() => buildItems(session), [session])
   const cursor = session.cursor || 0
   const onDone = stage === 'session' && cursor >= items.length
+
+  // Swap today's session to a shorter day-type (recovered muscles only). The old
+  // scheduled day is owed next time (onSwap records it).
+  const swaps = stage === 'gate' && session.dayType !== 'rest' ? swapOptions(state, dateIso, session.dayType) : []
+  const doSwap = (dayType) => {
+    const s = buildSession(state, dateIso, { dayType })
+    setSession(s)
+    if (s.swappedFrom) onSwap?.(s.swappedFrom)
+  }
 
   // ---- gate: the trainer's authoritative call, one button in ----------------
   if (stage === 'gate') {
@@ -86,6 +97,19 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
             <p className="mt-5 text-[13px] text-[#8c9472]">
               {session.exercises.length} exercises · about {estimateSessionMinutes(session)} min. Once you start, you're in until you finish.
             </p>
+          )}
+          {!rest && swaps.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[12px] text-[#8c9472]">Less time? Swap today's session:</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {swaps.map((o) => (
+                  <button key={o.dayType} onClick={() => doSwap(o.dayType)}
+                    className="rounded-full border border-[#4a5238] bg-[#2c3522] px-3.5 py-1.5 text-[13px] font-medium text-[#dfe6cf] active:scale-95">
+                    {o.label} · ~{o.estMin} min
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
         <div className="shrink-0 px-6 pb-8">

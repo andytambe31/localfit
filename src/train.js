@@ -200,6 +200,14 @@ function rotateAfter(day) {
   return i === -1 ? 'push' : ROTATION[(i + 1) % ROTATION.length]
 }
 
+// Days since a given day-type was last trained (Infinity if never). Drives the
+// recovery guard on swaps — a day-type is "recovered" if it wasn't hit yesterday.
+function daysSinceDayType(hist, dayType, todayIso) {
+  const last = [...hist].reverse().find((h) => h.day === dayType)
+  return last ? daysBetween(last.date, todayIso) : Infinity
+}
+const isRecovered = (hist, dayType, todayIso) => daysSinceDayType(hist, dayType, todayIso) >= 2
+
 // ---- the decisions ----------------------------------------------------------
 
 // Decide today's day-type and *why*. Returns { dayType, reason, rest } where
@@ -218,6 +226,14 @@ export function decideDayType(state, todayIso) {
   if (weekCount >= target && sinceLast <= 1) {
     return { dayType: 'rest', rest: true,
       reason: `You've trained ${weekCount}× this week and lifted ${sinceLast === 0 ? 'today' : 'yesterday'}. Recover — walk, hit your steps, let the work land.` }
+  }
+
+  // Owed day: a day-type swapped out earlier is prioritized once it's recovered,
+  // so swapping (e.g. legs → push for time) never quietly drops the skipped day.
+  const owed = profile.owedDay
+  if (owed && DAY_PLAN[owed] && isRecovered(hist, owed, todayIso)) {
+    return { dayType: owed, rest: false, owed: true,
+      reason: `${DAY_PLAN[owed].label} is owed — you swapped it out, and those muscles are recovered now.` }
   }
 
   const next = lastTyped ? rotateAfter(lastTyped.day) : 'push'
@@ -354,16 +370,18 @@ export function prefillSets(state, exId, todayIso, target, phase) {
 // `exercises` carry their double-progression target pre-filled.
 export function buildSession(state, todayIso, opts = {}) {
   const decision = decideDayType(state, todayIso)
-  if (decision.rest && !opts.force) return { dayType: 'rest', reason: decision.reason }
+  // opts.dayType = a user swap (e.g. legs → push for time); it overrides the call.
+  if (decision.rest && !opts.force && !opts.dayType) return { dayType: 'rest', reason: decision.reason }
 
   // Rest was recommended but the user chose to train anyway → run the next
   // rotation day regardless.
-  let dayType = decision.dayType
-  if (decision.rest) {
+  let dayType = opts.dayType || decision.dayType
+  if (!opts.dayType && decision.rest) {
     const hist = liftingHistory(state, todayIso)
     const lastTyped = [...hist].reverse().find((h) => h.day)
     dayType = lastTyped ? rotateAfter(lastTyped.day) : 'push'
   }
+  const swapped = !!opts.dayType && opts.dayType !== decision.dayType
   const plan = DAY_PLAN[dayType]
   const emphasis = pickEmphasis(state, todayIso, dayType)
   const phase = trainingPhase(state, todayIso) // this week's strategic intent
@@ -397,7 +415,10 @@ export function buildSession(state, todayIso, opts = {}) {
     phase: phase.key, phaseLabel: phase.label, phaseShort: phase.short, phaseLine: phase.line,
     deload: phase.deload, heavy: phase.heavy,
     weekNumber: phase.weekNumber, totalWeeks: phase.totalWeeks, blockNumber: phase.blockNumber,
-    reason: decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason,
+    swapped, swappedFrom: swapped ? decision.dayType : null,
+    reason: swapped
+      ? `Swapped to ${plan.label} for today — ${DAY_PLAN[decision.dayType].label} is owed and waiting for you next time.`
+      : (decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason),
     emphasisReason: emphasis ? `Extra focus on ${labelFor(emphasis)} — it's lagging and fits ${plan.label.toLowerCase()} day.` : null,
     warmup: WARMUPS[dayType],
     exercises,
@@ -407,6 +428,21 @@ export function buildSession(state, todayIso, opts = {}) {
 
 function labelFor(part) {
   return { 'side-delts': 'side delts', 'rear-delts': 'rear delts', 'lower-back': 'lower back', lats: 'lats / back width' }[part] || part
+}
+
+// Day-types you can swap today's session to: the other rotation days whose muscles
+// are recovered (not trained yesterday), each with its estimated minutes so you can
+// pick the shorter one when time's tight.
+export function swapOptions(state, todayIso, currentDayType) {
+  const hist = liftingHistory(state, todayIso)
+  const out = []
+  for (const dt of ROTATION) {
+    if (dt === currentDayType) continue
+    if (!isRecovered(hist, dt, todayIso)) continue // muscles not recovered → don't offer
+    const est = estimateSessionMinutes(buildSession(state, todayIso, { dayType: dt, force: true }))
+    out.push({ dayType: dt, label: DAY_PLAN[dt].label, estMin: est })
+  }
+  return out.sort((a, b) => a.estMin - b.estMin) // shortest first (time-pressed pick)
 }
 
 // ---- in-the-moment coaching: form/intent cues (hypertrophy focus) -----------

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
-import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES } from './train'
+import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
@@ -81,6 +81,7 @@ export default function App() {
   const [flow, setFlow] = useState(null) // 'am' | 'pm' | null — guided skincare takeover
   const [hairFlow, setHairFlow] = useState(null) // 'am' | 'pm' | null — guided hair takeover
   const [training, setTraining] = useState(false) // guided gym session takeover
+  const [pendingSwap, setPendingSwap] = useState(null) // day-type to open the trainer pre-swapped to
   const [manageProducts, setManageProducts] = useState(false)
   const [manageSupps, setManageSupps] = useState(false)
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
@@ -289,6 +290,8 @@ export default function App() {
       w.did = session.status === 'done'
       if (session.label) w.type = session.label
       next.days[today].workout = w
+      // Owed-day bookkeeping: a swap sets owedDay; completing that day clears it.
+      if (session.status === 'done' && next.profile?.owedDay === session.dayType) next.profile.owedDay = null
       next.days[today]._ts = Date.now()
       saveLocal(next)
       return next
@@ -296,6 +299,8 @@ export default function App() {
     setPending(true)
     scheduleSync()
   }
+  // Record that today's scheduled day was swapped out → it's owed next session.
+  function oweDay(dayType) { if (dayType) updateProfile({ owedDay: dayType }) }
 
   // Resume a locked-in session: if today's workout is still 'active' on load,
   // drop straight back into the takeover instead of the dashboard.
@@ -439,7 +444,10 @@ export default function App() {
     done: w.session?.status === 'done',
     rest: trainSession.dayType === 'rest',
     label: trainSession.label || 'Rest',
+    dayType: trainSession.dayType,
     estMin: trainSession.dayType !== 'rest' ? estimateSessionMinutes(trainSession) : null,
+    swaps: (trainSession.dayType !== 'rest' && w.session?.status !== 'active' && w.session?.status !== 'done')
+      ? swapOptions(state, today, trainSession.dayType) : [],
   }
   const skinDue = dueSummary(today, state)
   const lastSleep = lastNightSleep(state, today)
@@ -604,6 +612,7 @@ export default function App() {
             onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
             onSteps={(v) => patch({ steps: v })}
             onStartTrain={() => setTraining(true)} train={trainCall}
+            onSwapDay={(dt) => { setPendingSwap(dt); setTraining(true) }}
             onStartHair={(slot) => setHairFlow(slot)}
             onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
             onWater={setWater}
@@ -632,8 +641,8 @@ export default function App() {
       {training && (
         <TrainFlow
           dateIso={today} state={state} hour={hour} minute={minute}
-          onPersist={writeSession}
-          onClose={() => setTraining(false)} />
+          onPersist={writeSession} onSwap={oweDay} swapTo={pendingSwap}
+          onClose={() => { setTraining(false); setPendingSwap(null) }} />
       )}
       {hairFlow && (
         <HairFlow
@@ -676,7 +685,7 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onSwapDay, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -734,6 +743,19 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
         <div className="space-y-3">
           <TrainStrategy state={state} dateIso={dateIso} />
           <TrainStart train={train} onStart={onStartTrain} />
+          {onSwapDay && train?.swaps?.length > 0 && !train.active && !train.done && (
+            <div>
+              <p className="text-[12px] text-[#8a8474]">Less time? Swap today's {train.label} day:</p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {train.swaps.map((o) => (
+                  <button key={o.dayType} onClick={() => onSwapDay(o.dayType)}
+                    className="rounded-full border border-[#d8d1c2] bg-[#fbf9f3] px-3 py-1.5 text-[13px] font-medium text-[#4a463c] active:scale-95">
+                    {o.label} · ~{o.estMin} min
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <Field label="Steps today">
             <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
             <span className="text-[13px] text-[#8a8474]">of {profile.stepTarget.toLocaleString()}</span>
