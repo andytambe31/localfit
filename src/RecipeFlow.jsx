@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RECIPES, OFFICE_LUNCH, recipeMacros, timeBucket, TIME_BUCKET_LABEL } from './recipes'
+import { RECIPES, OFFICE_LUNCH, RECIPE_BY_ID, OFFICE_LUNCH_BY_ID, recipeMacros, timeBucket, TIME_BUCKET_LABEL } from './recipes'
 import { effectivePantry, defaultLocation } from './diet'
 
 /* ---------- guided recipe flow: browse → cook/order → log -------------------
@@ -9,10 +9,11 @@ import { effectivePantry, defaultLocation } from './diet'
  * denormalizes the macros into the day's food log via onLog(item).
  *   state · dateIso · onLog(item) · onClose()
  * -------------------------------------------------------------------------- */
-export default function RecipeFlow({ state, dateIso, onLog, onClose }) {
+export default function RecipeFlow({ state, dateIso, initialRecipeId, onLog, onClose }) {
   const pantry = useMemo(() => effectivePantry(state), [state])
   const loc = state?.days?.[dateIso]?.foodLoc || defaultLocation(dateIso) // home | office | outside
-  const [picked, setPicked] = useState(null)
+  // Opened from a plate meal → jump straight into that recipe; else browse.
+  const [picked, setPicked] = useState(() => initialRecipeId ? (RECIPE_BY_ID[initialRecipeId] || OFFICE_LUNCH_BY_ID[initialRecipeId] || null) : null)
   const [i, setI] = useState(0)
   const [anim, setAnim] = useState('in')
   const [closing, setClosing] = useState(null)

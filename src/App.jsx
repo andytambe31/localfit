@@ -4,6 +4,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import RecipeFlow from './RecipeFlow'
+import { todaysPlate } from './recipes'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
@@ -100,7 +101,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || recipesOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -610,6 +611,8 @@ export default function App() {
         </button>
       </div>
 
+      <PlateCard state={state} today={today} onOpen={(id) => setRecipesOpen(id)} onBrowse={() => setRecipesOpen(true)} />
+
       <div key={focus || 'none'} className="focus-swap mt-5">
         {focus ? (
           <FocusCard
@@ -674,7 +677,7 @@ export default function App() {
       )}
       {liftsOpen && <LiftsView state={state} onClose={() => setLiftsOpen(false)} />}
       {diaryOpen && <DiaryView state={state} profile={profile} today={today} onClose={() => setDiaryOpen(false)} />}
-      {recipesOpen && <RecipeFlow state={state} dateIso={today} onLog={logFood} onClose={() => setRecipesOpen(false)} />}
+      {recipesOpen && <RecipeFlow state={state} dateIso={today} initialRecipeId={typeof recipesOpen === 'string' ? recipesOpen : null} onLog={logFood} onClose={() => setRecipesOpen(false)} />}
     </div>
     </>
   )
@@ -1468,6 +1471,36 @@ function SuppsModal({ profile, onClose, onSave }) {
 
 // Full-screen PR board: the best set on each main lift, with date + how far it's
 // come. Best set is picked by estimated 1RM but shown literally as weight × reps.
+// Today's Plate — the prescribed day: defined meals at defined times, each a tap
+// into the guided RecipeFlow (lunch on office days opens the restaurant rotation).
+function PlateCard({ state, today, onOpen, onBrowse }) {
+  const plate = todaysPlate(state, today)
+  if (!plate.length) return null
+  return (
+    <div className="mt-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-display text-[17px] font-semibold text-[#23211c]">Today's Plate</h3>
+        <span className="text-[11px] uppercase tracking-[0.18em] text-[#9a9482]">prescribed</span>
+      </div>
+      <div className="mt-2 flex flex-col divide-y divide-[#ece5d7]">
+        {plate.map((meal, n) => (
+          <button key={n} onClick={() => (meal.pick ? onBrowse() : onOpen(meal.recipeId))}
+            className="flex items-center gap-3 py-2.5 text-left active:opacity-70">
+            <span className="w-11 shrink-0 text-[12px] font-medium tabular-nums text-[#9a9482]">{meal.time}</span>
+            <span className={`h-4 w-4 shrink-0 rounded-full border ${meal.done ? 'border-[#3d4a32] bg-[#3d4a32]' : 'border-[#cfc7b5]'}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[14px] font-medium text-[#23211c]">{meal.pick ? 'Pick your lunch' : (meal.recipe?.name || meal.label)}</span>
+              <span className="block truncate text-[12px] text-[#9a9482]">
+                {meal.label}{meal.macros ? ` · ${meal.macros.kcal} cal · ${meal.macros.protein}g P` : meal.pick ? ' · office rotation' : ''}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function LiftsView({ state, onClose }) {
   const lifts = bestLifts(state)
   const hasAny = lifts.some((l) => l.best)

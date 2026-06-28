@@ -8,7 +8,7 @@
  * No runtime AI — the library is curated. "Variety" = filtering/ranking these
  * by what's in stock, the remaining macro gap, location, and time available.
  * -------------------------------------------------------------------------- */
-import { DEFAULT_PANTRY, pantryFor, dayTotals, calorieTarget, PROTEIN_TARGET_DEFAULT } from './diet'
+import { DEFAULT_PANTRY, pantryFor, dayTotals, calorieTarget, defaultLocation, PROTEIN_TARGET_DEFAULT } from './diet'
 
 const BY_ID = Object.fromEntries(DEFAULT_PANTRY.map((it) => [it.id, it]))
 
@@ -141,6 +141,40 @@ export const RECIPES = [
 ]
 
 export const RECIPE_BY_ID = Object.fromEntries(RECIPES.map((r) => [r.id, r]))
+
+// ---- Today's Plate: the prescribed day -------------------------------------
+// Defined meals at defined times, two day-shapes. Home days train AM (breakfast
+// is post-workout); office days train PM (a late post-workout shake + dinner)
+// and lunch is a pick from the restaurant rotation. `pick:true` opens the
+// rotation; otherwise a meal points at a specific recipe.
+const PLATE = {
+  home: [ // Mon / Fri / Sat / Sun — AM training
+    { slot: 'breakfast', time: '09:00', label: 'Breakfast', recipeId: 'berries_yogurt_bowl' },
+    { slot: 'lunch',     time: '12:30', label: 'Lunch',     recipeId: 'cajun_chicken_sweet_potato' },
+    { slot: 'snack',     time: '16:00', label: 'Snack',     recipeId: 'cottage_cheese_fruit_bowl' },
+    { slot: 'dinner',    time: '19:30', label: 'Dinner',    recipeId: 'stirfry_chicken_veg' },
+  ],
+  office: [ // Tue / Wed / Thu — PM training
+    { slot: 'breakfast', time: '07:00', label: 'Breakfast',     recipeId: 'berries_yogurt_bowl' },
+    { slot: 'lunch',     time: '12:30', label: 'Lunch',         pick: true },
+    { slot: 'snack',     time: '15:00', label: 'Snack',         recipeId: 'cottage_cheese_fruit_bowl' },
+    { slot: 'snack',     time: '21:15', label: 'Post-workout',  recipeId: 'whey_banana_shake' },
+    { slot: 'dinner',    time: '21:45', label: 'Dinner',        recipeId: 'cajun_chicken_sweet_potato' },
+  ],
+}
+
+// The prescribed plate for a day: each meal resolved to its recipe + macros, with
+// a coarse `done` flag (something logged in that meal slot). Location-aware.
+export function todaysPlate(state, dateIso) {
+  const loc = state?.days?.[dateIso]?.foodLoc || defaultLocation(dateIso)
+  const plan = PLATE[loc] || PLATE.home
+  const log = state?.days?.[dateIso]?.food || []
+  const doneSlots = new Set(log.map((e) => e.meal).filter(Boolean))
+  return plan.map((meal) => {
+    const recipe = meal.pick ? null : (RECIPE_BY_ID[meal.recipeId] || OFFICE_LUNCH_BY_ID[meal.recipeId] || null)
+    return { ...meal, recipe, macros: recipe ? recipeMacros(recipe) : null, done: doneSlots.has(meal.slot) }
+  })
+}
 
 // Office-day lunches: a curated rotation of healthy spots a short walk / quick
 // pickup from the office (141 Portland St → Kendall Sq). No cooking — pick one
