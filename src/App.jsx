@@ -2029,7 +2029,12 @@ function NumInput({ value, placeholder, step, onCommit }) {
 // December, stays noise-aware (won't react to water/creatine), and offers a one-tap
 // calorie adjustment when the trend genuinely drifts.
 function DeficitCard({ state, today, onApply }) {
+  const [editCeiling, setEditCeiling] = useState(false)
+  const [draft, setDraft] = useState(0)
   const c = deficitCoach(state, today)
+  const ct = calorieTarget(state)
+  const ctCeiling = ct?.ceiling || 1800
+  const ctManual = !!ct?.manual
   if (!c || c.status === 'no-weight') return null // WeightCard already prompts for weight
   const tone = c.status === 'behind' ? 'border-[#e7d4b6] bg-[#f7ecd6]'
     : c.status === 'too-fast' ? 'border-[#dcae73] bg-[#fbf1e1]'
@@ -2054,6 +2059,23 @@ function DeficitCard({ state, today, onApply }) {
           {c.adjust.dir === 'down' ? `Tighten ${c.adjust.deltaCal} cal → ${c.adjust.newCeiling} ceiling` : `Add ${c.adjust.deltaCal} cal → ${c.adjust.newCeiling} ceiling`}
         </button>
       )}
+      <div className="mt-3 border-t border-[#00000010] pt-3">
+        {!editCeiling ? (
+          <button onClick={() => { setDraft(ctCeiling); setEditCeiling(true) }} className="text-[12px] font-medium text-[#7d8a5f] active:opacity-70">
+            {ctManual ? `Ceiling pinned at ${ctCeiling} — edit` : 'Set the ceiling manually'}
+          </button>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-full border border-[#d9d2c2] bg-[#fffdf8] px-1.5 py-0.5">
+              <button onClick={() => setDraft((d) => Math.max(1000, d - 50))} className="px-2 text-[18px] leading-none text-[#5b574c] active:opacity-60">−</button>
+              <span className="w-12 text-center text-[14px] font-semibold tabular-nums text-[#23211c]">{draft}</span>
+              <button onClick={() => setDraft((d) => Math.min(4000, d + 50))} className="px-2 text-[18px] leading-none text-[#5b574c] active:opacity-60">+</button>
+            </div>
+            <button onClick={() => { onApply({ calorieCeiling: draft }); setEditCeiling(false) }} className="rounded-full bg-[#3d4a32] px-3.5 py-1.5 text-[12px] font-semibold text-[#f4f1e8] active:scale-95">Pin</button>
+            <button onClick={() => { onApply({ calorieCeiling: null }); setEditCeiling(false) }} className="rounded-full px-3 py-1.5 text-[12px] font-medium text-[#7d8a5f] active:opacity-70">Auto</button>
+          </div>
+        )}
+      </div>
     </section>
   )
 }
