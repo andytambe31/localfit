@@ -5,6 +5,7 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import RecipeFlow from './RecipeFlow'
 import { todaysPlate } from './recipes'
+import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL } from './groceries'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
@@ -89,6 +90,7 @@ export default function App() {
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
   const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
+  const [groceriesOpen, setGroceriesOpen] = useState(false) // pantry stock + shopping list (declared before overlayOpen uses it)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
 
@@ -101,7 +103,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -332,6 +334,28 @@ export default function App() {
       food.splice(idx, 1)
       next.days[today].food = food
       next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  // --- pantry stock: per-item level lives under profile.stock so it survives the
+  // server merge (only profile/days/logs/pantry are preserved). ---
+  function setStock(id, level) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.profile = { ...(next.profile || {}), stock: { ...(next.profile?.stock || {}), [id]: level } }
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  // Log a grocery haul: everything Low/Out flips to Stocked, and the haul date
+  // resets the restock timer.
+  function logHaul() {
+    setState((prev) => {
+      const next = clone(prev)
+      const stock = { ...(next.profile?.stock || {}) }
+      for (const k of Object.keys(stock)) if (stock[k] === 'low' || stock[k] === 'out') stock[k] = 'stocked'
+      next.profile = { ...(next.profile || {}), stock, lastHaulDate: today }
       saveLocal(next); return next
     })
     setPending(true); scheduleSync()
@@ -593,7 +617,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-2">
+      <div className="mt-3 grid grid-cols-2 gap-2">
         <button onClick={() => setDiaryOpen(true)}
           className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
@@ -608,6 +632,11 @@ export default function App() {
           className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h13l5 5v15H3z" /><path d="M16 2v5h5M8 13h8M8 17h8M8 9h2" /></svg>
           Recipes
+        </button>
+        <button onClick={() => setGroceriesOpen(true)}
+          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h2l2.4 12.3a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L22 7H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>
+          Groceries{lowCount(state) ? ` · ${lowCount(state)}` : ''}
         </button>
       </div>
 
@@ -678,6 +707,7 @@ export default function App() {
       {liftsOpen && <LiftsView state={state} onClose={() => setLiftsOpen(false)} />}
       {diaryOpen && <DiaryView state={state} profile={profile} today={today} onClose={() => setDiaryOpen(false)} />}
       {recipesOpen && <RecipeFlow state={state} dateIso={today} initialRecipeId={typeof recipesOpen === 'string' ? recipesOpen : null} onLog={logFood} onClose={() => setRecipesOpen(false)} />}
+      {groceriesOpen && <GroceriesView state={state} today={today} onStock={setStock} onHaul={logHaul} onClose={() => setGroceriesOpen(false)} />}
     </div>
     </>
   )
@@ -1498,6 +1528,68 @@ function PlateCard({ state, today, onOpen, onBrowse }) {
         ))}
       </div>
     </div>
+  )
+}
+
+// Pantry stock + shopping list. Tap a stock chip to cycle Stocked → Low → Out;
+// the shopping list is everything Low/Out, and "Log haul" flips it all back.
+function GroceriesView({ state, today, onStock, onHaul, onClose }) {
+  const list = shoppingList(state)
+  const due = restockDue(state, today)
+  const byGroup = {}
+  for (const it of effectivePantry(state)) { const g = groupOf(it); (byGroup[g] ||= []).push(it) }
+  const chip = (lvl) => lvl === 'out' ? 'border-[#b5503f] text-[#b5503f]' : lvl === 'low' ? 'border-[#a8842a] text-[#a8842a]' : 'border-[#cfc7b5] text-[#8a8474]'
+  const Row = ({ it, lvl }) => (
+    <button onClick={() => onStock(it.id, cycleStock(lvl))} className="flex w-full items-center justify-between gap-3 py-2 text-left active:opacity-70">
+      <span className="truncate text-[14px] text-[#23211c]">{it.name}</span>
+      <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${chip(lvl)}`}>{STOCK_LABEL[lvl]}</span>
+    </button>
+  )
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-6">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Groceries</h1>
+        <p className="mt-1 text-[13px] text-[#8a8474]">Tap a chip to cycle Stocked → Low → Out. The shopping list builds itself.</p>
+
+        {due.due && (
+          <div className="mt-4 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+            <p className="text-[14px] font-medium text-[#23211c]">Grocery day — {due.low} item{due.low > 1 ? 's' : ''} to restock{due.out ? ", something's out" : ''}.</p>
+            <p className="mt-0.5 text-[12px] text-[#8a8474]">{due.daysSince >= 900 ? 'No haul logged yet.' : `${due.daysSince} day${due.daysSince === 1 ? '' : 's'} since your last haul (every ${due.cadence}).`}</p>
+          </div>
+        )}
+
+        {list.length > 0 && (
+          <div className="mt-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Shopping list</h2>
+              <button onClick={onHaul} className="rounded-full bg-[#3d4a32] px-3.5 py-1.5 text-[12px] font-semibold text-[#f4f1e8]">Log haul</button>
+            </div>
+            <div className="mt-2 space-y-3">
+              {list.map(({ group, items }) => (
+                <div key={group} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
+                  <p className="px-1 text-[11px] font-medium uppercase tracking-wider text-[#a39c8d]">{group}</p>
+                  <div className="mt-1 divide-y divide-[#ece5d7]">{items.map(({ item, level }) => <Row key={item.id} it={item} lvl={level} />)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <h2 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Your pantry</h2>
+        <div className="mt-2 space-y-3">
+          {GROUP_ORDER.filter((g) => byGroup[g]).map((g) => (
+            <div key={g} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
+              <p className="px-1 text-[11px] font-medium uppercase tracking-wider text-[#a39c8d]">{g}</p>
+              <div className="mt-1 divide-y divide-[#ece5d7]">{byGroup[g].map((it) => <Row key={it.id} it={it} lvl={stockLevel(state, it.id)} />)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
