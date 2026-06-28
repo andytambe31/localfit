@@ -71,6 +71,14 @@ const DAY_PLAN = {
   legs: { label: 'Legs', muscles: ['quads', 'hamstrings', 'glutes'],
           core: ['squat', 'rdl', 'leg_press', 'leg_curl', 'leg_ext'],
           emphasisPool: { glutes: ['hip_thrust', 'cable_kickback'], calves: ['calf_raise'], tibialis: ['tib_raise'], 'lower-back': ['back_ext'] } },
+  // Upper/Lower — for the 5-day split (Push/Pull/Legs/Upper/Lower). Composed from
+  // the same exercise pool, so progression/prefill carries across day-types.
+  upper: { label: 'Upper', muscles: ['chest', 'back', 'shoulders', 'biceps', 'triceps'],
+          core: ['bench_press', 'barbell_row', 'shoulder_press', 'lat_pulldown', 'triceps_pushdown', 'db_curl'],
+          emphasisPool: { 'side-delts': ['lateral_raise'], 'rear-delts': ['rear_delt_fly', 'face_pull'], lats: ['seated_row'], forearms: ['hammer_curl'], neck: ['shrug'] } },
+  lower: { label: 'Lower', muscles: ['quads', 'hamstrings', 'glutes', 'calves'],
+          core: ['squat', 'rdl', 'leg_press', 'leg_curl', 'calf_raise'],
+          emphasisPool: { glutes: ['hip_thrust', 'cable_kickback'], calves: ['calf_raise'], tibialis: ['tib_raise'], 'lower-back': ['back_ext'] } },
 }
 
 // Lagging body parts that biomechanically belong to each day (rotation order =
@@ -79,6 +87,8 @@ const LAGGING_BY_DAY = {
   push: ['side-delts', 'neck', 'calves'],
   pull: ['lats', 'rear-delts', 'forearms', 'lower-back', 'neck'],
   legs: ['glutes', 'calves', 'tibialis', 'lower-back'],
+  upper: ['side-delts', 'rear-delts', 'lats', 'forearms', 'neck'],
+  lower: ['glutes', 'calves', 'tibialis', 'lower-back'],
 }
 
 // Warm-up: a general primer plus day-specific activation. Optional treadmill is
@@ -102,6 +112,18 @@ const WARMUPS = {
     { id: 'wu_bodyweight_squat', name: 'Bodyweight Squats', instruction: 'Two sets of fifteen, full depth. Open the hips and knees.', hold: null },
     { id: 'wu_light_squat', name: 'Light Squat Ramp', instruction: 'Empty bar, then one light set to groove depth.', hold: null },
   ],
+  upper: [
+    { id: 'wu_treadmill', name: 'Treadmill Walk', instruction: 'Five easy minutes to warm up. Optional — skip if you walked in.', optional: true, cardio: true, hold: null },
+    { id: 'wu_arm_circles', name: 'Arm Circles', instruction: 'Twenty forward, twenty back. Loosen the shoulders.', hold: null },
+    { id: 'wu_band_pullapart', name: 'Band Pull-Aparts', instruction: 'Two sets of fifteen. Prime the upper back and rear delts.', hold: null },
+    { id: 'wu_light_press', name: 'Light Press Ramp', instruction: 'One light set of the first press to groove the pattern.', hold: null },
+  ],
+  lower: [
+    { id: 'wu_treadmill', name: 'Treadmill Walk', instruction: 'Five easy minutes to warm up. Optional — skip if you walked in.', optional: true, cardio: true, hold: null },
+    { id: 'wu_leg_swings', name: 'Leg Swings', instruction: 'Fifteen each leg, front-to-back and side-to-side.', hold: null },
+    { id: 'wu_bodyweight_squat', name: 'Bodyweight Squats', instruction: 'Two sets of fifteen, full depth. Open the hips and knees.', hold: null },
+    { id: 'wu_light_squat', name: 'Light Squat Ramp', instruction: 'Empty bar, then one light set to groove depth.', hold: null },
+  ],
 }
 
 // Full cooldown stretch routine per day. `hold` seconds => the card shows a
@@ -120,6 +142,19 @@ const COOLDOWNS = {
     { id: 'st_forearm', name: 'Forearm Flexor Stretch', instruction: 'Arm out, gently pull the fingers back. Each side.', hold: 25 },
   ],
   legs: [
+    { id: 'st_kneeling_hip', name: 'Kneeling Hip Flexor', instruction: 'Half-kneel, tuck the pelvis, push the hips forward. Each side.', hold: 40 },
+    { id: 'st_seated_ham', name: 'Seated Hamstring Reach', instruction: 'Leg extended in front, hinge forward over it. Each side.', hold: 40 },
+    { id: 'st_pigeon_glute', name: 'Pigeon Glute Stretch', instruction: 'Shin across in front, fold forward over it. Each side.', hold: 45 },
+    { id: 'st_calf_wall', name: 'Calf Wall Stretch', instruction: 'Back leg straight, heel down, lean into the wall. Each side.', hold: 30 },
+    { id: 'st_quad_stand', name: 'Standing Quad Stretch', instruction: 'Heel to glute, knees together. Each side.', hold: 30 },
+  ],
+  upper: [
+    { id: 'st_doorway_chest', name: 'Doorway Chest Stretch', instruction: 'Forearm on the frame, step through until you feel the chest open. Each side.', hold: 30 },
+    { id: 'st_cross_shoulder', name: 'Cross-Body Shoulder', instruction: 'Pull the arm across your chest. Each side.', hold: 30 },
+    { id: 'st_lat_hang', name: 'Lat Hang Stretch', instruction: 'Hang from a bar or hold a post and lean back to lengthen the lats.', hold: 30 },
+    { id: 'st_biceps_wall', name: 'Biceps Wall Stretch', instruction: 'Palm on the wall behind you, rotate away. Each side.', hold: 30 },
+  ],
+  lower: [
     { id: 'st_kneeling_hip', name: 'Kneeling Hip Flexor', instruction: 'Half-kneel, tuck the pelvis, push the hips forward. Each side.', hold: 40 },
     { id: 'st_seated_ham', name: 'Seated Hamstring Reach', instruction: 'Leg extended in front, hinge forward over it. Each side.', hold: 40 },
     { id: 'st_pigeon_glute', name: 'Pigeon Glute Stretch', instruction: 'Shin across in front, fold forward over it. Each side.', hold: 45 },
@@ -195,6 +230,10 @@ function sessionsThisWeek(hist, todayIso) {
 }
 
 const ROTATION = ['push', 'pull', 'legs']
+// Day-types offered as manual swaps: the rotation three plus Upper/Lower, so you
+// can run a 5-day split on demand. Auto-rotation stays push/pull/legs; Upper and
+// Lower are opt-in (chosen via the swap), never force-scheduled.
+const SWAP_TYPES = ['push', 'pull', 'legs', 'upper', 'lower']
 function rotateAfter(day) {
   const i = ROTATION.indexOf(day)
   return i === -1 ? 'push' : ROTATION[(i + 1) % ROTATION.length]
@@ -436,7 +475,7 @@ function labelFor(part) {
 export function swapOptions(state, todayIso, currentDayType) {
   const hist = liftingHistory(state, todayIso)
   const out = []
-  for (const dt of ROTATION) {
+  for (const dt of SWAP_TYPES) {
     if (dt === currentDayType) continue
     if (!isRecovered(hist, dt, todayIso)) continue // muscles not recovered → don't offer
     const est = estimateSessionMinutes(buildSession(state, todayIso, { dayType: dt, force: true }))
