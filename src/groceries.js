@@ -10,6 +10,18 @@
  * -------------------------------------------------------------------------- */
 import { effectivePantry, groupOf, GROUP_ORDER } from './diet'
 
+// A raw ingredient you actually buy/stock — NOT a composed dish. Meals (their own
+// category), ingredient-combos, and multi-part custom builds are excluded so the
+// pantry/shopping list shows groceries, not recipes.
+const MEAL_CATS = new Set(['homemade_meal', 'office_food', 'restaurant_meal'])
+export function isRawIngredient(it) {
+  if (!it) return false
+  if (MEAL_CATS.has(it.category)) return false   // homemade / office / restaurant meals
+  if (it.ingredients?.length) return false        // combos built from other items
+  if ((it.mods?.length || 0) >= 2) return false   // multi-part custom dishes
+  return true
+}
+
 export const STOCK_LEVELS = ['stocked', 'low', 'out']
 export const STOCK_LABEL = { stocked: 'Stocked', low: 'Low', out: 'Out' }
 
@@ -21,7 +33,7 @@ export function cycleStock(level) { return level === 'stocked' ? 'low' : level =
 // (Protein / Fruit / Veg / …) in display order. Each entry carries its level.
 export function shoppingList(state) {
   const stock = state?.profile?.stock || {}
-  const need = effectivePantry(state).filter((it) => stock[it.id] === 'low' || stock[it.id] === 'out')
+  const need = effectivePantry(state).filter((it) => isRawIngredient(it) && (stock[it.id] === 'low' || stock[it.id] === 'out'))
   const groups = {}
   for (const it of need) { const g = groupOf(it); (groups[g] ||= []).push({ item: it, level: stock[it.id] }) }
   return GROUP_ORDER.filter((g) => groups[g]).map((g) => ({ group: g, items: groups[g] }))

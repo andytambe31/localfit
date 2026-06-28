@@ -5,7 +5,7 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import RecipeFlow from './RecipeFlow'
 import { todaysPlate } from './recipes'
-import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, perishabilityOf, PERISH_TIERS, PERISH_META } from './groceries'
+import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, perishabilityOf, PERISH_TIERS, PERISH_META, isRawIngredient } from './groceries'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
@@ -1538,7 +1538,7 @@ function GroceriesView({ state, today, onStock, onHaul, onClose }) {
   const list = shoppingList(state)
   const due = restockDue(state, today)
   const byTier = {}
-  for (const it of effectivePantry(state)) { const t = perishabilityOf(it); (byTier[t] ||= []).push(it) }
+  for (const it of effectivePantry(state).filter(isRawIngredient)) { const t = perishabilityOf(it); (byTier[t] ||= []).push(it) }
   const chip = (lvl) => lvl === 'out' ? 'border-[#b5503f] text-[#b5503f]' : lvl === 'low' ? 'border-[#a8842a] text-[#a8842a]' : 'border-[#cfc7b5] text-[#8a8474]'
   const Row = ({ it, lvl }) => (
     <button onClick={() => onStock(it.id, cycleStock(lvl))} className="flex w-full items-center justify-between gap-3 py-2 text-left active:opacity-70">
