@@ -1534,6 +1534,7 @@ function PlateCard({ state, today, onOpen, onBrowse }) {
 // Pantry stock + shopping list. Tap a stock chip to cycle Stocked → Low → Out;
 // the shopping list is everything Low/Out, and "Log haul" flips it all back.
 function GroceriesView({ state, today, onStock, onHaul, onClose }) {
+  const [open, setOpen] = useState({}) // which pantry groups are expanded (default collapsed)
   const list = shoppingList(state)
   const due = restockDue(state, today)
   const byGroup = {}
@@ -1582,8 +1583,12 @@ function GroceriesView({ state, today, onStock, onHaul, onClose }) {
         <div className="mt-2 space-y-3">
           {GROUP_ORDER.filter((g) => byGroup[g]).map((g) => (
             <div key={g} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
-              <p className="px-1 text-[11px] font-medium uppercase tracking-wider text-[#a39c8d]">{g}</p>
-              <div className="mt-1 divide-y divide-[#ece5d7]">{byGroup[g].map((it) => <Row key={it.id} it={it} lvl={stockLevel(state, it.id)} />)}</div>
+              <button onClick={() => setOpen((o) => ({ ...o, [g]: !o[g] }))}
+                className="flex w-full items-center justify-between px-1 py-0.5 text-left active:opacity-70">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-[#a39c8d]">{g}<span className="text-[#c3bba8]"> · {byGroup[g].length}</span></span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a39c8d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open[g] ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+              {open[g] && <div className="mt-1 divide-y divide-[#ece5d7]">{byGroup[g].map((it) => <Row key={it.id} it={it} lvl={stockLevel(state, it.id)} />)}</div>}
             </div>
           ))}
         </div>
