@@ -138,6 +138,63 @@ export const RECIPES = [
       'Tzatziki on the side.',
       'Heavy protein, minimal carbs — a lean office default.',
     ] },
+  // --- built on the goal-optimal staples ----------------------------------
+  { id: 'salmon_quinoa_bowl', name: 'Salmon & Quinoa Bowl', loc: 'home',
+    meals: ['lunch', 'dinner'], timeMin: 25, complexity: 'medium', tags: ['high-protein', 'omega3', 'fiber'],
+    ingredients: [{ id: 'salmon', qty: 1.5 }, { id: 'quinoa', qty: 1 }, { id: 'spinach', qty: 1 }, { id: 'olive_oil', qty: 1 }],
+    steps: [
+      'Season the salmon; roast or pan-sear ~12 min to 50–52°C internal.',
+      'Cook the quinoa (or use pre-cooked); wilt the spinach in a little olive oil.',
+      'Build the bowl: quinoa, spinach, salmon on top. Lemon and pepper to finish.',
+    ] },
+  { id: 'turkey_chili', name: 'Turkey & Chickpea Chili', loc: 'home',
+    meals: ['dinner'], timeMin: 30, complexity: 'medium', tags: ['high-protein', 'fiber', 'meal-prep'],
+    ingredients: [{ id: 'ground_turkey', qty: 1.5 }, { id: 'chickpeas', qty: 1 }, { id: 'bell_pepper', qty: 1 }],
+    steps: [
+      'Brown the turkey with diced bell pepper, onion, garlic.',
+      'Add chickpeas, chopped tomatoes, chili powder, cumin, paprika.',
+      'Simmer 15–20 min until thick. Makes great leftovers.',
+    ] },
+  { id: 'red_lentil_dahl', name: 'Red Lentil Dahl', loc: 'home',
+    meals: ['lunch', 'dinner'], timeMin: 30, complexity: 'medium', tags: ['fiber', 'high-protein', 'plant'],
+    ingredients: [{ id: 'red_lentils', qty: 1 }, { id: 'spinach', qty: 1 }],
+    steps: [
+      'Sauté ginger, garlic, cumin, turmeric in a little oil.',
+      'Add red lentils + water/stock; simmer ~20 min until soft.',
+      'Stir in spinach to wilt; season with salt and lemon.',
+    ] },
+  { id: 'tuna_chickpea_bowl', name: 'Tuna & Chickpea Bowl', loc: 'both',
+    meals: ['lunch'], timeMin: 5, complexity: 'easy', tags: ['high-protein', 'fiber', 'no-cook'],
+    ingredients: [{ id: 'canned_tuna', qty: 1 }, { id: 'chickpeas', qty: 1 }, { id: 'bell_pepper', qty: 1 }],
+    steps: [
+      'Drain the tuna; rinse the chickpeas.',
+      'Toss with diced bell pepper, lemon, olive oil, salt and pepper.',
+      'No cooking — a 5-minute high-protein lunch for a low-pantry day.',
+    ] },
+  { id: 'tofu_veg_stirfry', name: 'Tofu & Veg Stir-Fry', loc: 'home',
+    meals: ['lunch', 'dinner'], timeMin: 20, complexity: 'medium', tags: ['plant', 'high-protein', 'low-cal'],
+    ingredients: [{ id: 'tofu', qty: 1.5 }, { id: 'broccoli', qty: 1 }, { id: 'bell_pepper', qty: 1 }, { id: 'soy_sauce', qty: 1 }],
+    steps: [
+      'Press and cube the tofu; sear hard until golden on all sides.',
+      'Stir-fry broccoli and pepper with a splash of water.',
+      'Return the tofu; toss with soy sauce, ginger, a little sriracha.',
+    ] },
+  { id: 'overnight_oats', name: 'High-Protein Overnight Oats', loc: 'home',
+    meals: ['breakfast'], timeMin: 5, complexity: 'easy', tags: ['fiber', 'high-protein', 'meal-prep'],
+    ingredients: [{ id: 'rolled_oats', qty: 1 }, { id: 'fage_total_0', qty: 1 }, { id: 'blueberries', qty: 0.5 }, { id: 'chia_seeds', qty: 1 }],
+    steps: [
+      'Stir oats, Fage, chia and a splash of milk in a jar.',
+      'Top with blueberries; refrigerate overnight.',
+      'Grab and go in the morning — fiber + protein, zero effort.',
+    ] },
+  { id: 'shrimp_quinoa_asparagus', name: 'Shrimp, Quinoa & Asparagus', loc: 'home',
+    meals: ['dinner'], timeMin: 20, complexity: 'medium', tags: ['high-protein', 'low-cal'],
+    ingredients: [{ id: 'shrimp', qty: 1.5 }, { id: 'quinoa', qty: 1 }, { id: 'asparagus', qty: 1 }],
+    steps: [
+      'Cook the quinoa; roast or pan the asparagus in olive oil.',
+      'Sear the shrimp 2–3 min until pink — garlic, lemon, chili flakes.',
+      'Plate over the quinoa with the asparagus.',
+    ] },
 ]
 
 export const RECIPE_BY_ID = Object.fromEntries(RECIPES.map((r) => [r.id, r]))
