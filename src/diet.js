@@ -204,8 +204,13 @@ export function calorieTarget(state, opts = {}) {
   const t = tdee(state)
   if (!t) return null
   const deficit = opts.deficit ?? state.profile?.deficit ?? 500
+  // Manual override: pin the ceiling directly when you've found the formula
+  // overestimates your real burn (it blends to observed TDEE on its own once
+  // enough weigh-ins + logged days accrue; the override just gets there now).
+  const manual = opts.ceiling ?? state.profile?.calorieCeiling
+  const ceiling = manual > 0 ? Math.round(manual / 10) * 10 : Math.round((t.value - deficit) / 10) * 10
   return {
-    ceiling: Math.round((t.value - deficit) / 10) * 10,
+    ceiling, manual: manual > 0 || null,
     tdee: t.value, confidence: t.confidence,
     lbm: t.bf != null ? Math.round(t.kg * (1 - t.bf / 100) * 10) / 10 : null, kg: t.kg, bf: t.bf,
   }

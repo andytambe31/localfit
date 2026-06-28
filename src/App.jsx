@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
+import RecipeFlow from './RecipeFlow'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
@@ -86,6 +87,7 @@ export default function App() {
   const [manageSupps, setManageSupps] = useState(false)
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
+  const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
 
@@ -98,7 +100,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || recipesOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -590,7 +592,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-3 grid grid-cols-3 gap-2">
         <button onClick={() => setDiaryOpen(true)}
           className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
@@ -600,6 +602,11 @@ export default function App() {
           className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v3" /><path d="M3 10v4M21 10v4" /></svg>
           Your lifts
+        </button>
+        <button onClick={() => setRecipesOpen(true)}
+          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h13l5 5v15H3z" /><path d="M16 2v5h5M8 13h8M8 17h8M8 9h2" /></svg>
+          Recipes
         </button>
       </div>
 
@@ -667,6 +674,7 @@ export default function App() {
       )}
       {liftsOpen && <LiftsView state={state} onClose={() => setLiftsOpen(false)} />}
       {diaryOpen && <DiaryView state={state} profile={profile} today={today} onClose={() => setDiaryOpen(false)} />}
+      {recipesOpen && <RecipeFlow state={state} dateIso={today} onLog={logFood} onClose={() => setRecipesOpen(false)} />}
     </div>
     </>
   )
