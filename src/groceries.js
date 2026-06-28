@@ -43,3 +43,20 @@ export function restockDue(state, todayIso) {
   const low = lowCount(state)
   return { due: low > 0 && (daysSince >= cadence || out), daysSince, cadence, out, low }
 }
+
+// --- perishability: what to stockpile vs buy fresh ---------------------------
+// An item's own `perishability` wins; otherwise it's inferred from its category.
+// Drives the pantry view's Stockpile / Fridge / Fresh grouping (you restock by
+// how long things last, not by food group).
+const PERISH_BY_CAT = {
+  condiment: 'stable', dip: 'stable', supplement: 'stable', protein_snack: 'stable', beverage: 'stable', dessert: 'stable',
+  dairy: 'fridge', dairy_alt: 'fridge', protein: 'fridge', office_food: 'fridge',
+  fruit: 'fresh', vegetable: 'fresh', side: 'fresh', homemade_meal: 'fresh', restaurant_meal: 'fresh',
+}
+export function perishabilityOf(it) { return it?.perishability || PERISH_BY_CAT[it?.category] || 'fridge' }
+export const PERISH_TIERS = ['stable', 'fridge', 'fresh']
+export const PERISH_META = {
+  stable: { label: 'Stockpile', hint: 'shelf-stable · buy in bulk' },
+  fridge: { label: 'Fridge / Freezer', hint: 'lasts a week or two' },
+  fresh:  { label: 'Fresh', hint: 'perishable · buy often' },
+}

@@ -5,7 +5,7 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import RecipeFlow from './RecipeFlow'
 import { todaysPlate } from './recipes'
-import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL } from './groceries'
+import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, perishabilityOf, PERISH_TIERS, PERISH_META } from './groceries'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
@@ -1534,11 +1534,11 @@ function PlateCard({ state, today, onOpen, onBrowse }) {
 // Pantry stock + shopping list. Tap a stock chip to cycle Stocked → Low → Out;
 // the shopping list is everything Low/Out, and "Log haul" flips it all back.
 function GroceriesView({ state, today, onStock, onHaul, onClose }) {
-  const [open, setOpen] = useState({}) // which pantry groups are expanded (default collapsed)
+  const [open, setOpen] = useState({}) // which pantry tiers are expanded (default collapsed)
   const list = shoppingList(state)
   const due = restockDue(state, today)
-  const byGroup = {}
-  for (const it of effectivePantry(state)) { const g = groupOf(it); (byGroup[g] ||= []).push(it) }
+  const byTier = {}
+  for (const it of effectivePantry(state)) { const t = perishabilityOf(it); (byTier[t] ||= []).push(it) }
   const chip = (lvl) => lvl === 'out' ? 'border-[#b5503f] text-[#b5503f]' : lvl === 'low' ? 'border-[#a8842a] text-[#a8842a]' : 'border-[#cfc7b5] text-[#8a8474]'
   const Row = ({ it, lvl }) => (
     <button onClick={() => onStock(it.id, cycleStock(lvl))} className="flex w-full items-center justify-between gap-3 py-2 text-left active:opacity-70">
@@ -1580,15 +1580,19 @@ function GroceriesView({ state, today, onStock, onHaul, onClose }) {
         )}
 
         <h2 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Your pantry</h2>
+        <p className="mt-0.5 text-[12px] text-[#a39c8d]">Grouped by how long it lasts — stockpile the stable stuff, buy fresh often.</p>
         <div className="mt-2 space-y-3">
-          {GROUP_ORDER.filter((g) => byGroup[g]).map((g) => (
-            <div key={g} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
-              <button onClick={() => setOpen((o) => ({ ...o, [g]: !o[g] }))}
+          {PERISH_TIERS.filter((t) => byTier[t]).map((t) => (
+            <div key={t} className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
+              <button onClick={() => setOpen((o) => ({ ...o, [t]: !o[t] }))}
                 className="flex w-full items-center justify-between px-1 py-0.5 text-left active:opacity-70">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-[#a39c8d]">{g}<span className="text-[#c3bba8]"> · {byGroup[g].length}</span></span>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a39c8d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open[g] ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+                <span className="min-w-0">
+                  <span className="text-[12px] font-semibold text-[#23211c]">{PERISH_META[t].label}</span>
+                  <span className="text-[11px] text-[#a39c8d]"> · {byTier[t].length} · {PERISH_META[t].hint}</span>
+                </span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a39c8d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-200 ${open[t] ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
               </button>
-              {open[g] && <div className="mt-1 divide-y divide-[#ece5d7]">{byGroup[g].map((it) => <Row key={it.id} it={it} lvl={stockLevel(state, it.id)} />)}</div>}
+              {open[t] && <div className="mt-1 divide-y divide-[#ece5d7]">{byTier[t].map((it) => <Row key={it.id} it={it} lvl={stockLevel(state, it.id)} />)}</div>}
             </div>
           ))}
         </div>

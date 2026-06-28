@@ -42,7 +42,7 @@ export const DEFAULT_PANTRY = [
   { id: 'espresso',         name: 'Espresso',           loc: 'home', category: 'beverage',   portion: '1 shot',          kcal: 5,   protein: 0.3, carbs: 1,    fat: 0,    fiber: 0,   sugar: 0 },
   { id: 'sriracha',         name: 'Sriracha',           loc: 'home', category: 'condiment',  portion: '1 tbsp',          kcal: 15,  protein: 0,   carbs: 3,    fat: 0,    fiber: 0,   sugar: 1 },
   { id: 'barebells_bar',    name: 'Barebells Protein Bar', loc: 'home', category: 'protein_snack', portion: '1 bar',    kcal: 200, protein: 20,  carbs: 20,   fat: 7,    fiber: 3,   sugar: 1 },
-  { id: 'whey_isolate',     name: 'Impact Whey Isolate',   loc: 'home', category: 'protein',       portion: '1 scoop (25g)', kcal: 100, protein: 23, carbs: 2, fat: 1, fiber: 0,   sugar: 1 },
+  { id: 'whey_isolate',     name: 'Impact Whey Isolate',   loc: 'home', category: 'protein',       portion: '1 scoop (25g)', kcal: 100, protein: 23, carbs: 2, fat: 1, fiber: 0,   sugar: 1, perishability: 'stable' },
   { id: 'creatine',         name: 'Creatine Monohydrate',  loc: 'home', category: 'supplement',    portion: '1 scoop (3g)',  kcal: 0,   protein: 0,  carbs: 0, fat: 0, fiber: 0,   sugar: 0 },
   { id: 'homemade_chicken_bowl', name: 'Homemade Chicken Bowl', loc: 'home', category: 'homemade_meal', portion: '1 bowl', kcal: 510, protein: 45, carbs: 28, fat: 23, fiber: 10, sugar: 6,
     mods: [{ id: 'chicken', label: 'Chicken (×50g)', default: 3, min: 0, max: 8, per: { kcal: 83, protein: 15.5, carbs: 0, fat: 1.8 } }] },
