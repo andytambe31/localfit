@@ -640,7 +640,8 @@ export default function App() {
         </button>
       </div>
 
-      <PlateCard state={state} today={today} onOpen={(id) => setRecipesOpen(id)} onBrowse={() => setRecipesOpen(true)} />
+      {/* Today's Plate card hidden per request — restore by uncommenting the line below */}
+      {/* <PlateCard state={state} today={today} onOpen={(id) => setRecipesOpen(id)} onBrowse={() => setRecipesOpen(true)} /> */}
 
       <div key={focus || 'none'} className="focus-swap mt-5">
         {focus ? (
