@@ -10,6 +10,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
+import { buildReview } from './review'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -463,6 +464,18 @@ export default function App() {
     )
   }
 
+  if (view === 'review') {
+    return (
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-7 fade-in">
+        <button onClick={() => setView('home')} className="mb-5 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+          Back
+        </button>
+        <ReviewView state={state} today={today} />
+      </div>
+    )
+  }
+
   const r = day.routines, w = day.workout, meals = day.meals || {}
   // Today's training call, for the Train tile + movement focus card.
   const trainSession = buildSession(state, today)
@@ -551,6 +564,20 @@ export default function App() {
         <h1 className="font-display mt-3 text-[26px] font-semibold leading-[1.16] text-[#f4f1e8]">{coach.headline}</h1>
         <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{coach.support}</p>
       </section>
+
+      <button onClick={() => setView('review')}
+        className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-5 py-4 text-left transition active:scale-[0.99] hover:bg-[#e8ecdd]">
+        <span className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#3d4a32]">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block font-display text-[16px] font-semibold text-[#23291f]">Coach's review</span>
+            <span className="block text-[12px] text-[#6b7355]">Your progress, your pace, what's next.</span>
+          </span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+      </button>
 
       <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} cal={calorieBreakdown(state)} />
 
@@ -1497,6 +1524,154 @@ function SuppsModal({ profile, onClose, onSave }) {
       </div>
     </div>,
     document.body
+  )
+}
+
+// Coach's review — a full-screen standing report built from all local data:
+// where the body-fat goal is, whether the pace is right (health-aware), what's
+// been earned, where it's slipping, and how to pace from here. Pure read; every
+// number comes from buildReview so the review never disagrees with the rings.
+function ReviewView({ state, today }) {
+  const R = buildReview(state, today)
+  const tone = {
+    excellent: { chip: 'bg-[#dfe6cf] text-[#3d4a32]', word: 'Excellent' },
+    good: { chip: 'bg-[#dfe6cf] text-[#3d4a32]', word: 'On track' },
+    aggressive: { chip: 'bg-[#f0dcc9] text-[#8a5a1e]', word: 'Too hard' },
+    behind: { chip: 'bg-[#f0dcc9] text-[#8a5a1e]', word: 'Drifting' },
+    building: { chip: 'bg-[#e6e2d6] text-[#6f6a5d]', word: 'Building' },
+    starting: { chip: 'bg-[#e6e2d6] text-[#6f6a5d]', word: 'New' },
+  }[R.standing] || { chip: 'bg-[#e6e2d6] text-[#6f6a5d]', word: '—' }
+  const bf = R.bodyFat, p = R.pacing
+  const paceAccent = p.verdict === 'aggressive' || p.verdict === 'behind' || p.verdict === 'stalled'
+    ? 'border-[#e7d4b6] bg-[#f7ecd6]' : p.verdict === 'no-data' || p.verdict === 'building'
+    ? 'border-[#e6dfd0] bg-[#fbf9f3]' : 'border-[#cdd4bb] bg-[#eef0e6]'
+  const Item = ({ children, good }) => (
+    <li className="flex items-start gap-2.5 py-1.5">
+      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${good ? 'bg-[#3d4a32]' : 'bg-[#c08a4a]'}`} />
+      <span className="text-[14px] leading-snug text-[#33322c]">{children}</span>
+    </li>
+  )
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#9a9482]">Coach's review</p>
+        <span className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wider ${tone.chip}`}>{tone.word}</span>
+      </div>
+
+      {/* Top-line standing — the coach's one-sentence verdict */}
+      <section className="mt-3 rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
+        <h1 className="font-display text-[26px] font-semibold leading-[1.16] text-[#f4f1e8]">{R.verdictWord}</h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{R.topline}</p>
+        {R.hasData && (
+          <p className="mt-4 text-[12px] uppercase tracking-[0.16em] text-[#9aa581]">{R.daysTracked} days in{R.overall != null ? ` · overall ${R.overall}/10` : ''}</p>
+        )}
+      </section>
+
+      {/* Body fat — the primary goal, led first */}
+      <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Body fat</h2>
+          <span className="text-[11px] uppercase tracking-[0.18em] text-[#9a9482]">the goal</span>
+        </div>
+        {bf.has ? (
+          <>
+            <div className="mt-3 flex items-end gap-4">
+              <div>
+                <p className="font-display text-[34px] font-semibold leading-none text-[#23211c]">{bf.now}<span className="text-[18px] text-[#9a9482]">%</span></p>
+                <p className="mt-1 text-[12px] text-[#8a8474]">now</p>
+              </div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b3ac9c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mb-2.5"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              <div>
+                <p className="font-display text-[34px] font-semibold leading-none text-[#3d4a32]">{bf.target}<span className="text-[18px] text-[#9aa581]">%</span></p>
+                <p className="mt-1 text-[12px] text-[#8a8474]">target</p>
+              </div>
+              {bf.pointsOff != null && bf.pointsOff > 0 && (
+                <p className="mb-1 ml-auto text-right text-[13px] text-[#8a8474]">{bf.pointsOff} pts to go</p>
+              )}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-[#ece5d7] pt-3 text-[13px]">
+              {bf.start != null && <span className="text-[#8a8474]">Start <span className="font-medium text-[#33322c]">{bf.start}%</span></span>}
+              {bf.pointsLost != null && bf.pointsLost !== 0 && <span className="text-[#8a8474]">{bf.pointsLost > 0 ? 'Lost' : 'Up'} <span className="font-medium text-[#33322c]">{Math.abs(bf.pointsLost)} pts</span></span>}
+              {bf.weightLost != null && bf.weightLost !== 0 && <span className="text-[#8a8474]">Scale <span className="font-medium text-[#33322c]">{bf.weightLost > 0 ? '−' : '+'}{Math.abs(bf.weightLost)} kg</span></span>}
+              {bf.weeksLeft != null && <span className="text-[#8a8474]">Deadline <span className="font-medium text-[#33322c]">{bf.weeksLeft} wk</span></span>}
+            </div>
+          </>
+        ) : (
+          <p className="mt-2 text-[14px] text-[#8a8474]">No body-fat estimate yet. Log one from the dashboard and this fills in with your real trend.</p>
+        )}
+      </section>
+
+      {/* Pacing — rate-based and health-aware */}
+      <section className={`mt-4 rounded-3xl border p-5 ${paceAccent}`}>
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Your pace</h2>
+          {p.lossPerWk != null && (
+            <span className="text-[12px] text-[#6b6857]">~{p.lossPerWk.toFixed(2)} kg/wk{p.neededPerWk != null ? ` · need ${p.neededPerWk.toFixed(2)}` : ''}</span>
+          )}
+        </div>
+        <p className="mt-2 text-[15px] font-medium text-[#23211c]">{p.headline}</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-[#6b6857]">{p.detail}</p>
+        {p.projection && (
+          <p className="mt-3 rounded-xl bg-[#ffffff88] px-3 py-2 text-[13px] text-[#33322c]">
+            At this rate you reach {bf.target}% around <span className="font-semibold">{p.projection.hitLabel}</span>
+            {p.projection.vsWeeks >= 0
+              ? ` — about ${p.projection.vsWeeks} week${p.projection.vsWeeks === 1 ? '' : 's'} ahead of your deadline.`
+              : ` — about ${Math.abs(p.projection.vsWeeks)} week${Math.abs(p.projection.vsWeeks) === 1 ? '' : 's'} past your deadline.`}
+          </p>
+        )}
+        <p className="mt-3 flex items-start gap-2 text-[14px] leading-snug text-[#23291f]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          <span className="font-medium">{p.prescription}</span>
+        </p>
+      </section>
+
+      {/* Pillars — the five habit scores */}
+      {R.overall != null && (
+        <section className="mt-4 rounded-3xl bg-[#23291f] px-5 py-6">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-[18px] font-semibold text-[#f4f1e8]">The pillars</h2>
+            {R.weakest && R.strongest && R.weakest.key !== R.strongest.key && (
+              <span className="text-[12px] text-[#9aa581]">{R.strongest.label} leads · {R.weakest.label} lags</span>
+            )}
+          </div>
+          <div className="mt-4 flex justify-between gap-1">
+            {R.pillars.map((pl) => <ScoreRing key={pl.key} score={pl.score} label={pl.label} />)}
+          </div>
+        </section>
+      )}
+
+      {/* Wins */}
+      {R.wins.length > 0 && (
+        <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
+          <h2 className="font-display text-[18px] font-semibold text-[#23211c]">What you've earned</h2>
+          <ul className="mt-1">{R.wins.map((t, i) => <Item key={i} good>{t}</Item>)}</ul>
+        </section>
+      )}
+
+      {/* Gaps */}
+      {R.gaps.length > 0 && (
+        <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
+          <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Where you're slipping</h2>
+          <ul className="mt-1">{R.gaps.map((t, i) => <Item key={i}>{t}</Item>)}</ul>
+        </section>
+      )}
+
+      {/* How to pace from here */}
+      <section className="mt-4 rounded-3xl border border-[#cdd4bb] bg-[#eef0e6] p-5">
+        <h2 className="font-display text-[18px] font-semibold text-[#23291f]">How to pace yourself</h2>
+        <ol className="mt-2 flex flex-col gap-2.5">
+          {R.pacePlan.map((t, i) => (
+            <li key={i} className="flex items-start gap-3">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[12px] font-semibold text-[#f4f1e8]">{i + 1}</span>
+              <span className="text-[14px] leading-snug text-[#23291f]">{t}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <p className="mt-8 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
+    </div>
   )
 }
 
