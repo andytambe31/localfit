@@ -940,7 +940,7 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
             <MoveSkip kind="gym" skip={day.workout?.skip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />
           )}
           <StepsToggle done={stepsHit(day, profile.stepTarget)} target={profile.stepTarget} skipped={day.stepsSkip} onDone={onStepsDone} />
-          {onSkipMove && !day.stepsDone && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />}
+          {onSkipMove && !stepsHit(day, profile.stepTarget) && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />}
           <TrainingProgress state={state} />
         </div>
       )}
