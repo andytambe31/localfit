@@ -601,9 +601,10 @@ export default function App() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
       </button>
 
-      <WeightCard state={state} weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} cal={calorieBreakdown(state)} />
+      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />
 
-      <DeficitCard state={state} today={today} onApply={updateProfile} />
+      {/* Deficit coach + the full weight trajectory now live in Coach's Review
+          (Your pace / Trajectory) — kept off the dashboard to reduce density. */}
 
       {(() => {
         const checkin = weeklyCheckin(state, today)
@@ -2410,10 +2411,8 @@ function DeficitCard({ state, today, onApply }) {
   )
 }
 
-function WeightCard({ state, weightLog, today, day, onSave, cal }) {
+function WeightCard({ weightLog, today, day, onSave }) {
   const [editing, setEditing] = useState(false)
-  const tdeeLabel = { low: 'estimated', medium: 'calibrating', high: 'calibrated' }
-  const tdeeCls = { low: 'bg-[#f3efe6] text-[#8a8474]', medium: 'bg-[#f6eed8] text-[#866a1c]', high: 'bg-[#eef0e6] text-[#3d4a32]' }
   const sorted = [...(weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
   const latest = sorted.at(-1)
   const prev = sorted.length >= 2 ? sorted.at(-2) : null
@@ -2451,18 +2450,6 @@ function WeightCard({ state, weightLog, today, day, onSave, cal }) {
           <button onClick={() => setEditing(false)} className="ml-auto text-[13px] text-[#8a8474]">Cancel</button>
         </div>
       )}
-      {cal && (
-        <div className="mt-2.5 border-t border-[#ede7d9] pt-2.5">
-          <p className="flex items-center gap-1.5 text-[12px] text-[#6f6a5d]">
-            <span>Maintenance <span className="font-semibold text-[#3a382f]">~{cal.maintenance.toLocaleString()}</span> cal/day</span>
-            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tdeeCls[cal.confidence]}`}>{tdeeLabel[cal.confidence]}</span>
-          </p>
-          <p className="mt-1 text-[12px] text-[#6f6a5d]">
-            Target <span className="font-semibold text-[#3d4a32]">{cal.target.toLocaleString()}</span> · deficit {cal.deficit}/day · ~{cal.weeklyLoss} kg/week
-          </p>
-        </div>
-      )}
-      {sorted.length >= 2 && <div className="mt-2"><WeightTimeline state={state} today={today} variant="compact" /></div>}
     </section>
   )
 }
@@ -2685,8 +2672,6 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
   const log = state.bodyFatLog || []
   const latest = log[log.length - 1]
   const target = profile.bodyFatTarget || 12
-  const deadline = profile.bodyFatDeadline || '2026-12-31'
-  const daysLeft = Math.max(0, Math.ceil((Date.parse(deadline) - Date.parse(today)) / 86400000))
 
   // All five pillars on the same rolling-7-day footing.
   const skinScore = pillar(days, today, skinQ)
@@ -2715,24 +2700,7 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
     ? 'Start logging and your scores will fill in.'
     : overall >= 8 ? 'You’re doing the work. Keep it up.' : weakest.msg
 
-  const latestWeight = [...(state.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date)).at(-1)
-  let bfStatus = null
-  if (latest) {
-    const toGo = +(latest.pct - target).toFixed(1)
-    if (toGo <= 0) {
-      bfStatus = `Now ${latest.pct}% (${fmtMD(latest.date)}) — target reached. Hold it.`
-    } else if (latestWeight) {
-      // Translate the body-fat gap into kg to lose: hold lean mass, shed fat until
-      // body fat hits the target. targetWeight = leanMass / (1 - target%).
-      const lbm = latestWeight.kg * (1 - latest.pct / 100)
-      const targetWeight = lbm / (1 - target / 100)
-      const lose = Math.max(0, Math.round((latestWeight.kg - targetWeight) * 10) / 10)
-      const perWeek = daysLeft > 0 ? Math.round((lose / (daysLeft / 7)) * 100) / 100 : null
-      bfStatus = `Now ${latest.pct}% at ${latestWeight.kg}kg — about ${lose}kg to lose to reach ${target}% by ${fmtMD(deadline)}, ${daysLeft} days left${perWeek ? ` (~${perWeek}kg/week)` : ''}.`
-    } else {
-      bfStatus = `Now ${latest.pct}% (${fmtMD(latest.date)}) — ${toGo} to go. Log your weight to see the kilos and your runway to ${fmtMD(deadline)}.`
-    }
-  }
+  const suppsLeft = (() => { const due = suppsDue(today, state); return (due.amCount - due.amTaken) + (due.pmCount - due.pmTaken) })()
 
   return (
     <section className="mt-6 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -2771,25 +2739,19 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
         </div>
       </div>
 
-      {/* Body fat */}
-      <div className="mt-4">
-        <div className="flex items-baseline justify-between">
-          <p className="text-[15px] font-semibold text-[#23211c]">Reach {target}% body fat</p>
-          {latest && <span className="text-[14px] font-semibold text-[#3d4a32]">{latest.pct}%</span>}
+      {/* Body fat + supplements — compact entries only. The full projection to
+          your target lives in Coach's Review; this just keeps the log actions. */}
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#ece5d7] pt-3.5">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-[#23211c]">Body fat {latest ? `${latest.pct}%` : '—'}<span className="font-normal text-[#8a8474]"> · {target}% goal</span></p>
+          <p className="text-[12px] text-[#8a8474]">{suppsLeft > 0 ? `${suppsLeft} supplement${suppsLeft > 1 ? 's' : ''} left today` : 'Supplements taken'}</p>
         </div>
-        <p className="text-[13px] text-[#8a8474]">By {fmtFull(deadline)} · {daysLeft} days left</p>
-        {bfStatus && <p className="mt-1.5 text-[14px] leading-relaxed text-[#3d4a32]">{bfStatus}</p>}
-        <p className="mt-2 rounded-xl bg-[#eef0e6] px-3 py-2 text-[12px] leading-snug text-[#5b6745]">{LOOSE_SKIN_NOTE}</p>
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-[12px] text-[#8a8474]">
-            {(() => { const due = suppsDue(today, state); const am = due.amCount - due.amTaken, pm = due.pmCount - due.pmTaken; const left = am + pm
-              return left > 0 ? `${left} supplement${left > 1 ? 's' : ''} left today` : 'Supplements taken today' })()}
-          </span>
-          {onManageSupps && <button onClick={onManageSupps} className="text-[12px] font-medium text-[#3d4a32]">Manage supplements →</button>}
+        <div className="flex shrink-0 items-center gap-3">
+          {onManageSupps && <button onClick={onManageSupps} className="text-[12px] font-medium text-[#3d4a32] active:opacity-70">Supplements</button>}
+          <button onClick={() => setEstimating(true)} className="rounded-full bg-[#3d4a32] px-3.5 py-1.5 text-[12px] font-semibold text-[#f4f1e8] active:scale-95">
+            {latest ? 'Re-estimate' : 'Estimate BF'}
+          </button>
         </div>
-        <button onClick={() => setEstimating(true)} className="mt-3 rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-medium text-[#f4f1e8] active:scale-95">
-          {latest ? 'Re-estimate body fat' : 'Estimate body fat'}
-        </button>
       </div>
 
       {estimating && (
