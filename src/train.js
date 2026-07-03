@@ -16,6 +16,7 @@
  * the standard build weeks keep marching cleanly.
  * -------------------------------------------------------------------------- */
 import { trainingPhase } from './periodize'
+import { gymMakeup } from './makeup'
 
 // ---- libraries --------------------------------------------------------------
 
@@ -447,7 +448,19 @@ export function buildSession(state, todayIso, opts = {}) {
     }
   })
 
+  // Make-up for owed (skipped) sessions: harder next lift — add a set to each
+  // core lift to win back the missed stimulus. Not on a deload week (recovery).
+  const makeup = gymMakeup(state, todayIso)
+  if (makeup.debt > 0 && makeup.extraSets > 0 && !phase.deload) {
+    for (const ex of exercises) {
+      if (!plan.core.includes(ex.id) || !ex.sets?.length) continue
+      const last = ex.sets[ex.sets.length - 1]
+      for (let k = 0; k < makeup.extraSets; k++) ex.sets.push({ ...last, done: false })
+    }
+  }
+
   return {
+    makeup: makeup.debt > 0 ? { owed: makeup.debt, extraSets: makeup.extraSets } : null,
     dayType, emphasis,
     label: plan.label,
     // periodization stamp — persisted on the session, drives the off-ledger skip
@@ -455,9 +468,10 @@ export function buildSession(state, todayIso, opts = {}) {
     deload: phase.deload, heavy: phase.heavy,
     weekNumber: phase.weekNumber, totalWeeks: phase.totalWeeks, blockNumber: phase.blockNumber,
     swapped, swappedFrom: swapped ? decision.dayType : null,
-    reason: swapped
+    reason: (swapped
       ? `Swapped to ${plan.label} for today — ${DAY_PLAN[decision.dayType].label} is owed and waiting for you next time.`
-      : (decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason),
+      : (decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason))
+      + (makeup.debt > 0 && !phase.deload ? ` Making up ${makeup.debt} skipped session${makeup.debt > 1 ? 's' : ''}: one extra set on the main lifts.` : ''),
     emphasisReason: emphasis ? `Extra focus on ${labelFor(emphasis)} — it's lagging and fits ${plan.label.toLowerCase()} day.` : null,
     warmup: WARMUPS[dayType],
     exercises,

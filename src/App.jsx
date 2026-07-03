@@ -12,6 +12,7 @@ import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { buildWeightTimeline } from './timeline'
+import { SKIP_REASONS, skipRecord, movementAccount } from './makeup'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -213,6 +214,18 @@ export default function App() {
     setOverride(null)
     setPending(true)
     scheduleSync()
+  }
+  // Skip today's lift or steps with a reason. Owed-ness (whether a make-up is
+  // due) is derived from the reason inside skipRecord. Keep the movement card
+  // pinned so the acknowledgment/make-up plan shows right where they tapped.
+  function skipMove(kind, reasonId) {
+    const rec = skipRecord(reasonId, Date.now())
+    patch(kind === 'gym' ? { workout: { skip: rec } } : { stepsSkip: rec })
+    setOverride('movement')
+  }
+  function undoSkipMove(kind) {
+    patch(kind === 'gym' ? { workout: { skip: null } } : { stepsSkip: null })
+    setOverride('movement')
   }
   function saveWeight(kg) {
     setState((prev) => {
@@ -682,6 +695,7 @@ export default function App() {
             onSteps={(v) => patch({ steps: v })}
             onStartTrain={() => setTraining(true)} train={trainCall}
             onSwapDay={(dt) => { setPendingSwap(dt); setTraining(true) }}
+            onSkipMove={skipMove} onUndoSkipMove={undoSkipMove}
             onStartHair={(slot) => setHairFlow(slot)}
             onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
             onWater={setWater}
@@ -756,7 +770,65 @@ function Splash({ leaving }) {
 const FOCUS_TITLE = { skin: 'Skin care', movement: 'Training', hair: 'Hair care', diet: 'Today’s food', water: 'Hydration' }
 const MEAL_AFTER = { breakfast: 5, lunch: 11, dinner: 16 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onSwapDay, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
+// The make-up reminder: what you owe and how you'll pay it back. Only shows
+// when there's an outstanding movement debt (from an owed skip or short days).
+function MoveMakeupCard({ acc }) {
+  if (!acc?.hasDebt) return null
+  return (
+    <div className="rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] p-3.5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8a5a1e]">Make-up owed</p>
+      <ul className="mt-1.5 space-y-1.5">
+        {acc.items.map((it, i) => (
+          <li key={i} className="flex gap-2 text-[13px] leading-snug text-[#6b5326]">
+            <span className="mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#c9742e]" />
+            <span>{it.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// Skip today's lift or walk with a reason. The reason decides whether a make-up
+// is owed (handled downstream); here it just records the skip or shows the
+// resulting state with an undo.
+function MoveSkip({ kind, skip, onSkip, onUndo }) {
+  const [picking, setPicking] = useState(false)
+  const what = kind === 'gym' ? "today's lift" : "today's walk"
+  if (skip) {
+    return (
+      <div className="rounded-xl border border-[#e6dfd0] bg-[#f3efe6] px-3 py-2 text-[12px] leading-snug text-[#6f6a5d]">
+        <span className="font-semibold text-[#4a463c]">{kind === 'gym' ? 'Lift' : 'Walk'} skipped</span> · {skip.label}. {skip.owed
+          ? (kind === 'gym' ? 'Make-up queued — your next session runs harder.' : "Added to this week's step balance.")
+          : 'No make-up owed — recovery counts.'}
+        <button onClick={() => onUndo(kind)} className="ml-1.5 font-medium text-[#7d8a5f] underline underline-offset-2 active:opacity-70">Undo</button>
+      </div>
+    )
+  }
+  if (!picking) {
+    return (
+      <button onClick={() => setPicking(true)} className="text-[12px] font-medium text-[#8a8474] underline underline-offset-2 active:opacity-70">
+        Can't do {what}?
+      </button>
+    )
+  }
+  return (
+    <div className="rounded-xl border border-[#e6dfd0] bg-[#fbf9f3] p-3">
+      <p className="text-[12px] text-[#6f6a5d]">Why skip {what}?</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {SKIP_REASONS.map((r) => (
+          <button key={r.id} onClick={() => { onSkip(kind, r.id); setPicking(false) }}
+            className="rounded-full border border-[#d8d1c2] bg-white px-3 py-1.5 text-[12px] font-medium text-[#4a463c] active:scale-95">
+            {r.label}
+          </button>
+        ))}
+      </div>
+      <button onClick={() => setPicking(false)} className="mt-2 text-[12px] text-[#8a8474] active:opacity-70">Cancel</button>
+    </div>
+  )
+}
+
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -812,9 +884,10 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
 
       {focus === 'movement' && (
         <div className="space-y-3">
+          <MoveMakeupCard acc={movementAccount(state, dateIso)} />
           <TrainStrategy state={state} dateIso={dateIso} />
           <TrainStart train={train} onStart={onStartTrain} />
-          {onSwapDay && train?.swaps?.length > 0 && !train.active && !train.done && (
+          {onSwapDay && train?.swaps?.length > 0 && !train.active && !train.done && !day.workout?.skip && (
             <div>
               <p className="text-[12px] text-[#8a8474]">Less time? Swap today's {train.label} day:</p>
               <div className="mt-1.5 flex flex-wrap gap-2">
@@ -827,10 +900,14 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
               </div>
             </div>
           )}
+          {onSkipMove && !train?.rest && (!train?.active && !train?.done || day.workout?.skip) && (
+            <MoveSkip kind="gym" skip={day.workout?.skip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />
+          )}
           <Field label="Steps today">
             <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
             <span className="text-[13px] text-[#8a8474]">of {profile.stepTarget.toLocaleString()}</span>
           </Field>
+          {onSkipMove && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />}
           <TrainingProgress state={state} />
         </div>
       )}
