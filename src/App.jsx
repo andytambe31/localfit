@@ -921,8 +921,14 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
       {focus === 'movement' && (
         <div className="space-y-3">
           <MoveMakeupCard acc={movementAccount(state, dateIso)} />
-          <TrainStrategy state={state} dateIso={dateIso} />
-          <TrainStart train={train} onStart={onStartTrain} />
+          {/* Lift skipped today → hide the session + strategy entirely and show
+              only the skipped state (with undo) below. Either/or, never both. */}
+          {!(day.workout?.skip && !train?.rest) && (
+            <>
+              <TrainStrategy state={state} dateIso={dateIso} />
+              <TrainStart train={train} onStart={onStartTrain} />
+            </>
+          )}
           {onSwapDay && train?.swaps?.length > 0 && !train.active && !train.done && !day.workout?.skip && (
             <div>
               <p className="text-[12px] text-[#8a8474]">Less time? Swap today's {train.label} day:</p>
