@@ -471,7 +471,7 @@ export default function App() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           Back
         </button>
-        <ReviewView state={state} today={today} />
+        <ReviewView state={state} today={today} onApply={updateProfile} />
       </div>
     )
   }
@@ -1531,8 +1531,9 @@ function SuppsModal({ profile, onClose, onSave }) {
 // where the body-fat goal is, whether the pace is right (health-aware), what's
 // been earned, where it's slipping, and how to pace from here. Pure read; every
 // number comes from buildReview so the review never disagrees with the rings.
-function ReviewView({ state, today }) {
+function ReviewView({ state, today, onApply }) {
   const R = buildReview(state, today)
+  const [applied, setApplied] = useState(false)
   const tone = {
     excellent: { chip: 'bg-[#dfe6cf] text-[#3d4a32]', word: 'Excellent' },
     good: { chip: 'bg-[#dfe6cf] text-[#3d4a32]', word: 'On track' },
@@ -1669,6 +1670,47 @@ function ReviewView({ state, today }) {
           ))}
         </ol>
       </section>
+
+      {/* Apply the plan — turn the verdict into concrete, reversible targets */}
+      {applied ? (
+        <section className="mt-4 rounded-3xl border border-[#cdd4bb] bg-[#eef0e6] p-5 text-center fade-in">
+          <span className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-full bg-[#3d4a32]">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          </span>
+          <p className="font-display text-[17px] font-semibold text-[#23291f]">Plan applied</p>
+          <p className="mt-1 text-[13px] text-[#6b7355]">Your targets are updated across the app. Change any of them anytime from your profile.</p>
+        </section>
+      ) : R.suggestions.length > 0 ? (
+        <section className="mt-4 rounded-3xl border border-[#cdd4bb] bg-[#eef0e6] p-5">
+          <h2 className="font-display text-[18px] font-semibold text-[#23291f]">Apply the coach's plan</h2>
+          <p className="mt-1 text-[13px] text-[#6b7355]">One tap sets these targets. All reversible.</p>
+          <ul className="mt-3 flex flex-col divide-y divide-[#dbe0cd]">
+            {R.suggestions.map((s) => (
+              <li key={s.id} className="py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-[14px] font-medium text-[#23291f]">{s.title}</span>
+                  <span className="shrink-0 text-[13px] tabular-nums text-[#4a5238]">
+                    <span className="text-[#9a9482] line-through">{s.from}</span>
+                    <span className="mx-1.5 text-[#7d8a5f]">→</span>
+                    <span className="font-semibold text-[#3d4a32]">{s.to}</span>
+                    <span className="ml-2 rounded-full bg-[#dfe6cf] px-2 py-0.5 text-[11px] font-semibold text-[#3d4a32]">{s.delta}</span>
+                  </span>
+                </div>
+                <p className="mt-1 text-[12px] leading-snug text-[#6b7355]">{s.why}</p>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => { onApply?.(R.applyPatch); setApplied(true) }}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d4a32] px-5 py-3.5 text-[15px] font-semibold text-[#f4f1e8] transition active:scale-[0.99]">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+            Apply the coach's plan
+          </button>
+        </section>
+      ) : R.hasData ? (
+        <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 text-center">
+          <p className="text-[14px] text-[#6b6857]">Your targets already match the plan — nothing to change. Keep executing.</p>
+        </section>
+      ) : null}
 
       <p className="mt-8 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
     </div>
