@@ -11,6 +11,7 @@ import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
+import { buildWeightTimeline } from './timeline'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -579,7 +580,7 @@ export default function App() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
       </button>
 
-      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} cal={calorieBreakdown(state)} />
+      <WeightCard state={state} weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} cal={calorieBreakdown(state)} />
 
       <DeficitCard state={state} today={today} onApply={updateProfile} />
 
@@ -1603,6 +1604,18 @@ function ReviewView({ state, today, onApply }) {
         )}
       </section>
 
+      {/* Trajectory — actual + trend vs the pace you should be on */}
+      {(state.weightLog || []).length >= 2 && (
+        <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Trajectory</h2>
+            <span className="text-[11px] uppercase tracking-[0.18em] text-[#9a9482]">actual vs plan</span>
+          </div>
+          <p className="mt-1 mb-3 text-[13px] text-[#8a8474]">Your trend against the pace you need for the goal and what your deficit predicts.</p>
+          <WeightTimeline state={state} today={today} variant="full" />
+        </section>
+      )}
+
       {/* Pacing — rate-based and health-aware */}
       <section className={`mt-4 rounded-3xl border p-5 ${paceAccent}`}>
         <div className="flex items-center justify-between">
@@ -2302,7 +2315,7 @@ function DeficitCard({ state, today, onApply }) {
   )
 }
 
-function WeightCard({ weightLog, today, day, onSave, cal }) {
+function WeightCard({ state, weightLog, today, day, onSave, cal }) {
   const [editing, setEditing] = useState(false)
   const tdeeLabel = { low: 'estimated', medium: 'calibrating', high: 'calibrated' }
   const tdeeCls = { low: 'bg-[#f3efe6] text-[#8a8474]', medium: 'bg-[#f6eed8] text-[#866a1c]', high: 'bg-[#eef0e6] text-[#3d4a32]' }
@@ -2354,21 +2367,76 @@ function WeightCard({ weightLog, today, day, onSave, cal }) {
           </p>
         </div>
       )}
-      {sorted.length >= 2 && <div className="mt-2"><WeightChart log={sorted} /></div>}
+      {sorted.length >= 2 && <div className="mt-2"><WeightTimeline state={state} today={today} variant="compact" /></div>}
     </section>
   )
 }
 
-function WeightChart({ log }) {
+// The weight graph: raw weigh-ins + a smoothed trend, overlaid with two
+// reference trajectories (needed-for-goal and deficit-predicted) so you can see
+// at a glance whether you're ahead of, on, or behind the pace you should be at.
+// variant 'compact' (dashboard) is terse; 'full' (Coach's Review) adds the
+// legend, axis, and an ahead/behind status read.
+const TL_COLORS = { actual: '#b3ac9c', trend: '#3d4a32', needed: '#b0552a', predicted: '#7d8a5f' }
+function WeightTimeline({ state, today, variant = 'compact' }) {
+  const tl = buildWeightTimeline(state, today)
+  if (!tl.ok) return null
+  const full = variant === 'full'
+  const st = tl.status || {}
+  const verdictCopy = (v, aheadKg) => {
+    const mag = Math.abs(aheadKg)
+    if (v === 'ahead') return `${mag} kg ahead`
+    if (v === 'behind') return `${mag} kg behind`
+    return 'right on it'
+  }
+  const verdictCls = (v) => v === 'ahead' ? 'text-[#3d4a32]' : v === 'behind' ? 'text-[#b0552a]' : 'text-[#6f6a5d]'
+
   return (
-    <ResponsiveContainer width="100%" height={130}>
-      <LineChart data={log} margin={{ top: 6, right: 8, bottom: 0, left: -24 }}>
-        <XAxis dataKey="date" tick={{ fill: '#a39c8d', fontSize: 10 }} tickFormatter={(d) => d.slice(5)} axisLine={{ stroke: '#e0d9c9' }} tickLine={false} />
-        <YAxis domain={['auto', 'auto']} tick={{ fill: '#a39c8d', fontSize: 10 }} width={32} axisLine={false} tickLine={false} />
-        <Tooltip contentStyle={{ background: '#23291f', border: 'none', borderRadius: 12, color: '#f4f1e8', fontSize: 12 }} />
-        <Line type="monotone" dataKey="kg" stroke="#3d4a32" strokeWidth={2.5} dot={{ r: 3, fill: '#3d4a32' }} />
-      </LineChart>
-    </ResponsiveContainer>
+    <div>
+      {full && (st.needed || st.predicted) && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {st.needed && (
+            <span className="rounded-xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-1.5 text-[12px]">
+              <span className="text-[#8a8474]">Goal pace </span>
+              <span className={`font-semibold ${verdictCls(st.needed.verdict)}`}>{verdictCopy(st.needed.verdict, st.needed.aheadKg)}</span>
+            </span>
+          )}
+          {st.predicted && (
+            <span className="rounded-xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-1.5 text-[12px]">
+              <span className="text-[#8a8474]">Deficit plan </span>
+              <span className={`font-semibold ${verdictCls(st.predicted.verdict)}`}>{verdictCopy(st.predicted.verdict, st.predicted.aheadKg)}</span>
+            </span>
+          )}
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={full ? 230 : 140}>
+        <LineChart data={tl.rows} margin={{ top: 6, right: 10, bottom: 0, left: full ? -16 : -24 }}>
+          <XAxis dataKey="date" tick={{ fill: '#a39c8d', fontSize: 10 }} tickFormatter={(d) => d.slice(5)} axisLine={{ stroke: '#e0d9c9' }} tickLine={false} minTickGap={full ? 24 : 16} />
+          <YAxis domain={['auto', 'auto']} tick={{ fill: '#a39c8d', fontSize: 10 }} width={full ? 34 : 32} axisLine={false} tickLine={false} tickFormatter={(v) => Math.round(v)} />
+          <Tooltip contentStyle={{ background: '#23291f', border: 'none', borderRadius: 12, color: '#f4f1e8', fontSize: 12 }}
+            formatter={(v, name) => [v != null ? `${v} kg` : '—', TL_LABELS[name] || name]} labelFormatter={(d) => d} />
+          {tl.series.needed && <Line type="monotone" dataKey="needed" stroke={TL_COLORS.needed} strokeWidth={1.75} strokeDasharray="5 4" dot={false} connectNulls isAnimationActive={false} />}
+          {tl.series.predicted && <Line type="monotone" dataKey="predicted" stroke={TL_COLORS.predicted} strokeWidth={1.5} strokeDasharray="2 3" dot={false} connectNulls isAnimationActive={false} />}
+          <Line type="monotone" dataKey="actual" stroke={TL_COLORS.actual} strokeWidth={1.25} dot={{ r: 2.5, fill: TL_COLORS.actual }} connectNulls={false} isAnimationActive={false} />
+          <Line type="monotone" dataKey="trend" stroke={TL_COLORS.trend} strokeWidth={2.75} dot={false} connectNulls isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[10px] text-[#8a8474]">
+        <LegendDot color={TL_COLORS.trend} label="Trend" solid />
+        <LegendDot color={TL_COLORS.actual} label="Actual" solid />
+        {tl.series.needed && <LegendDot color={TL_COLORS.needed} label="Needed for goal" />}
+        {tl.series.predicted && <LegendDot color={TL_COLORS.predicted} label="Deficit plan" />}
+      </div>
+    </div>
+  )
+}
+const TL_LABELS = { actual: 'Actual', trend: 'Trend', needed: 'Needed for goal', predicted: 'Deficit plan' }
+function LegendDot({ color, label, solid }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="inline-block h-0 w-4 border-t-2" style={{ borderColor: color, borderStyle: solid ? 'solid' : 'dashed' }} />
+      {label}
+    </span>
   )
 }
 /* ---------- goals: your personal outcomes, quantified, in words ---------- */
