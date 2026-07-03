@@ -10,7 +10,7 @@
  * -------------------------------------------------------------------------- */
 import { deficitCoach, weightTrend } from './adapt'
 import { sleepScore } from './sleep'
-import { dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { dietScore as foodScore, PROTEIN_TARGET_DEFAULT, calorieTarget } from './diet'
 import { bestLifts } from './train'
 
 const MS_DAY = 86400000
@@ -250,6 +250,93 @@ export function buildReview(state, today) {
   if (streak === 0 && Object.keys(days).length >= 3) pacePlan.push('Start a fresh streak today — one strong day is the whole trick, repeated.')
   else if (streak >= 1) pacePlan.push("Protect the streak. Momentum is the asset you're actually building.")
 
+  // ---- apply-able plan: turn the verdict into concrete target changes -------
+  // Every change is a plain profile patch (deficit / proteinTarget / stepTarget
+  // / gymTargetPerWeek) — visible, reversible, and applied in one tap. Only real
+  // changes from current targets are surfaced; matching targets are dropped.
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
+  const round5 = (n) => Math.round(n / 5) * 5
+  const suggestions = []
+  const ct = calorieTarget(state)
+  const curDeficit = profile.deficit ?? 500
+  const dietScoreVal = pillars.find((x) => x.key === 'diet')?.score
+  const moveScoreVal = pillars.find((x) => x.key === 'move')?.score
+  const cutting = loss != null && loss > 0.05
+
+  // Calories — raise or tighten the baseline via the deficit (ceiling = TDEE − deficit).
+  if (ct) {
+    if (dc.adjust && dc.adjust.deficit != null && dc.adjust.deficit !== curDeficit) {
+      const up = dc.adjust.dir === 'up'
+      suggestions.push({
+        id: 'calories', patch: { deficit: dc.adjust.deficit }, title: 'Daily calories',
+        from: `${ct.ceiling} cal`, to: `${dc.adjust.newCeiling} cal`, delta: `${up ? '+' : '−'}${dc.adjust.deltaCal}/day`,
+        why: up ? 'More fuel so the cut stops costing you muscle.' : 'A touch tighter to move the trend toward December.',
+      })
+    } else if (verdict === 'aggressive') {
+      const newDef = clamp(curDeficit - 200, 250, 800)
+      if (newDef < curDeficit) {
+        const newCeil = calorieTarget(state, { deficit: newDef })?.ceiling ?? ct.ceiling + (curDeficit - newDef)
+        suggestions.push({
+          id: 'calories', patch: { deficit: newDef }, title: 'Daily calories',
+          from: `${ct.ceiling} cal`, to: `${newCeil} cal`, delta: `+${curDeficit - newDef}/day`,
+          why: 'Eat more to bring the cut back into a safe range and protect muscle.',
+        })
+      }
+    }
+  }
+
+  // Protein — emphasise it on a cut (muscle protection) or when diet is dragging.
+  const curProtein = profile.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const dietWeak = dietScoreVal != null && dietScoreVal <= 6
+  if (wNow) {
+    const factor = verdict === 'aggressive' ? 2.2 : (cutting || dietWeak) ? 2.0 : null
+    if (factor) {
+      const rec = clamp(round5(wNow * factor), 130, 240)
+      if (rec >= curProtein + 5) suggestions.push({
+        id: 'protein', patch: { proteinTarget: rec }, title: 'Protein target',
+        from: `${curProtein}g`, to: `${rec}g`, delta: `+${rec - curProtein}g/day`,
+        why: `About ${factor} g per kg of bodyweight — what holds muscle while fat comes off.`,
+      })
+    }
+  } else if (dietWeak && curProtein < 170) {
+    suggestions.push({
+      id: 'protein', patch: { proteinTarget: curProtein + 20 }, title: 'Protein target',
+      from: `${curProtein}g`, to: `${curProtein + 20}g`, delta: '+20g/day',
+      why: 'Push protein up to anchor the diet score and stay full on fewer calories.',
+    })
+  }
+
+  // Steps — more NEAT widens the deficit without cutting food harder (behind only),
+  // or set the baseline to 10k if it's been left low.
+  const curSteps = profile.stepTarget || 10000
+  if (verdict === 'behind' || verdict === 'stalled') {
+    const rec = clamp(curSteps + 1500, 6000, 16000)
+    if (rec > curSteps) suggestions.push({
+      id: 'steps', patch: { stepTarget: rec }, title: 'Daily steps',
+      from: `${curSteps.toLocaleString()}`, to: `${rec.toLocaleString()}`, delta: `+${(rec - curSteps).toLocaleString()}`,
+      why: 'Walking off the gap beats eating less — it protects training and recovery.',
+    })
+  } else if (curSteps < 8000) {
+    suggestions.push({
+      id: 'steps', patch: { stepTarget: 10000 }, title: 'Daily steps',
+      from: `${curSteps.toLocaleString()}`, to: '10,000', delta: `+${(10000 - curSteps).toLocaleString()}`,
+      why: 'Set the daily floor at 10k — steady movement is the cheapest deficit there is.',
+    })
+  }
+
+  // Gym frequency — three lifts a week is the floor for holding muscle on a cut.
+  const curGym = profile.gymTargetPerWeek || 3
+  const moveWeak = moveScoreVal != null && moveScoreVal <= 5
+  if ((verdict === 'aggressive' || cutting || moveWeak) && curGym < 3) {
+    suggestions.push({
+      id: 'gym', patch: { gymTargetPerWeek: 3 }, title: 'Gym sessions',
+      from: `${curGym}/wk`, to: '3/wk', delta: `+${3 - curGym}/wk`,
+      why: 'Resistance training is what tells your body to keep the muscle, not burn it.',
+    })
+  }
+
+  const applyPatch = Object.assign({}, ...suggestions.map((s) => s.patch))
+
   // ---- top-line standing ----------------------------------------------------
   let standing, verdictWord, topline
   if (!hasData) { standing = 'starting'; verdictWord = 'Just getting started'; topline = 'Log a few days and this becomes a real read on where you stand.' }
@@ -266,6 +353,7 @@ export function buildReview(state, today) {
     bodyFat, pacing, momentum,
     pillars, overall, strongest, weakest,
     wins, gaps, pacePlan,
+    suggestions, applyPatch,
   }
 }
 
