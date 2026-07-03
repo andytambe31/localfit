@@ -16,7 +16,7 @@
  * the standard build weeks keep marching cleanly.
  * -------------------------------------------------------------------------- */
 import { trainingPhase } from './periodize'
-import { gymMakeup } from './makeup'
+import { gymMakeup, stepsHit } from './makeup'
 
 // ---- libraries --------------------------------------------------------------
 
@@ -639,7 +639,7 @@ function stepDaysThisWeek(state, todayIso, stepTarget) {
   let n = 0
   for (const date of Object.keys(days)) {
     if (date > todayIso || weekKey(date) !== wk) continue
-    if ((days[date].steps || 0) >= stepTarget) n++
+    if (stepsHit(days[date], stepTarget)) n++
   }
   return n
 }
@@ -675,9 +675,7 @@ export function decideEveningPriority(state, todayIso, hour, minute = 0) {
   const stepTarget = profile.stepTarget || 10000
   const liftTarget = profile.gymTargetPerWeek || 3
   const day = state.days?.[todayIso] || {}
-  const steps = day.steps || 0
-  const stepsShort = steps < stepTarget
-  const gap = Math.max(0, stepTarget - steps)
+  const stepsShort = !stepsHit(day, stepTarget) // binary: hit your 10k or not
   const trainedToday = day.workout?.session?.status === 'done'
 
   const dec = decideDayType(state, todayIso)
@@ -686,7 +684,6 @@ export function decideEveningPriority(state, todayIso, hour, minute = 0) {
   const weekLifts = sessionsThisWeek(hist, todayIso)
   const stepDays = stepDaysThisWeek(state, todayIso, stepTarget)
   const late = hour >= 20
-  const stepsLine = `${steps.toLocaleString()} of ${stepTarget.toLocaleString()} steps`
 
   // Meal signals: protein for recovery (advisory) + adherence (tilts the call).
   const diet = dietToday(day)
@@ -696,15 +693,15 @@ export function decideEveningPriority(state, todayIso, hour, minute = 0) {
   // Already lifted today — the session's banked; steps are all that's left.
   if (trainedToday) {
     if (!stepsShort) return { focus: 'done', headline: 'Trained and stepped. Done.', support: 'Session in, steps in. Close the day out — food and sleep do the rest.', advisories: [protein].filter(Boolean) }
-    return { focus: 'walk', headline: `Lift's done — walk off the last ${gap.toLocaleString()} steps.`,
-      support: `You're at ${stepsLine}. A short walk now tops it off and doubles as recovery from the session.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
+    return { focus: 'walk', headline: `Lift's done — now get your 10k in.`,
+      support: `Your 10k isn't in yet. A short walk now closes the day and doubles as recovery from the session — mark it done once you hit it.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
   }
 
   // Rest day — no lift owed, so the walk is the actual work.
   if (dec.rest) {
     if (!stepsShort) return { focus: 'done', headline: 'Rest day, handled.', support: 'No session owed and your steps are in. Let the week of training land.', advisories: [protein].filter(Boolean) }
     return { focus: 'walk', headline: `Off day — the walk is tonight's work.`,
-      support: `No lift today; you've trained ${weekLifts}× this week. So tonight the job is steps: you're at ${stepsLine}. Get the walk in — it's how the deficit holds on rest days.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
+      support: `No lift today; you've trained ${weekLifts}× this week. So tonight the job is your 10k — it's how the deficit holds on rest days. Mark it done once you hit it.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
   }
 
   // Training day, not yet trained — but does TODAY's session actually fit the
@@ -739,14 +736,14 @@ export function decideEveningPriority(state, todayIso, hour, minute = 0) {
   // real gap is steps — walk regardless of the gym window.
   if (weekLifts >= liftTarget) {
     return { focus: 'walk', headline: `You've hit ${weekLifts} sessions — tonight, close the steps.`,
-      support: `Your ${liftTarget}×/week lifting is already banked, so an extra session can wait. The open gap is movement: ${stepsLine}. Walk it off; lift again tomorrow if you want the bonus.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
+      support: `Your ${liftTarget}×/week lifting is already banked, so an extra session can wait. The open gap is your 10k. Walk it off; lift again tomorrow if you want the bonus.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
   }
 
   // Behind on lifts, but today's session won't fit the window — the lift's off
   // tonight. Offer the honest fallback: claw back steps with a walk, or rest.
   if (!fits) {
     return { focus: 'walk', headline: `${dayLabel} won't fit the window — walk or rest tonight.`,
-      support: `${gymWhy} You can't get the session in, so don't force it: take a walk to claw back some steps (${stepsLine}), or just take the night and rest. Either way, ${dayLabel} is first thing tomorrow.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
+      support: `${gymWhy} You can't get the session in, so don't force it: take a walk to get your 10k in, or just take the night and rest. Either way, ${dayLabel} is first thing tomorrow.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
   }
 
   // Behind on lifts AND on steps, and the gym's open. Lift wins — it's the one
@@ -765,7 +762,7 @@ export function decideEveningPriority(state, todayIso, hour, minute = 0) {
     ? `Move fast — the gym closes at ${gym.closeLabel}, so skip the treadmill. Let the steps go and ${stepsTail}.`
     : late
       ? `It's late — get the lift in, let the steps go tonight and ${stepsTail}.`
-      : `Lift first, then walk off what steps you can — even ${Math.min(gap, 3000).toLocaleString()} helps.`
+      : `Lift first, then get a short walk in after if you can — every bit helps toward your 10k.`
   return { focus: noTime ? 'train' : 'both', headline: `Skip the walk for now — train. ${dayLabel} day.`,
     support: `Here's the call: you've lifted ${weekLifts}× of ${liftTarget} this week, and a session you skip tonight is gone — but steps you can recover (${consistency}). So the lift comes first. ${after}${offPlanTail}`,
     advisories: trainAdvice }

@@ -12,6 +12,7 @@ import { deficitCoach, weightTrend } from './adapt'
 import { sleepScore } from './sleep'
 import { dietScore as foodScore, PROTEIN_TARGET_DEFAULT, calorieTarget } from './diet'
 import { bestLifts } from './train'
+import { stepsHit } from './makeup'
 
 const MS_DAY = 86400000
 const dayD = (iso) => new Date(iso + 'T00:00:00')
@@ -30,9 +31,9 @@ const skinQ = (d) => ((d.routines?.skincareAM ? 1 : 0) + (d.routines?.skincarePM
 const hairQ = (d) => ((d.routines?.haircareAM ? 1 : 0) + (d.routines?.haircarePM ? 1 : 0)) / 2
 const moveQ = (d, profile) => {
   const trained = (d.workout?.did && d.workout.type !== 'Rest') || d.workout?.session?.status === 'done'
-  return trained ? 1 : Math.min(1, (d.steps || 0) / (profile.stepTarget || 10000))
+  return trained ? 1 : (stepsHit(d, profile.stepTarget || 10000) ? 1 : 0)
 }
-const dayLogged = (d) => !!(d && (d.routines?.skincareAM || d.routines?.skincarePM || d.routines?.haircareAM || d.routines?.haircarePM || d.workout?.did || (d.food && d.food.length) || d.steps || d.water))
+const dayLogged = (d) => !!(d && (d.routines?.skincareAM || d.routines?.skincarePM || d.routines?.haircareAM || d.routines?.haircarePM || d.workout?.did || (d.food && d.food.length) || d.steps || d.stepsDone || d.stepsSkip || d.water))
 function pillar(days, today, quality) {
   let sum = 0, cnt = 0
   for (let i = 0; i < 7; i++) {
@@ -61,7 +62,7 @@ function strongDay(d, profile) {
   const skin = r.skincareAM && r.skincarePM
   const water = (d.water || 0) >= (profile.waterTarget || 8)
   const trained = (w.did && w.type !== 'Rest') || w.session?.status === 'done'
-  const move = trained || (d.steps || 0) >= (profile.stepTarget || 10000)
+  const move = trained || stepsHit(d, profile.stepTarget || 10000)
   const diet = (d.food?.length || 0) > 0
   return skin && water && move && diet
 }

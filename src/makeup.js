@@ -45,6 +45,14 @@ function weekStart(iso) {
 
 const trained = (day) => day?.workout?.session?.status === 'done' || (day?.workout?.did && day?.workout?.type !== 'Rest')
 
+// Steps are binary now: you either hit your 10k that day or you didn't. The
+// exact count is irrelevant — anything past target is just bonus. `stepsDone`
+// is the tap; legacy days with a logged number still count as hit if >= target.
+export const stepsHit = (day, target = 10000) => !!day?.stepsDone || (day?.steps || 0) >= target
+// A day you actually used the app — so an un-hit walk on a blank, untracked day
+// isn't counted as a miss you owe.
+const dayLogged = (d) => !!(d && (d.routines?.skincareAM || d.routines?.skincarePM || d.routines?.haircareAM || d.routines?.haircarePM || d.workout?.did || d.workout?.session || d.workout?.skip || (d.food && d.food.length) || d.steps || d.stepsDone || d.stepsSkip || d.water))
+
 // The full movement account: gym debt (owed lifts) + step balance, with a
 // reminder and the make-up strategy for each.
 export function movementAccount(state, today) {
@@ -61,37 +69,20 @@ export function movementAccount(state, today) {
     if (trained(d) && gymDebt > 0) gymDebt -= 1
   }
 
-  // --- steps: cumulative deficit through yesterday, carried until paid --------
-  // Only days you actually engaged count (logged steps, or an explicit skip) —
-  // a day with nothing logged is unknown, not a 10k deficit.
-  let running = 0 // negative = behind
-  for (const iso of keys) {
-    if (iso >= today) continue // today handled live below
-    const d = days[iso]
-    const sk = d.stepsSkip
-    if (sk && !sk.owed) continue // forgiven — no requirement
-    const s = d.steps || 0
-    if (s <= 0 && !sk) continue // not tracked that day
-    running += s - stepTarget
-    if (running > 0) running = 0 // overshoot clears debt but doesn't bank credit
-  }
-  const baseStepDebt = Math.max(0, Math.round(-running))
-  const todaySteps = days[today]?.steps || 0
-  const todaySurplus = Math.max(0, todaySteps - stepTarget)
-  const stepDebt = Math.max(0, baseStepDebt - todaySurplus)
-
-  // --- this week's balance, for the weekly framing ---------------------------
+  // --- steps: missed 10k walks this week (binary) -----------------------------
+  // Any day you used the app but didn't hit your 10k — or an owed skip — is a
+  // make-up walk you owe. Forgiven skips (rest/sick/injured) don't count. Scoped
+  // to this week ("balance over the week"); the count is walks, not steps.
   const ws = weekStart(today)
-  let weekActual = 0, weekReqDays = 0
-  for (let iso = ws; iso <= today; iso = shiftIso(iso, 1)) {
+  let stepsOwed = 0
+  for (let iso = ws; iso < today; iso = shiftIso(iso, 1)) {
     const d = days[iso]
     const sk = d?.stepsSkip
-    if (sk && !sk.owed) continue // forgiven days don't count against the week
-    if ((d?.steps || 0) <= 0 && !sk && iso !== today) continue
-    weekReqDays += 1
-    weekActual += d?.steps || 0
+    if (sk && !sk.owed) continue // forgiven
+    if (sk && sk.owed) { stepsOwed += 1; continue }
+    if (dayLogged(d) && !stepsHit(d, stepTarget)) stepsOwed += 1
   }
-  const weekTarget = stepTarget * weekReqDays
+  const hitToday = stepsHit(days[today], stepTarget)
   const daysLeftInWeek = Math.round((new Date(shiftIso(ws, 7) + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000)
 
   // --- reminders + strategy ---------------------------------------------------
@@ -100,19 +91,16 @@ export function movementAccount(state, today) {
     kind: 'gym', debt: gymDebt,
     text: `${gymDebt} missed session${gymDebt > 1 ? 's' : ''} to answer for. Your next lift runs harder — an extra set on the main lifts — to win back the stimulus.`,
   })
-  if (stepDebt >= 1000) {
-    const perDay = daysLeftInWeek > 0 ? Math.round(stepDebt / daysLeftInWeek / 100) * 100 : stepDebt
-    items.push({
-      kind: 'steps', debt: stepDebt,
-      text: daysLeftInWeek > 0
-        ? `You're ${stepDebt.toLocaleString()} steps behind pace. Add about ${perDay.toLocaleString()}/day over the ${daysLeftInWeek} day${daysLeftInWeek > 1 ? 's' : ''} left this week to square it.`
-        : `You're ${stepDebt.toLocaleString()} steps behind. Bank a long walk to clear it and start the week even.`,
-    })
-  }
+  if (stepsOwed > 0) items.push({
+    kind: 'steps', debt: stepsOwed,
+    text: daysLeftInWeek > 1
+      ? `${stepsOwed} missed 10k walk${stepsOwed > 1 ? 's' : ''} this week. ${daysLeftInWeek} days left — don't miss another; string the rest together.`
+      : `${stepsOwed} missed 10k walk${stepsOwed > 1 ? 's' : ''} this week.${hitToday ? '' : ' Close it out — get your walk in today.'}`,
+  })
 
   return {
     gym: { debt: gymDebt, extraSets: gymDebt > 0 ? 1 : 0 },
-    steps: { debt: stepDebt, weekActual, weekTarget, weekReqDays, daysLeftInWeek, perDay: stepTarget },
+    steps: { owed: stepsOwed, hitToday, daysLeftInWeek },
     items,
     hasDebt: items.length > 0,
   }
