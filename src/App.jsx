@@ -12,7 +12,7 @@ import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { buildWeightTimeline } from './timeline'
-import { SKIP_REASONS, skipRecord, movementAccount } from './makeup'
+import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -225,6 +225,12 @@ export default function App() {
   }
   function undoSkipMove(kind) {
     patch(kind === 'gym' ? { workout: { skip: null } } : { stepsSkip: null })
+    setOverride('movement')
+  }
+  // Steps are binary: one tap confirms you hit your 10k (count not tracked).
+  // Marking done clears any steps-skip for the day.
+  function setStepsDone(done) {
+    patch({ stepsDone: done, ...(done ? { stepsSkip: null } : {}) })
     setOverride('movement')
   }
   function saveWeight(kg) {
@@ -538,8 +544,9 @@ export default function App() {
   // so hitting steps alone never makes it look close to done.
   const trainedToday = w.did || w.session?.status === 'done'
   const stepTarget = profile.stepTarget || 10000
-  const stepFrac = Math.min(1, (day.steps || 0) / stepTarget)
-  const moveDone = trainCall.rest ? (day.steps || 0) >= stepTarget : trainedToday
+  const stepsIn = stepsHit(day, stepTarget) // binary: hit today's 10k or not
+  const stepFrac = stepsIn ? 1 : 0
+  const moveDone = trainCall.rest ? stepsIn : trainedToday
   const moveProgress = trainCall.rest ? stepFrac : 0.3 * stepFrac
   const waterTarget = profile.waterTarget || 8
 
@@ -692,7 +699,7 @@ export default function App() {
             state={state} dateIso={today}
             onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
             onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
-            onSteps={(v) => patch({ steps: v })}
+            onStepsDone={setStepsDone}
             onStartTrain={() => setTraining(true)} train={trainCall}
             onSwapDay={(dt) => { setPendingSwap(dt); setTraining(true) }}
             onSkipMove={skipMove} onUndoSkipMove={undoSkipMove}
@@ -828,7 +835,36 @@ function MoveSkip({ kind, skip, onSkip, onUndo }) {
   )
 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onSteps, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
+// Steps are a single yes/no: did you hit your 10k? The exact count isn't
+// tracked — anything past target is just bonus. One tap marks it done.
+function StepsToggle({ done, target, onDone }) {
+  const label = (target || 10000).toLocaleString()
+  if (done) {
+    return (
+      <div className="flex items-center justify-between rounded-2xl border border-[#cdd6b8] bg-[#eef0e6] px-4 py-3">
+        <span className="flex items-center gap-2.5">
+          <span className="grid h-6 w-6 place-items-center rounded-full bg-[#3d4a32]">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          </span>
+          <span className="text-[14px] font-medium text-[#23291f]">{label} steps — done</span>
+        </span>
+        <button onClick={() => onDone(false)} className="text-[12px] font-medium text-[#7d8a5f] active:opacity-70">Undo</button>
+      </div>
+    )
+  }
+  return (
+    <button onClick={() => onDone(true)}
+      className="flex w-full items-center justify-between rounded-2xl border border-[#d8d1c2] bg-[#fbf9f3] px-4 py-3 active:scale-[0.99]">
+      <span className="flex items-center gap-2.5">
+        <span className="h-6 w-6 rounded-full border-2 border-[#cfc7b5]" />
+        <span className="text-[14px] font-medium text-[#4a463c]">Hit your {label} steps?</span>
+      </span>
+      <span className="text-[12px] font-semibold text-[#3d4a32]">Mark done</span>
+    </button>
+  )
+}
+
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -903,11 +939,8 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSta
           {onSkipMove && !train?.rest && (!train?.active && !train?.done || day.workout?.skip) && (
             <MoveSkip kind="gym" skip={day.workout?.skip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />
           )}
-          <Field label="Steps today">
-            <NumInput value={day.steps || ''} placeholder={String(profile.stepTarget)} onCommit={onSteps} />
-            <span className="text-[13px] text-[#8a8474]">of {profile.stepTarget.toLocaleString()}</span>
-          </Field>
-          {onSkipMove && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />}
+          <StepsToggle done={stepsHit(day, profile.stepTarget)} target={profile.stepTarget} skipped={day.stepsSkip} onDone={onStepsDone} />
+          {onSkipMove && !day.stepsDone && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />}
           <TrainingProgress state={state} />
         </div>
       )}
@@ -2229,7 +2262,7 @@ function activeName(id) {
 function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, today }) {
   const r = day.routines, w = day.workout
   skinDue = skinDue || { amPending: !r.skincareAM, pmPending: !r.skincarePM, tonightActive: null, shaveDue: false }
-  const steps = day.steps || 0, target = profile.stepTarget, water = day.water || 0, wTarget = profile.waterTarget
+  const stepsIn = stepsHit(day, profile.stepTarget), water = day.water || 0, wTarget = profile.waterTarget
   const t = fmtTime(hour, minute)
   const eyebrow = `Today — ${t}`
   const phase = hour < 5 ? 'latenight' : hour < 12 ? 'morning' : hour < 17 ? 'midday' : hour < 21 ? 'evening' : 'night'
@@ -2285,7 +2318,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
     const pn = proteinNudge(); if (pn) return pn
     if (water < expectedWater(hour, wTarget)) return { eyebrow, headline: `You're at ${water} of ${wTarget} glasses. Drink up.`, support: `Behind on water for midday. Get a glass in before you forget.`, action: { target: 'water' } }
     if (tcall && (tcall.focus === 'train' || tcall.focus === 'both')) return move(tcall)
-    if (steps < target * 0.4) return { eyebrow, headline: `Only ${steps.toLocaleString()} steps so far. Get on your feet.`, support: `Ten minutes of walking now beats cramming it after dark.`, action: { target: 'movement' } }
+    if (!stepsIn) return { eyebrow, headline: `Your 10k isn't in yet. Get on your feet.`, support: `Ten minutes of walking now beats cramming it after dark. Mark it done once you've hit it.`, action: { target: 'movement' } }
     return { eyebrow, headline: `Strong midday. Hold the line.`, support: `On track. Stay sharp through the afternoon.`, action: null }
   }
 
@@ -2546,7 +2579,7 @@ function moveScore(state, today, profile) {
     const d = days[shiftIso(today, -i)]
     if (!d) continue
     const trained = d.workout?.did && d.workout.type !== 'Rest'
-    sum += trained ? 10 : Math.min(10, Math.round((d.steps || 0) / stepTarget * 10))
+    sum += trained ? 10 : (stepsHit(d, stepTarget) ? 10 : 0)
     n++
   }
   if (!n) return null
@@ -2588,9 +2621,9 @@ const skinQ = (d) => ((d.routines?.skincareAM ? 1 : 0) + (d.routines?.skincarePM
 const hairQ = (d) => ((d.routines?.haircareAM ? 1 : 0) + (d.routines?.haircarePM ? 1 : 0)) / 2
 const moveQ = (d, profile) => {
   const trained = (d.workout?.did && d.workout.type !== 'Rest') || d.workout?.session?.status === 'done'
-  return trained ? 1 : Math.min(1, (d.steps || 0) / (profile.stepTarget || 10000))
+  return trained ? 1 : (stepsHit(d, profile.stepTarget || 10000) ? 1 : 0)
 }
-const dayLogged = (d) => !!(d && (d.routines?.skincareAM || d.routines?.skincarePM || d.routines?.haircareAM || d.routines?.haircarePM || d.workout?.did || (d.food && d.food.length) || d.steps || d.water))
+const dayLogged = (d) => !!(d && (d.routines?.skincareAM || d.routines?.skincarePM || d.routines?.haircareAM || d.routines?.haircarePM || d.workout?.did || (d.food && d.food.length) || d.steps || d.stepsDone || d.stepsSkip || d.water))
 function pillar(days, today, quality) {
   let sum = 0, cnt = 0
   for (let i = 0; i < 7; i++) {
@@ -2985,7 +3018,7 @@ function strongDay(d, profile) {
   const skin = r.skincareAM && r.skincarePM
   const water = (d.water || 0) >= (profile.waterTarget || 8)
   const trained = (w.did && w.type !== 'Rest') || w.session?.status === 'done'
-  const move = trained || (d.steps || 0) >= (profile.stepTarget || 10000)
+  const move = trained || stepsHit(d, profile.stepTarget || 10000)
   const diet = (d.food?.length || 0) > 0 // logged your food today (new model)
   return skin && water && move && diet
 }
@@ -3002,7 +3035,7 @@ function dayGaps(d, profile) {
   if (!(r.skincareAM && r.skincarePM)) gaps.push('skincare')
   if (!((d?.water || 0) >= (profile.waterTarget || 8))) gaps.push('water')
   const trained = (w.did && w.type !== 'Rest') || w.session?.status === 'done'
-  if (!(trained || (d?.steps || 0) >= (profile.stepTarget || 10000))) gaps.push('movement')
+  if (!(trained || stepsHit(d, profile.stepTarget || 10000))) gaps.push('movement')
   if (!((d?.food?.length || 0) > 0)) gaps.push('log your food')
   return gaps
 }
