@@ -1194,6 +1194,7 @@ function TrainStart({ train, onStart }) {
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
 function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove, onToggleDone, budget }) {
   const [adding, setAdding] = useState(false)
+  const [autoScan, setAutoScan] = useState(false) // open the barcode scanner on form mount
   const [builder, setBuilder] = useState(null) // { initial, editId } → ComponentBuilder
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
   const [confirmReset, setConfirmReset] = useState(false)
@@ -1344,12 +1345,20 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
         <p className="text-[11px] text-[#b3ac9c]">Tap ＋ to log one · tap a food to set a quantity.</p>
       </div>
 
-      {/* quick-add */}
+      {/* quick-add — add by hand, or scan a packaged item's barcode */}
       {adding
-        ? <AddFoodForm defaultLoc={loc} onAdd={(f) => { onAdd(f); setAdding(false) }}
+        ? <AddFoodForm defaultLoc={loc} autoScan={autoScan} onAdd={(f) => { onAdd(f); setAdding(false) }}
             onBuild={(seed) => { setAdding(false); setBuilder({ initial: { ...seed, components: [] }, editId: null }) }}
             onCancel={() => setAdding(false)} />
-        : <button onClick={() => setAdding(true)} className="text-[13px] font-medium text-[#3d4a32]">+ Add food</button>}
+        : (
+          <div className="flex items-center gap-4">
+            <button onClick={() => { setAutoScan(false); setAdding(true) }} className="text-[13px] font-medium text-[#3d4a32]">+ Add food</button>
+            <button onClick={() => { setAutoScan(true); setAdding(true) }} className="flex items-center gap-1.5 text-[13px] font-medium text-[#3d4a32]">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14M7 5v14M11 5v14M15 5v14M19 5v14M22 5v14" /></svg>
+              Scan barcode
+            </button>
+          </div>
+        )}
 
       {/* today's food → its own screen (keeps the dashboard light) */}
       {log.length > 0 && (
@@ -1676,7 +1685,7 @@ function BarcodeScanner({ onDetected, onClose }) {
   )
 }
 
-function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
+function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel, autoScan }) {
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('1')
   const [unit, setUnit] = useState('serving')
@@ -1688,7 +1697,7 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
   const [sugar, setSugar] = useState('')
   const [group, setGroup] = useState('Snacks')
   const [foodLoc, setFoodLoc] = useState(defaultLoc || 'home')
-  const [scanning, setScanning] = useState(false)
+  const [scanning, setScanning] = useState(!!autoScan) // opened straight into scan mode?
   const [scanStatus, setScanStatus] = useState(null) // 'loading' | 'ok' | 'sparse' | 'notfound' | 'error'
   const num = (v) => (v === '' ? undefined : Number(v))
   const set = (v, fn) => fn(v == null ? '' : String(v))
