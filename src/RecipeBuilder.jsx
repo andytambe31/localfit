@@ -13,6 +13,8 @@ import { FOOD_LOCS, GROUP_ORDER, groupOf } from './diet'
 let _rk = 0
 const num = (v) => (v === '' || v == null ? 0 : Number(v) || 0)
 const r1 = (n) => Math.round(n * 10) / 10
+// Coerce a typed servings value to a sane positive number (blank/garbage → 1).
+const normServings = (v) => { const n = Number(v); return n > 0 ? Math.round(n * 100) / 100 : 1 }
 
 // An existing item's reconstructed components (per-default-amount macros) → parts
 // holding per-serving macros + a servings multiplier.
@@ -40,7 +42,7 @@ export default function RecipeBuilder({ initial = {}, editId = null, pantry = []
   const setPart = (key, patch) => setParts((ps) => ps.map((p) => (p.key === key ? { ...p, ...patch } : p)))
   const removePart = (key) => setParts((ps) => ps.filter((p) => p.key !== key))
   const addFood = (f) => { setParts((ps) => [...ps, partFromFood(f)]); setPicking(false) }
-  const bumpServings = (key, d) => setParts((ps) => ps.map((p) => (p.key === key ? { ...p, servings: Math.max(0.5, Math.round((Number(p.servings || 1) + d) * 2) / 2) } : p)))
+  const bumpServings = (key, d) => setParts((ps) => ps.map((p) => (p.key === key ? { ...p, servings: Math.max(0.05, Math.round((Number(p.servings || 1) + d) * 100) / 100) } : p)))
 
   const total = useMemo(() => parts.reduce((a, p) => {
     const s = Number(p.servings) || 1
@@ -52,7 +54,7 @@ export default function RecipeBuilder({ initial = {}, editId = null, pantry = []
   const save = () => {
     if (!canSave) return
     const components = named.map((p) => {
-      const s = Math.max(0.5, Number(p.servings) || 1)
+      const s = Math.max(0.05, Number(p.servings) || 1)
       return {
         id: p.id, name: p.name.trim(), unit: p.portion || 'serving', default: s,
         kcal: num(p.kcal) * s, protein: num(p.protein) * s, carbs: num(p.carbs) * s, fat: num(p.fat) * s, fiber: num(p.fiber) * s, sugar: num(p.sugar) * s,
@@ -116,9 +118,10 @@ export default function RecipeBuilder({ initial = {}, editId = null, pantry = []
                 )}
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-[12px] text-[#8a8474]">Servings</span>
-                  <button onClick={() => bumpServings(p.key, -0.5)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">−</button>
-                  <span className="w-8 text-center text-[14px] font-semibold tabular-nums text-[#23211c]">{Number(p.servings) || 1}</span>
-                  <button onClick={() => bumpServings(p.key, 0.5)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">+</button>
+                  <button onClick={() => bumpServings(p.key, -0.25)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">−</button>
+                  <input value={p.servings} onChange={(e) => setPart(p.key, { servings: e.target.value })} onBlur={(e) => setPart(p.key, { servings: normServings(e.target.value) })} inputMode="decimal" aria-label="Servings"
+                    className="w-14 rounded-lg border border-[#ddd5c5] bg-white px-1.5 py-1 text-center text-[14px] font-semibold tabular-nums text-[#23211c] outline-none focus:border-[#3d4a32]" />
+                  <button onClick={() => bumpServings(p.key, 0.25)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">+</button>
                   <div className="ml-auto flex gap-1">{[0.5, 1, 2].map((m) => <Pill key={m} small on={(Number(p.servings) || 1) === m} onClick={() => setPart(p.key, { servings: m })}>×{m}</Pill>)}</div>
                 </div>
               </div>
