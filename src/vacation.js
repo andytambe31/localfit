@@ -36,9 +36,7 @@ const RETURN_DAYS = 3 // re-entry window after a trip: routines resume, scale st
 // Trips are defined here in code, by design — tell Claude "I'm away Jul 5–7" and
 // it adds a line. No in-app trip planner. Dates are inclusive (YYYY-MM-DD).
 export const VACATIONS = [
-  // No active trips → the app stays on the normal dashboard. To turn vacation
-  // mode back on, add a line, e.g.:
-  //   { start: '2026-07-04', end: '2026-07-05', label: "NYC — sister's birthday" },
+  { start: '2026-07-04', end: '2026-07-05', label: "NYC — sister's birthday" },
 ]
 
 const norm = (v) => ({ start: v.start, end: v.end || v.start, label: v.label || 'Vacation' })
