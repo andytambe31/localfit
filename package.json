@@ -16,6 +16,7 @@
     "start:https": "TLS_CERT=certs/localfit.pem TLS_KEY=certs/localfit-key.pem node server/index.mjs"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.0",
     "express": "^4.21.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
