@@ -114,6 +114,28 @@ export const DEFAULT_PANTRY = [
   { id: 'green_beans',   name: 'Green Beans',       loc: 'home', category: 'vegetable', portion: '100g',        kcal: 31,  protein: 1.8, carbs: 7,   fat: 0.2, fiber: 3.4, sugar: 3.3, staple: true, perishability: 'fresh', shelfDays: 7, storage: 'fridge', freezable: true, burnRate: 'weekly', bulk: false, goalRank: 1, costTier: 'low' },
   { id: 'almonds',       name: 'Almonds',           loc: 'both', category: 'protein_snack', portion: '1 oz (28g)', kcal: 164, protein: 6, carbs: 6, fat: 14, fiber: 3.5, sugar: 1, staple: true, perishability: 'stable', shelfDays: 365, storage: 'pantry', freezable: false, burnRate: 'monthly', bulk: true, goalRank: 2, costTier: 'med' },
   { id: 'chia_seeds',    name: 'Chia Seeds',        loc: 'home', category: 'condiment', portion: '1 tbsp',      kcal: 58,  protein: 2,   carbs: 5,   fat: 4,   fiber: 4,   sugar: 0, staple: true, perishability: 'stable', shelfDays: 730, storage: 'pantry', freezable: false, burnRate: 'monthly', bulk: true, goalRank: 1, costTier: 'med' },
+
+  // Travel / eating-out (surfaced first in vacation mode; searchable everywhere).
+  // Calories are padded ~20% on purpose: restaurant food is systematically
+  // under-estimated (hidden oil, butter, bigger portions), so the running total
+  // reflects the likely truth and nudges you to stop a slice sooner. Protein is
+  // kept honest — never inflate the good macro.
+  { id: 'ny_pizza_slice',    name: 'NY Pizza Slice',        loc: 'outside', category: 'restaurant_meal', portion: '1 slice',    kcal: 340,  protein: 13, carbs: 40,  fat: 14, fiber: 2, sugar: 5,  travel: true, unhealthy: true },
+  { id: 'bagel_cream_cheese', name: 'Bagel + Cream Cheese', loc: 'outside', category: 'restaurant_meal', portion: '1 bagel',    kcal: 540,  protein: 14, carbs: 62,  fat: 22, fiber: 3, sugar: 8,  travel: true },
+  { id: 'bacon_egg_cheese',  name: 'Bacon Egg & Cheese',    loc: 'outside', category: 'restaurant_meal', portion: '1 sandwich', kcal: 600,  protein: 24, carbs: 40,  fat: 36, fiber: 2, sugar: 4,  travel: true },
+  { id: 'deli_sandwich',     name: 'Deli Sandwich',         loc: 'outside', category: 'restaurant_meal', portion: '1 sandwich', kcal: 780,  protein: 36, carbs: 58,  fat: 40, fiber: 4, sugar: 8,  travel: true },
+  { id: 'cheeseburger_fries', name: 'Cheeseburger + Fries', loc: 'outside', category: 'restaurant_meal', portion: '1 meal',     kcal: 1140, protein: 42, carbs: 92,  fat: 60, fiber: 6, sugar: 12, travel: true, unhealthy: true },
+  { id: 'restaurant_pasta',  name: 'Restaurant Pasta',      loc: 'outside', category: 'restaurant_meal', portion: '1 plate',    kcal: 1080, protein: 28, carbs: 112, fat: 42, fiber: 6, sugar: 12, travel: true },
+  { id: 'halal_cart_platter', name: 'Halal Cart over Rice', loc: 'outside', category: 'restaurant_meal', portion: '1 platter',  kcal: 1150, protein: 46, carbs: 110, fat: 46, fiber: 4, sugar: 8,  travel: true },
+  { id: 'pork_dumplings',    name: 'Dumplings',             loc: 'outside', category: 'restaurant_meal', portion: '8 pieces',   kcal: 600,  protein: 20, carbs: 56,  fat: 28, fiber: 3, sugar: 4,  travel: true },
+  { id: 'ramen_bowl',        name: 'Ramen',                 loc: 'outside', category: 'restaurant_meal', portion: '1 bowl',     kcal: 840,  protein: 30, carbs: 82,  fat: 36, fiber: 4, sugar: 8,  travel: true },
+  { id: 'nyc_fries',         name: 'Fries',                 loc: 'outside', category: 'side',            portion: '1 order',    kcal: 460,  protein: 5,  carbs: 56,  fat: 24, fiber: 5, sugar: 1,  travel: true, unhealthy: true },
+  { id: 'scoop_ice_cream',   name: 'Ice Cream',             loc: 'outside', category: 'dessert',        portion: '2 scoops',   kcal: 420,  protein: 6,  carbs: 46,  fat: 24, fiber: 1, sugar: 40, travel: true, unhealthy: true },
+  { id: 'draft_beer',        name: 'Beer',                  loc: 'outside', category: 'beverage',       portion: '1 pint',     kcal: 240,  protein: 2,  carbs: 18,  fat: 0,  fiber: 0, sugar: 0,  travel: true, unhealthy: true },
+  { id: 'cocktail',          name: 'Cocktail',              loc: 'outside', category: 'beverage',       portion: '1 drink',    kcal: 320,  protein: 0,  carbs: 26,  fat: 0,  fiber: 0, sugar: 22, travel: true, unhealthy: true },
+  { id: 'wine_glass',        name: 'Glass of Wine',         loc: 'outside', category: 'beverage',       portion: '1 glass',    kcal: 160,  protein: 0,  carbs: 4,   fat: 0,  fiber: 0, sugar: 1,  travel: true, unhealthy: true },
+  { id: 'soft_drink',        name: 'Soda',                  loc: 'outside', category: 'beverage',       portion: '1 can',      kcal: 180,  protein: 0,  carbs: 45,  fat: 0,  fiber: 0, sugar: 44, travel: true, unhealthy: true },
+  { id: 'cafe_latte',        name: 'Latte',                 loc: 'outside', category: 'beverage',       portion: '12 oz',      kcal: 220,  protein: 9,  carbs: 18,  fat: 10, fiber: 0, sugar: 17, travel: true },
 ]
 const DEFAULT_BY_ID = Object.fromEntries(DEFAULT_PANTRY.map((it) => [it.id, it]))
 

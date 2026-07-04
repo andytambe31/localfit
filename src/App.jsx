@@ -13,6 +13,7 @@ import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
+import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -468,10 +469,29 @@ export default function App() {
     setPending(true); scheduleSync()
   }
 
+  // Keystone habit on a trip: one tap logs the nightly minoxidil so the streak
+  // and the hair goal don't quietly lapse while you're away.
+  function markKeystone() { patch({ routines: { haircarePM: true, haircareAM: true } }) }
+
   const day = useMemo(() => (state ? { ...defaultDay(), ...(state.days?.[today] || {}) } : null), [state, today])
   if (!state || !day) return <Centered>…</Centered>
 
   const { profile } = state
+
+  // Vacation mode: when today falls inside a trip range, the whole dashboard
+  // flips to the away screen. Protect progress, enjoy deliberately, come back clean.
+  const activeVac = activeVacation(state, today)
+  if (activeVac) {
+    return (
+      <VacationView state={state} today={today} profile={profile} day={day} vac={activeVac}
+        onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood}
+        onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
+        onWater={(d) => patch({ water: Math.max(0, (day.water || 0) + d) })}
+        onKeystone={markKeystone} />
+    )
+  }
+  const preTrip = upcomingVacation(state, today) // night-before nudge
+  const ret = returnWindow(state, today)         // just-back re-entry window (hides weigh-ins)
 
   if (view === 'rewards') {
     return (
@@ -579,6 +599,7 @@ export default function App() {
           <span>{lastBackup ? "It's been a while — back up your data to Files so you don't lose it." : 'Your data lives only on this device. Tap to export a backup to Files.'}</span>
         </button>
       )}
+      {preTrip && <PreTripBanner vac={preTrip} />}
 
       {/* The coach speaks — directive, one thing at a time */}
       <section className="rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
@@ -601,7 +622,11 @@ export default function App() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
       </button>
 
-      <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />
+      {ret && <ReturnCard state={state} ret={ret} />}
+
+      {/* Weigh-ins stay hidden through the just-back window so you judge a settled
+          number, not a bloated one. */}
+      {!ret && <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />}
 
       {/* Deficit coach + the full weight trajectory now live in Coach's Review
           (Your pace / Trajectory) — kept off the dashboard to reduce density. */}
@@ -836,6 +861,112 @@ function MoveSkip({ kind, skip, onSkip, onUndo }) {
   )
 }
 
+// --- vacation mode ----------------------------------------------------------
+// The away screen: warm permission, a banked trip budget that burns down, the
+// same search-first logger (NYC picks first), the one keystone habit, hydration,
+// and a frozen-streak assurance. Strict targets/scores/weigh-ins are suspended.
+function VacationView({ state, today, profile, day, vac, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onKeystone }) {
+  const b = vacationBudget(state, today, vac)
+  const streak = currentStreak(state.days || {}, today, profile)
+  const hairDone = day.routines?.haircarePM || day.routines?.haircareAM
+  const water = day.water || 0, wTarget = profile.waterTarget || 8
+  const pct = b?.budget ? Math.min(100, Math.round((b.spent / b.budget) * 100)) : 0
+  return (
+    <div className="mx-auto max-w-xl px-5 pb-16 pt-7 fade-in">
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="font-display text-lg font-semibold tracking-tight text-[#20201d]">localfit</span>
+        <span className="flex items-center gap-1.5 rounded-full border border-[#cdd4bb] bg-[#eef0e6] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3d4a32]">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5A2.12 2.12 0 0 0 16.5 4.5L13 8 4.8 6.2a1 1 0 0 0-.9 1.7l6.1 4-1.6 3.4-2.4-.5a1 1 0 0 0-.9 1.6l2 2 2 2a1 1 0 0 0 1.6-.9l-.5-2.4 3.4-1.6 4 6.1a1 1 0 0 0 1.7-.9Z" /></svg>
+          On vacation
+        </span>
+      </div>
+
+      <section className="rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#9aa581]">{vac.label} · day {b?.dayIndex} of {b?.tripDays}</p>
+        <h1 className="font-display mt-3 text-[26px] font-semibold leading-[1.16] text-[#f4f1e8]">Enjoy it. You earned this.</h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">Protein first, one indulgence per meal, water between drinks. The strict targets are paused and your streak is safe — stay inside your budget and this trip can't cost you a thing.</p>
+      </section>
+
+      {b?.budget != null ? (
+        <section className="mt-4 rounded-3xl border border-[#cdd4bb] bg-[#eef0e6] p-5">
+          <div className="flex items-baseline justify-between">
+            <h2 className="font-display text-[18px] font-semibold text-[#23291f]">Trip budget</h2>
+            <span className="text-[12px] text-[#6b7355]">{b.daysLeft} day{b.daysLeft === 1 ? '' : 's'} left</span>
+          </div>
+          <p className="mt-2 font-display text-[28px] font-semibold text-[#23291f]">{Math.max(0, b.remaining).toLocaleString()}<span className="text-[15px] font-normal text-[#6b7355]"> cal left of {b.budget.toLocaleString()}</span></p>
+          <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-[#dbe0cd]">
+            <div className={`h-full rounded-full transition-all ${b.remaining < 0 ? 'bg-[#b0552a]' : 'bg-[#3d4a32]'}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-3 text-[13px] leading-snug text-[#4a5238]">
+            {b.remaining >= 0
+              ? `You banked ${b.banked.toLocaleString()} cal from this week's deficit. Stay inside this and the week nets even — you don't lose an ounce of progress.`
+              : `You're ${(-b.remaining).toLocaleString()} past the buffer — from here it's a small real gain. Ease off, hydrate, and we reset clean when you're home.`}
+          </p>
+          {b.bigDay && <p className="mt-2 rounded-xl bg-[#f7ecd6] px-3 py-2 text-[12px] leading-snug text-[#8a5a1e]">Big day — you can't productively spend a whole weekend's buffer in one night. Slow down and drink water.</p>}
+        </section>
+      ) : (
+        <section className="mt-4 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4 text-[13px] leading-relaxed text-[#6b6857]">Log a weigh-in to unlock a calorie budget. For now: protein at each meal, one indulgence at a time, and plenty of water.</section>
+      )}
+
+      <section className="mt-4 grid grid-cols-2 gap-2">
+        <button onClick={hairDone ? undefined : onKeystone}
+          className={`rounded-2xl border px-3.5 py-3 text-left transition ${hairDone ? 'border-[#cdd6b8] bg-[#eef0e6]' : 'border-[#d8d1c2] bg-[#fbf9f3] active:scale-[0.99]'}`}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#7d8a5f]">Keystone</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-[14px] font-medium text-[#23211c]">
+            {hairDone && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+            {hairDone ? 'Minoxidil done' : 'Minoxidil tonight'}
+          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-[#8a8474]">{hairDone ? 'The one you never skip.' : 'Tap when applied — hair only works daily.'}</p>
+        </button>
+        <div className="rounded-2xl border border-[#d8d1c2] bg-[#fbf9f3] px-3.5 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#7d8a5f]">Hydrate</p>
+          <p className="mt-0.5 text-[14px] font-medium text-[#23211c]">{water} / {wTarget} glasses</p>
+          <div className="mt-1.5 flex gap-1.5">
+            <button onClick={() => onWater(-1)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[16px] text-[#3d4a32] active:scale-90">−</button>
+            <button onClick={() => onWater(1)} className="grid h-7 w-7 place-items-center rounded-full bg-[#3d4a32] text-[16px] text-[#f4f1e8] active:scale-90">+</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
+        <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Log what you ate</h2>
+        <p className="mb-3 mt-0.5 text-[12px] text-[#8a8474]">Tap a NYC pick or search. Calories are padded a little on purpose — restaurants under-count.</p>
+        <DietCard state={state} dateIso={today} day={day} budget={b}
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} onToggleDone={onToggleDietDone} />
+      </section>
+
+      <div className="mt-4 flex items-center gap-2 rounded-2xl bg-[#eef0e6] px-4 py-3 text-[13px] leading-snug text-[#3d4a32]">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /></svg>
+        <span>{streak > 0 ? `Your ${streak}-day streak is frozen and safe` : 'Streak paused — vacation days are auto-forgiven'} — it resumes the day you're home.</span>
+      </div>
+
+      <p className="mt-6 text-center text-[12px] text-[#a39c8d]">Vacation ends {fmtMD(vac.end)}. Consistency over intensity — even on the road.</p>
+    </div>
+  )
+}
+
+// The night-before nudge on the normal dashboard (informational).
+function PreTripBanner({ vac }) {
+  return (
+    <div className="mb-4 flex w-full items-center gap-2 rounded-xl border border-[#cdd4bb] bg-[#eef0e6] px-3 py-2.5 text-[12px] leading-snug text-[#3d4a32]">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M17.8 19.2 16 11l3.5-3.5A2.12 2.12 0 0 0 16.5 4.5L13 8 4.8 6.2a1 1 0 0 0-.9 1.7l6.1 4-1.6 3.4-2.4-.5a1 1 0 0 0-.9 1.6l4 4a1 1 0 0 0 1.6-.9l-.5-2.4 3.4-1.6 4 6.1a1 1 0 0 0 1.7-.9Z" /></svg>
+      <span><span className="font-semibold">{vac.label} starts tomorrow.</span> Pack minoxidil + travel skincare, plan to walk. Vacation mode switches on automatically.</span>
+    </div>
+  )
+}
+
+// Welcome-back card during the return window: reassurance + scale amnesty.
+function ReturnCard({ state, ret }) {
+  return (
+    <section className="mt-4 rounded-3xl border border-[#cdd4bb] bg-[#eef0e6] p-5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7d8a5f]">Welcome back</p>
+      <h2 className="mt-1 font-display text-[18px] font-semibold text-[#23291f]">Ease back in — don't panic at the scale.</h2>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-[#4a5238]">{reassurance(state, ret.vac)}</p>
+      <p className="mt-2 text-[12px] text-[#6b7355]">Weigh-ins unlock in {ret.weighUnlockIn} day{ret.weighUnlockIn === 1 ? '' : 's'}. Today: a long walk, protein, water — and resume your routines.</p>
+    </section>
+  )
+}
+
 // Steps are a single yes/no: did you hit your 10k? The exact count isn't
 // tracked — anything past target is just bonus. One tap marks it done.
 function StepsToggle({ done, target, onDone }) {
@@ -1060,7 +1191,7 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
-function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove, onToggleDone }) {
+function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove, onToggleDone, budget }) {
   const [adding, setAdding] = useState(false)
   const [builder, setBuilder] = useState(null) // { initial, editId } → ComponentBuilder
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
@@ -1087,6 +1218,7 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
   const qn = query.trim().toLowerCase()
   const results = qn ? allItems.filter((it) => it.name.toLowerCase().includes(qn)).sort(byFreq).slice(0, 40) : null
   const recent = [...allItems].filter((it) => freq[it.id]).sort(byFreq).slice(0, 8)
+  const travel = budget ? allItems.filter((it) => it.travel).sort(byFreq) : null // NYC quick-picks
   const pPct = Math.min(100, Math.round((totals.protein / proteinTarget) * 100))
   const zone = ct && totals.count ? calorieZone(totals.kcal, ct.ceiling) : null
   const zoneCls = { green: 'text-[#5b6745]', yellow: 'text-[#866a1c]', red: 'text-[#b0552a]' }
@@ -1113,21 +1245,23 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
         </div>
       )}
 
-      {/* protein ring (bar) + calorie guardrail */}
+      {/* protein ring (bar) + calorie guardrail (trip budget in vacation mode) */}
       <div>
         <div className="flex items-baseline justify-between">
           <span className="font-display text-[26px] font-semibold text-[#23211c]">
             {Math.round(totals.protein)}<span className="text-[15px] font-normal text-[#8a8474]"> / {proteinTarget}g protein</span>
           </span>
-          {ct
-            ? <span className={`text-[13px] ${zone ? zoneCls[zone] : 'text-[#8a8474]'}`}>{totals.kcal} / {ct.ceiling} cal</span>
-            : <span className="text-[12px] text-[#b08a3a]">log weight for a calorie target</span>}
+          {budget && budget.remaining != null
+            ? <span className={`text-[13px] font-medium ${budget.remaining >= 0 ? 'text-[#5b6745]' : 'text-[#b0552a]'}`}>{Math.abs(budget.remaining).toLocaleString()} {budget.remaining >= 0 ? 'left' : 'over'}</span>
+            : ct
+              ? <span className={`text-[13px] ${zone ? zoneCls[zone] : 'text-[#8a8474]'}`}>{totals.kcal} / {ct.ceiling} cal</span>
+              : <span className="text-[12px] text-[#b08a3a]">log weight for a calorie target</span>}
         </div>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
           <div className="h-full rounded-full bg-[#3d4a32] transition-all" style={{ width: `${pPct}%` }} />
         </div>
-        {zone === 'yellow' && <p className="mt-1 text-[12px] text-[#866a1c]">A touch over target — still a deficit. Just don't drift higher.</p>}
-        {zone === 'red' && <p className="mt-1 text-[12px] text-[#b0552a]">Well over target — today's deficit is mostly gone. Rein it in.</p>}
+        {!budget && zone === 'yellow' && <p className="mt-1 text-[12px] text-[#866a1c]">A touch over target — still a deficit. Just don't drift higher.</p>}
+        {!budget && zone === 'red' && <p className="mt-1 text-[12px] text-[#b0552a]">Well over target — today's deficit is mostly gone. Rein it in.</p>}
         {totals.count > 0 && (
           <p className="mt-1.5 text-[12px] text-[#8a8474]">
             {Math.round(totals.carbs)}g carbs · {Math.round(totals.fat)}g fat ·{' '}
@@ -1158,6 +1292,12 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
           )
         ) : (
           <>
+            {travel && travel.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-[#a39c8d]">On the trip</p>
+                {travel.map((it) => <FoodRow key={it.id} item={it} onLogOne={() => logOne(it)} onQty={() => setQtyItem(it)} />)}
+              </div>
+            )}
             {recent.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-[#a39c8d]">Recent</p>
