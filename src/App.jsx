@@ -14,6 +14,7 @@ import { buildReview } from './review'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
+import { lookupBarcode, parsePortion } from './barcode'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
@@ -1630,6 +1631,51 @@ function MacroField({ label, value, onChange }) {
     </label>
   )
 }
+// Full-screen camera barcode scanner. ZXing is dynamically imported so the ~big
+// decoder only loads when you actually scan (keeps the initial bundle lean).
+// Prefers the rear camera; degrades to a clear message on permission/hardware.
+function BarcodeScanner({ onDetected, onClose }) {
+  const videoRef = useRef(null)
+  const [error, setError] = useState(null)
+  useEffect(() => {
+    let stopped = false, controls = null
+    ;(async () => {
+      try {
+        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        const reader = new BrowserMultiFormatReader()
+        controls = await reader.decodeFromConstraints({ video: { facingMode: 'environment' } }, videoRef.current, (result, _err, ctrls) => {
+          if (stopped || !result) return
+          stopped = true; ctrls.stop(); onDetected(result.getText())
+        })
+      } catch (e) {
+        setError(e?.name === 'NotAllowedError' || e?.name === 'NotFoundError' ? 'denied' : 'error')
+      }
+    })()
+    return () => { stopped = true; try { controls?.stop() } catch { /* noop */ } }
+  }, [onDetected])
+  return createPortal(
+    <div className="fixed inset-0 z-[70] bg-black">
+      <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="h-36 w-72 rounded-2xl border-2 border-white/85 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]" />
+      </div>
+      <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4">
+        <span className="rounded-full bg-black/40 px-3 py-1.5 text-[13px] font-medium text-white backdrop-blur">Point at a barcode</span>
+        <button onClick={onClose} className="rounded-full bg-white/20 px-3.5 py-1.5 text-[13px] font-semibold text-white backdrop-blur active:scale-95">Cancel</button>
+      </div>
+      {error && (
+        <div className="absolute inset-x-0 bottom-0 bg-black/80 px-5 py-6 text-center">
+          <p className="text-[14px] leading-relaxed text-white">
+            {error === 'denied' ? 'No camera access. Allow the camera in your browser/site settings, or just enter the food by hand.' : "Couldn't start the camera. Enter the food by hand instead."}
+          </p>
+          <button onClick={onClose} className="mt-4 w-full rounded-full bg-white px-4 py-2.5 text-[14px] font-semibold text-black">Enter by hand</button>
+        </div>
+      )}
+    </div>,
+    document.body
+  )
+}
+
 function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('1')
@@ -1642,9 +1688,41 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel }) {
   const [sugar, setSugar] = useState('')
   const [group, setGroup] = useState('Snacks')
   const [foodLoc, setFoodLoc] = useState(defaultLoc || 'home')
+  const [scanning, setScanning] = useState(false)
+  const [scanStatus, setScanStatus] = useState(null) // 'loading' | 'ok' | 'sparse' | 'notfound' | 'error'
   const num = (v) => (v === '' ? undefined : Number(v))
+  const set = (v, fn) => fn(v == null ? '' : String(v))
+  // A scanned barcode → Open Food Facts → prefill the fields, then you review + Add.
+  async function onScanned(code) {
+    setScanning(false); setScanStatus('loading')
+    try {
+      const f = await lookupBarcode(code)
+      if (!f) { setScanStatus('notfound'); return }
+      if (f.name) setName(f.name)
+      const pp = parsePortion(f.portion); setAmount(pp.amount); if (FOOD_UNITS.includes(pp.unit)) setUnit(pp.unit)
+      if (f.sparse) { setScanStatus('sparse'); return }
+      set(f.kcal, setKcal); set(f.protein, setProtein); set(f.carbs, setCarbs)
+      set(f.fat, setFat); set(f.fiber, setFiber); set(f.sugar, setSugar)
+      setScanStatus('ok')
+    } catch { setScanStatus('error') }
+  }
   return (
     <div className="space-y-2 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] p-3">
+      <button onClick={() => { setScanStatus(null); setScanning(true) }}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#cdd4bb] bg-[#eef0e6] px-3 py-2 text-[13px] font-semibold text-[#3d4a32] active:scale-[0.99]">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14M7 5v14M11 5v14M15 5v14M19 5v14M22 5v14" /></svg>
+        Scan a barcode
+      </button>
+      {scanStatus && (
+        <p className={`text-[12px] leading-snug ${scanStatus === 'error' || scanStatus === 'notfound' ? 'text-[#b0552a]' : scanStatus === 'loading' ? 'text-[#8a8474]' : 'text-[#5b6745]'}`}>
+          {scanStatus === 'loading' ? 'Looking it up…'
+            : scanStatus === 'ok' ? 'Found it — review the numbers and Add.'
+            : scanStatus === 'sparse' ? 'Found the product, but it has no macros — fill them in.'
+            : scanStatus === 'notfound' ? "Not in the food database. Enter it by hand — it'll be saved for next time."
+            : "Couldn't reach the database (offline?). Enter it by hand."}
+        </p>
+      )}
+      {scanning && <BarcodeScanner onDetected={onScanned} onClose={() => setScanning(false)} />}
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Food name"
         className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
       <div className="flex gap-2">
