@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { estimateBF, estimateSkinfold, bfCategory, round1, TAPE_SITES, SKINFOLD_SITES, PINCH_TIP } from './bodyfat'
 
 /* ---------- guided body-fat flow: full-screen takeover, one site per card ----
@@ -218,12 +219,20 @@ function ProgressBar({ total, i }) {
 }
 
 function Takeover({ children, onClose, closing }) {
-  return (
+  // Lock background scroll and portal to <body> so the fixed takeover anchors to
+  // the viewport (a transformed ancestor would otherwise trap it mid-page).
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+  return createPortal(
     <div className={`fixed inset-x-0 top-0 z-50 flex h-[100dvh] flex-col overflow-hidden overscroll-none bg-[#23291f] ${closing ? 'sk-takeover-out' : 'sk-takeover-in'}`}>
       <div className="flex shrink-0 justify-end px-5 pt-5">
         <button onClick={onClose} className="rounded-full px-3 py-1.5 text-[13px] font-medium text-[#9aa581]">Not now</button>
       </div>
       <div className="mx-auto flex w-full min-h-0 max-w-xl flex-1 flex-col">{children}</div>
-    </div>
+    </div>,
+    document.body,
   )
 }
