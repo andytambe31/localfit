@@ -1435,10 +1435,10 @@ function FoodRow({ item, onLogOne, onQty }) {
 // Quantity editor (bottom sheet): set how many servings of an item to log in one
 // go, with a live macro preview. The serving label is the item's own unit.
 function QtyEditor({ item, onLog, onEdit, onDuplicate, onClose }) {
-  const [qty, setQty] = useState(1)
+  const [qty, setQty] = useState('1') // raw text so decimals like 0.75 can be typed
   const [mods, setMods] = useState(() => Object.fromEntries((item.mods || []).map((m) => [m.id, m.default])))
-  const q = qty > 0 ? Math.round(qty * 100) / 100 : 1
-  const bump = (d) => setQty((v) => Math.max(0.25, Math.round((v + d) * 100) / 100))
+  const q = (() => { const n = Number(qty); return n > 0 ? Math.round(n * 100) / 100 : 1 })()
+  const bump = (d) => setQty((v) => String(Math.max(0.25, Math.round(((Number(v) || 0) + d) * 100) / 100)))
   const adj = applyMods(item, mods)
   const setMod = (m, v) => setMods((s) => ({ ...s, [m.id]: Math.max(m.min ?? 0, Math.min(m.max ?? 99, v)) }))
   const log = () => {
@@ -1470,7 +1470,7 @@ function QtyEditor({ item, onLog, onEdit, onDuplicate, onClose }) {
         <div className="mt-4 flex items-center justify-center gap-5">
           <RoundBtn onClick={() => bump(-1)}>−</RoundBtn>
           <div className="text-center">
-            <input value={q} onChange={(e) => setQty(Number(e.target.value) || 0)} inputMode="decimal"
+            <input value={qty} onChange={(e) => setQty(e.target.value)} onBlur={() => setQty(String(q))} inputMode="decimal"
               className="w-24 rounded-xl border border-[#ddd5c5] bg-white px-2 py-2 text-center font-display text-[26px] font-semibold text-[#23211c] outline-none focus:border-[#3d4a32]" />
             <div className="mt-1 text-[11px] text-[#a39c8d]">× {item.portion}</div>
           </div>
@@ -1478,7 +1478,7 @@ function QtyEditor({ item, onLog, onEdit, onDuplicate, onClose }) {
         </div>
 
         <div className="mt-3 flex justify-center gap-2">
-          {[0.5, 1, 2, 3, 5].map((n) => <Chip key={n} small on={q === n} onClick={() => setQty(n)}>×{n}</Chip>)}
+          {[0.5, 1, 2, 3, 5].map((n) => <Chip key={n} small on={q === n} onClick={() => setQty(String(n))}>×{n}</Chip>)}
         </div>
 
         <p className="mt-4 text-center text-[14px] text-[#3d4a32]">
