@@ -122,6 +122,7 @@ export const DEFAULT_PANTRY = [
   // kept honest — never inflate the good macro.
   { id: 'ny_pizza_slice',    name: 'NY Pizza Slice',        loc: 'outside', category: 'restaurant_meal', portion: '1 slice',    kcal: 340,  protein: 13, carbs: 40,  fat: 14, fiber: 2, sugar: 5,  travel: true, unhealthy: true },
   { id: 'bagel_cream_cheese', name: 'Bagel + Cream Cheese', loc: 'outside', category: 'restaurant_meal', portion: '1 bagel',    kcal: 540,  protein: 14, carbs: 62,  fat: 22, fiber: 3, sugar: 8,  travel: true },
+  { id: 'popup_bagel_scallion', name: 'Pop Up Bagel + Scallion Schmear', loc: 'outside', category: 'restaurant_meal', portion: '1 bagel', kcal: 720, protein: 19, carbs: 82, fat: 34, fiber: 4, sugar: 8, travel: true, unhealthy: true },
   { id: 'bacon_egg_cheese',  name: 'Bacon Egg & Cheese',    loc: 'outside', category: 'restaurant_meal', portion: '1 sandwich', kcal: 600,  protein: 24, carbs: 40,  fat: 36, fiber: 2, sugar: 4,  travel: true },
   { id: 'deli_sandwich',     name: 'Deli Sandwich',         loc: 'outside', category: 'restaurant_meal', portion: '1 sandwich', kcal: 780,  protein: 36, carbs: 58,  fat: 40, fiber: 4, sugar: 8,  travel: true },
   { id: 'cheeseburger_fries', name: 'Cheeseburger + Fries', loc: 'outside', category: 'restaurant_meal', portion: '1 meal',     kcal: 1140, protein: 42, carbs: 92,  fat: 60, fiber: 6, sugar: 12, travel: true, unhealthy: true },
