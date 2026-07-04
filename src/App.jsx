@@ -1066,13 +1066,27 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
   const [confirmReset, setConfirmReset] = useState(false)
   const [reviewing, setReviewing] = useState(false) // full-screen day review
-  const [foodGroup, setFoodGroup] = useState(null)  // selected pantry category
+  const [foodGroup, setFoodGroup] = useState(null)  // selected pantry category (browse)
+  const [query, setQuery] = useState('')            // live search across ALL foods
+  const [browsing, setBrowsing] = useState(false)   // expand the full location/category browse
+  const [justLogged, setJustLogged] = useState(null) // { name } → inline confirm + undo
   const proteinTarget = state.profile?.proteinTarget || PROTEIN_TARGET_DEFAULT
   const loc = day.foodLoc || defaultLocation(dateIso)
   const totals = dayTotals(day)
   const ct = calorieTarget(state)
-  const items = pantryFor(effectivePantry(state), loc)
+  const allItems = effectivePantry(state)
+  const items = pantryFor(allItems, loc)
   const log = day.food || []
+  const logOne = (it) => { onLog(it, 1); setJustLogged({ name: it.name }) }
+  // Most-logged foods, recency-weighted over the last ~60 tracked days — the fast
+  // path for the ~20 things you actually eat.
+  const freq = {}
+  const dks = Object.keys(state.days || {}).sort().slice(-60)
+  dks.forEach((k, i) => { const w = 1 + i / Math.max(1, dks.length); for (const e of state.days[k].food || []) if (e.id) freq[e.id] = (freq[e.id] || 0) + w })
+  const byFreq = (a, b) => (freq[b.id] || 0) - (freq[a.id] || 0) || a.name.localeCompare(b.name)
+  const qn = query.trim().toLowerCase()
+  const results = qn ? allItems.filter((it) => it.name.toLowerCase().includes(qn)).sort(byFreq).slice(0, 40) : null
+  const recent = [...allItems].filter((it) => freq[it.id]).sort(byFreq).slice(0, 8)
   const pPct = Math.min(100, Math.round((totals.protein / proteinTarget) * 100))
   const zone = ct && totals.count ? calorieZone(totals.kcal, ct.ceiling) : null
   const zoneCls = { green: 'text-[#5b6745]', yellow: 'text-[#866a1c]', red: 'text-[#b0552a]' }
@@ -1123,28 +1137,70 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
         )}
       </div>
 
-      {/* location toggle */}
-      <div className="flex gap-2">
-        {LOCATIONS.map((l) => <Chip key={l} small on={loc === l} onClick={() => onLoc(l)}>{l[0].toUpperCase() + l.slice(1)}</Chip>)}
-      </div>
+      {/* search-first food logger: type to find any food, or tap a recent one */}
+      <div className="space-y-2.5">
+        <div className="relative">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a39c8d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your foods…"
+            className="w-full rounded-xl border border-[#ddd5c5] bg-white py-2.5 pl-9 pr-9 text-[14px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+          {query && (
+            <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-[#8a8474] hover:bg-[#f1ede4]">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          )}
+        </div>
 
-      {/* pantry — category filter, then tap to log */}
-      <div>
-        {items.length > 0 ? (
-          <>
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {tabs.map((g) => <Chip key={g} small on={g === activeGroup} onClick={() => setFoodGroup(g)}>{g}</Chip>)}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {shownItems.map((it) => (
-                <PantryButton key={it.id} item={it} onTap={() => onLog(it, 1)} onLongPress={() => setQtyItem(it)} />
-              ))}
-            </div>
-            <p className="mt-1.5 text-[11px] text-[#b3ac9c]">Tap to log one · press &amp; hold to set a quantity</p>
-          </>
+        {results ? (
+          results.length > 0 ? (
+            <div className="space-y-1.5">{results.map((it) => <FoodRow key={it.id} item={it} onLogOne={() => logOne(it)} onQty={() => setQtyItem(it)} />)}</div>
+          ) : (
+            <p className="text-[13px] text-[#8a8474]">No match for “{query.trim()}”. Add it with “+ Add food” below.</p>
+          )
         ) : (
-          <p className="text-[13px] text-[#8a8474]">Nothing here yet — add what you ate below.</p>
+          <>
+            {recent.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-[#a39c8d]">Recent</p>
+                {recent.map((it) => <FoodRow key={it.id} item={it} onLogOne={() => logOne(it)} onQty={() => setQtyItem(it)} />)}
+              </div>
+            )}
+            <button onClick={() => setBrowsing((b) => !b)} className="flex items-center gap-1 text-[12px] font-medium text-[#3d4a32]">
+              {browsing ? 'Hide all foods' : 'Browse all foods'}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${browsing ? 'rotate-90' : ''}`}><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+            {browsing && (
+              <div className="space-y-2.5 rounded-2xl border border-[#e6dfd0] bg-[#faf7f0] p-3">
+                <div className="flex gap-2">
+                  {LOCATIONS.map((l) => <Chip key={l} small on={loc === l} onClick={() => onLoc(l)}>{l[0].toUpperCase() + l.slice(1)}</Chip>)}
+                </div>
+                {items.length > 0 ? (
+                  <>
+                    <div className="flex flex-wrap gap-1.5">
+                      {tabs.map((g) => <Chip key={g} small on={g === activeGroup} onClick={() => setFoodGroup(g)}>{g}</Chip>)}
+                    </div>
+                    <div className="space-y-1.5">
+                      {shownItems.map((it) => <FoodRow key={it.id} item={it} onLogOne={() => logOne(it)} onQty={() => setQtyItem(it)} />)}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[13px] text-[#8a8474]">Nothing here yet — add what you ate below.</p>
+                )}
+              </div>
+            )}
+          </>
         )}
+
+        {justLogged && (
+          <div className="flex items-center justify-between rounded-xl bg-[#eef0e6] px-3 py-2 text-[12px] text-[#3d4a32] fade-in">
+            <span className="flex items-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              Logged {justLogged.name}.
+            </span>
+            <button onClick={() => { onRemove(log.length - 1); setJustLogged(null) }} className="font-semibold text-[#7d8a5f] active:opacity-70">Undo</button>
+          </div>
+        )}
+
+        <p className="text-[11px] text-[#b3ac9c]">Tap ＋ to log one · tap a food to set a quantity.</p>
       </div>
 
       {/* quick-add */}
@@ -1184,7 +1240,7 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
 
       {qtyItem && (
         <QtyEditor item={qtyItem}
-          onLog={(loggedItem, q) => { onLog(loggedItem, q); setQtyItem(null) }}
+          onLog={(loggedItem, q) => { onLog(loggedItem, q); setJustLogged({ name: loggedItem.name }); setQtyItem(null) }}
           onEdit={(it) => { setQtyItem(null); setBuilder({ initial: { name: it.name, loc: it.loc, group: groupOf(it), components: componentsFromItem(it) }, editId: it.id }) }}
           onDuplicate={(it) => { setQtyItem(null); setBuilder({ initial: { name: `${it.name} copy`, loc: it.loc, group: groupOf(it), components: componentsFromItem(it) }, editId: null }) }}
           onClose={() => setQtyItem(null)} />
@@ -1202,24 +1258,26 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
   )
 }
 
-// A pantry chip: single tap logs one serving; press-and-hold opens the quantity
-// editor. Pointer events unify touch + mouse; contextmenu is suppressed so the
-// iOS long-press callout doesn't fire.
-function PantryButton({ item, onTap, onLongPress }) {
-  const longRef = useRef(false)
-  const timer = useRef(null)
+// A scannable food row: macros visible at a glance, a ＋ to log one instantly,
+// and a tap on the food itself to set a quantity. Replaces the old chip + hidden
+// long-press so nothing about quantity is a secret gesture.
+function FoodRow({ item, onLogOne, onQty }) {
   const bad = isUnhealthy(item)
-  const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null } }
-  const down = () => { longRef.current = false; timer.current = setTimeout(() => { longRef.current = true; onLongPress() }, 450) }
-  const up = () => { clear(); if (!longRef.current) onTap() }
+  const macros = [item.protein != null ? `${item.protein}g P` : null, item.kcal != null ? `${item.kcal} cal` : null].filter(Boolean).join(' · ')
   return (
-    <button onPointerDown={down} onPointerUp={up} onPointerLeave={clear} onPointerCancel={clear}
-      onContextMenu={(e) => e.preventDefault()} style={{ WebkitTouchCallout: 'none' }}
-      className={`select-none rounded-full border px-3 py-1.5 text-[13px] text-[#3a382f] transition active:scale-[0.97] ${
-        bad ? 'border-[#dcae73] bg-[#fbf1e1] hover:bg-[#f6e9d3]' : 'border-[#d8d1c2] bg-[#fbf9f3] hover:bg-[#f3efe6]'}`}>
-      {bad && <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[#c9742e] align-middle" title="Treat" />}
-      {item.name} <span className="text-[#a39c8d]">· {item.portion}</span>
-    </button>
+    <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${bad ? 'border-[#e7d4b6] bg-[#fbf4e8]' : 'border-[#e6dfd0] bg-[#fbf9f3]'}`}>
+      <button onClick={onQty} className="min-w-0 flex-1 text-left active:opacity-70">
+        <p className="truncate text-[14px] font-medium text-[#23211c]">
+          {bad && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#c9742e] align-middle" title="Treat" />}
+          {item.name}
+        </p>
+        <p className="truncate text-[12px] text-[#8a8474]">{item.portion}{macros ? ` · ${macros}` : ''}</p>
+      </button>
+      <button onClick={onLogOne} aria-label={`Log one ${item.name}`}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[#f4f1e8] transition active:scale-90">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    </div>
   )
 }
 
