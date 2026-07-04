@@ -1499,6 +1499,28 @@ function QtyEditor({ item, onLog, onEdit, onDuplicate, onClose }) {
   )
 }
 
+// The trip-day critique: no cut nagging, just protein-first, budget-aware,
+// no-guilt guidance that matches the vacation dashboard's voice.
+function vacationCritique(vb, totals, proteinTarget) {
+  const gotP = Math.round(totals.protein)
+  const shortP = Math.max(0, proteinTarget - gotP)
+  const points = [`${gotP}g protein in — anchor each meal with a lean protein${shortP ? `, about ${shortP}g to go` : ''}.`]
+  if (vb?.budget != null) {
+    points.push(vb.remaining >= 0
+      ? `${vb.remaining.toLocaleString()} cal left of your ${vb.budget.toLocaleString()} trip budget — pace it across the days left.`
+      : `${(-vb.remaining).toLocaleString()} cal past your banked buffer — ease back to protein and water, no guilt.`)
+  }
+  if (vb?.bigDay) points.push('Big day — slow down and hydrate; you can’t productively spend a weekend’s buffer in one sitting.')
+  const ok = !vb || vb.remaining == null || vb.remaining >= 0
+  return {
+    tone: ok ? 'good' : 'warn',
+    headline: ok
+      ? 'On the trip — enjoy it deliberately. Protein first, one indulgence at a time, water between.'
+      : 'Past the buffer — no guilt. Ease off, hydrate, and we reset clean when you’re home.',
+    points,
+  }
+}
+
 // Full-screen day review: protein/calorie totals, an honest critique, and the
 // food grouped by auto-assigned meal. Keeps the dashboard card light.
 function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onMove, onClose }) {
@@ -1506,7 +1528,11 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
   const [movingIdx, setMovingIdx] = useState(null) // entry being reassigned to a meal
   const totals = dayTotals(day)
   const ct = calorieTarget(state)
-  const crit = dayCritique(state, dateIso, proteinTarget)
+  // On a trip the strict cut target doesn't apply — mirror the dashboard's
+  // banked-budget, no-guilt framing instead of nagging against the ceiling.
+  const vac = activeVacation(state, dateIso)
+  const vb = vac ? vacationBudget(state, dateIso, vac) : null
+  const crit = vac ? vacationCritique(vb, totals, proteinTarget) : dayCritique(state, dateIso, proteinTarget)
   const log = day.food || []
   const byMeal = MEAL_ORDER
     .map((m) => ({ meal: m, rows: log.map((e, i) => ({ e, i })).filter(({ e }) => (e.meal || mealForTime(new Date(e.ts))) === m) }))
@@ -1530,9 +1556,19 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
           </div>
           <div className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-3">
             <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Calories</p>
-            <p className="font-display text-[22px] font-semibold text-[#23211c]">{totals.kcal}{ct && <span className="text-[13px] font-normal text-[#8a8474]"> / {ct.ceiling}</span>}</p>
+            <p className="font-display text-[22px] font-semibold text-[#23211c]">{totals.kcal}{vac
+              ? (vb?.maintenance ? <span className="text-[13px] font-normal text-[#8a8474]"> / {vb.maintenance} to maintain</span> : null)
+              : (ct && <span className="text-[13px] font-normal text-[#8a8474]"> / {ct.ceiling}</span>)}</p>
           </div>
         </div>
+
+        {vb?.budget != null && (
+          <div className="mt-2 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-2.5">
+            <p className="text-[12px] leading-snug text-[#4a5238]">
+              <span className="font-semibold">{Math.max(0, vb.remaining).toLocaleString()}</span> cal left of your {vb.budget.toLocaleString()} trip budget · {vb.daysLeft} day{vb.daysLeft === 1 ? '' : 's'} left
+            </p>
+          </div>
+        )}
 
         <div className="mt-2 grid grid-cols-4 gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-2.5 text-center">
           {[
@@ -1552,7 +1588,7 @@ function FoodReview({ state, dateIso, day, proteinTarget, onRemove, onReset, onM
             Fiber's at {Math.round(totals.fiber)}g — aim for ~{FIBER_TARGET}g. Add berries, oats, beans, or veg to close the gap; it blunts hunger and steadies blood sugar.
           </p>
         )}
-        {totals.sugar > SUGAR_LIMIT && (
+        {!vac && totals.sugar > SUGAR_LIMIT && (
           <p className="mt-1.5 px-1 text-[12px] text-[#b0552a]">
             Sugar's at {Math.round(totals.sugar)}g — over the {SUGAR_LIMIT}g cap. Fruit is fine; it's the desserts and sweetened drinks to rein in.
           </p>
