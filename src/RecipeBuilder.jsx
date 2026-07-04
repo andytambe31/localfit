@@ -42,7 +42,6 @@ export default function RecipeBuilder({ initial = {}, editId = null, pantry = []
   const setPart = (key, patch) => setParts((ps) => ps.map((p) => (p.key === key ? { ...p, ...patch } : p)))
   const removePart = (key) => setParts((ps) => ps.filter((p) => p.key !== key))
   const addFood = (f) => { setParts((ps) => [...ps, partFromFood(f)]); setPicking(false) }
-  const bumpServings = (key, d) => setParts((ps) => ps.map((p) => (p.key === key ? { ...p, servings: Math.max(0.05, Math.round((Number(p.servings || 1) + d) * 100) / 100) } : p)))
 
   const total = useMemo(() => parts.reduce((a, p) => {
     const s = Number(p.servings) || 1
@@ -118,10 +117,8 @@ export default function RecipeBuilder({ initial = {}, editId = null, pantry = []
                 )}
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-[12px] text-[#8a8474]">Servings</span>
-                  <button onClick={() => bumpServings(p.key, -0.25)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">−</button>
                   <input value={p.servings} onChange={(e) => setPart(p.key, { servings: e.target.value })} onBlur={(e) => setPart(p.key, { servings: normServings(e.target.value) })} inputMode="decimal" aria-label="Servings"
-                    className="w-14 rounded-lg border border-[#ddd5c5] bg-white px-1.5 py-1 text-center text-[14px] font-semibold tabular-nums text-[#23211c] outline-none focus:border-[#3d4a32]" />
-                  <button onClick={() => bumpServings(p.key, 0.25)} className="grid h-7 w-7 place-items-center rounded-full bg-[#e3ddcd] text-[#3d4a32]">+</button>
+                    className="w-16 rounded-lg border border-[#ddd5c5] bg-white px-2 py-1 text-center text-[14px] font-semibold tabular-nums text-[#23211c] outline-none focus:border-[#3d4a32]" />
                   <div className="ml-auto flex gap-1">{[0.5, 1, 2].map((m) => <Pill key={m} small on={(Number(p.servings) || 1) === m} onClick={() => setPart(p.key, { servings: m })}>×{m}</Pill>)}</div>
                 </div>
               </div>
