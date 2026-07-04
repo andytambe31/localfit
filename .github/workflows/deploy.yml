@@ -40,7 +40,24 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-2.outputs.page_url || steps.deployment-3.outputs.page_url }}
     steps:
+      # GitHub Pages' publish step flakes intermittently ("Deployment failed,
+      # try again later") even when the build artifact is fine. Retry up to
+      # three times with a short backoff so a transient backend hiccup doesn't
+      # fail an otherwise-good deploy. The first two attempts swallow the error
+      # (continue-on-error); the last one is allowed to fail the job for real.
       - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - if: steps.deployment.outcome == 'failure'
+        run: sleep 15
+      - id: deployment-2
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - if: steps.deployment.outcome == 'failure' && steps.deployment-2.outcome == 'failure'
+        run: sleep 30
+      - id: deployment-3
+        if: steps.deployment.outcome == 'failure' && steps.deployment-2.outcome == 'failure'
         uses: actions/deploy-pages@v4
