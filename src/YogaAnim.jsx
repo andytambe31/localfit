@@ -96,40 +96,56 @@ export function PoseFigure({ id }) {
   )
 }
 
-// A detailed, static illustration of the full pose — the same joint skeleton
-// rendered as a solid filled "mannequin" (thick rounded limbs + torso + head,
-// with a darker outline behind for a clean silhouette). Reads as a real figure,
-// not a stick drawing; derived from the pose data so all 15 stay consistent.
+// Flesh the joint skeleton into a human silhouette: tapered limbs (thick upper
+// arm/thigh → slim forearm/shin), broad shoulders and round hips (joint discs),
+// a neck and an oval head. Drawn as a dark outline pass behind a gradient fill
+// pass so it reads as a real body, not a stick figure — style preserved.
+// Tapered, round-capped limb segments whose wide ends overlap at the shoulders
+// and hips — that overlap gives real pelvis/shoulder mass without the "beaded"
+// look of explicit joint discs. Thick upper arm/thigh → slim forearm/shin.
+function bodyShapes(J) {
+  const seg = (a, b) => (a && b ? line(a, b) : null)
+  const torso = J.hip && J.sh ? (J.S ? `M ${J.hip[0]} ${J.hip[1]} Q ${J.S[0]} ${J.S[1]} ${J.sh[0]} ${J.sh[1]}` : line(J.hip, J.sh)) : null
+  const neckTo = J.sh && J.H ? [lerp(J.sh[0], J.H[0], 0.55), lerp(J.sh[1], J.H[1], 0.55)] : null // stop the neck short of the head
+  const segs = [
+    [seg(J.hip, J.K), 17], [seg(J.hip, J.KB), 17],   // thighs (drawn first, behind)
+    [seg(J.K, J.F), 10], [seg(J.KB, J.FB), 10],       // shins
+    [torso, 25],                                       // trunk
+    [seg(J.sh, J.E), 13], [seg(J.sh, J.E2), 13],       // upper arms
+    [seg(J.E, J.Ha), 8], [seg(J.E2, J.Ha2), 8],        // forearms
+    [J.sh && neckTo ? line(J.sh, neckTo) : null, 12],  // neck
+  ].filter(([d]) => d)
+  return { segs, head: J.H || null }
+}
+
 export function PoseIllustration({ id }) {
   const fig = FIGURES[id]
   if (!fig) return null
   const J = { ...fig.base, ...fig.b }
-  const torso = J.hip && J.sh ? (J.S ? `M ${J.hip[0]} ${J.hip[1]} Q ${J.S[0]} ${J.S[1]} ${J.sh[0]} ${J.sh[1]}` : line(J.hip, J.sh)) : null
-  const neck = J.sh && J.H ? line(J.sh, J.H) : null
-  const limbs = [
-    J.hip && J.KB && J.FB && line(J.hip, J.KB, J.FB),
-    J.sh && J.E2 && J.Ha2 && line(J.sh, J.E2, J.Ha2),
-    J.hip && J.K && J.F && line(J.hip, J.K, J.F),
-    J.sh && J.E && J.Ha && line(J.sh, J.E, J.Ha),
-  ].filter(Boolean)
+  const { segs, head } = bodyShapes(J)
   const cx = J.hip && J.sh ? (J.hip[0] + J.sh[0]) / 2 : 100
   const low = J.hip && J.sh ? Math.max(J.hip[1], J.sh[1]) : 120
   const cap = { strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }
-  const Body = ({ stroke, w, wT, wN }) => (
-    <g stroke={stroke} {...cap}>
-      {limbs.map((d, i) => <path key={i} d={d} strokeWidth={w} />)}
-      {torso && <path d={torso} strokeWidth={wT} />}
-      {neck && <path d={neck} strokeWidth={wN} />}
+  // One color pass: outline (dark, wider) or fill (gradient, base). Interior
+  // edges get covered by the fill pass, leaving a clean outer silhouette.
+  const Pass = ({ paint, grow }) => (
+    <g stroke={paint} {...cap}>
+      {segs.map(([d, w], i) => <path key={i} d={d} strokeWidth={w + grow} />)}
+      {head && <ellipse cx={head[0]} cy={head[1]} rx={9 + grow / 2} ry={10.5 + grow / 2} fill={paint} stroke="none" />}
     </g>
   )
   return (
     <svg viewBox="0 0 200 160" className="mx-auto block h-[150px] w-full max-w-[300px]" role="img" aria-label="Pose illustration">
+      <defs>
+        <linearGradient id="yogaBody" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#eef1e3" />
+          <stop offset="1" stopColor="#bcc6a2" />
+        </linearGradient>
+      </defs>
       <ellipse cx={cx} cy={150} rx={44 + (low - 90) * 0.25} ry={4.5} fill="#171c12" opacity="0.5" />
       <line x1="16" y1="147" x2="184" y2="147" stroke="#39402f" strokeWidth="2.5" strokeLinecap="round" />
-      <Body stroke="#2b3324" w={19} wT={27} wN={16} />
-      {J.H && <circle cx={J.H[0]} cy={J.H[1]} r={15.5} fill="#2b3324" />}
-      <Body stroke="#dfe6cf" w={13} wT={20.5} wN={10.5} />
-      {J.H && <circle cx={J.H[0]} cy={J.H[1]} r={12.5} fill="#dfe6cf" />}
+      <Pass paint="#2b3324" grow={4} />
+      <Pass paint="url(#yogaBody)" grow={0} />
     </svg>
   )
 }
