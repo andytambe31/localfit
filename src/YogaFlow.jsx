@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SESSIONS, sessionSteps, yogaStage } from './yoga'
+import { SESSIONS, sessionSteps, yogaStage, guideFor } from './yoga'
 import { BREATH_DEFAULT, BREATH_PATTERNS } from './yogaPoses'
 import { PoseVisual, BreathOrb } from './YogaAnim'
 
@@ -85,6 +85,7 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
 
   // --- a pose card -----------------------------------------------------------
   const pose = steps[i - 1]
+  const guide = guideFor(pose.id)
   const breath = BREATH_PATTERNS[pose.id] || BREATH_DEFAULT
   const cyc = breath.reduce((a, b) => a + b, 0)
   const nBreaths = Math.max(3, Math.round((pose.holdSec || 30) / cyc))
@@ -107,7 +108,30 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
           <p className="mt-1 text-[12px] leading-snug text-[#7f8a68]">{pose.targets.join(' · ')}</p>
           {pose.kind !== 'breath' && <div className="mt-2"><PoseVisual id={pose.id} key={pose.id} /></div>}
           <p className="mt-2 text-[14px] leading-relaxed text-[#cfccba]">{pose.cue}</p>
-          <div className="mt-3"><BreathOrb pattern={breath} /></div>
+
+          {guide.steps.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9aa581]">Steps</p>
+              <ol className="mt-1.5 space-y-1.5">
+                {guide.steps.map((s, n) => (
+                  <li key={n} className="flex gap-2.5 text-[13px] leading-snug text-[#cfccba]">
+                    <span className="mt-px grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[10px] font-semibold text-[#dfe6cf]">{n + 1}</span>
+                    <span>{s}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {guide.checks.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9aa581]">Form check</p>
+              <ul className="mt-1.5 space-y-1">
+                {guide.checks.map((c, n) => <CheckItem key={n} text={c} />)}
+              </ul>
+            </div>
+          )}
+
+          <div className="mt-5"><BreathOrb pattern={breath} /></div>
           <p className="mt-2 text-center text-[12px] text-[#7f8a68]">{holdHint}</p>
         </div>
       </div>
@@ -120,6 +144,21 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
 }
 
 const PHASE_LABEL = { warmup: 'Warm-up', flow: 'Flow', deep: 'Deep stretch', relax: 'Relax' }
+
+// A form cue you can tick as you dial the pose in — local only, resets per pose.
+function CheckItem({ text }) {
+  const [on, setOn] = useState(false)
+  return (
+    <li>
+      <button onClick={() => setOn((v) => !v)} className="flex w-full items-start gap-2.5 text-left active:opacity-80">
+        <span className={`mt-px grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border ${on ? 'border-[#7d8a5f] bg-[#3d4a32]' : 'border-[#4a5238]'}`}>
+          {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#dfe6cf" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+        </span>
+        <span className={`text-[13px] leading-snug ${on ? 'text-[#7f8a68] line-through' : 'text-[#cfccba]'}`}>{text}</span>
+      </button>
+    </li>
+  )
+}
 
 function EdgeTap({ side, onTap }) {
   return <div onClick={onTap} aria-label={side === 'left' ? 'Previous' : 'Next'} className={`absolute inset-y-0 z-10 w-[20%] ${side === 'left' ? 'left-0' : 'right-0'}`} />

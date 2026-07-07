@@ -70,6 +70,84 @@ export function sessionSteps(id) {
   return s ? s.steps.map(step).filter(Boolean) : []
 }
 
+// Per-pose how-to: ordered setup steps + a form checklist you can tick as you
+// dial the shape in. Keeps the cue as the one-line summary; this is the detail.
+export const POSE_GUIDE = {
+  cat_cow: {
+    steps: ['Start on all fours — wrists under shoulders, knees under hips.', 'Inhale: drop the belly, lift the chest and tailbone (cow).', 'Exhale: round the spine, tuck the chin and tailbone (cat).', 'Flow slowly, one movement per breath.'],
+    checks: ['Wrists stacked under shoulders', 'Move from the breath, not speed', 'Neck long — no crunching'],
+  },
+  down_dog: {
+    steps: ['From all fours, tuck the toes and lift the hips up and back.', 'Straighten the legs as far as the hamstrings allow.', 'Press the floor away through the hands, reach the heels down.', 'Let the head hang, ears beside the arms.'],
+    checks: ['Hips are the highest point', 'Spine long — bend the knees if the back rounds', 'Weight even between hands and feet', 'Shoulders away from the ears'],
+  },
+  low_lunge: {
+    steps: ['From down dog, step one foot up between the hands.', 'Lower the back knee to the floor.', 'Sink the hips forward and down.', 'Lift the chest; reach the arms overhead if it feels good.'],
+    checks: ['Front knee over the ankle, not past the toes', 'Hips square to the front', 'Stretch felt in the back hip flexor', 'Tall chest, front ribs down'],
+  },
+  warrior2: {
+    steps: ['From a wide stance, turn the front foot forward, back foot slightly in.', 'Bend the front knee toward 90°.', 'Extend the arms level, front and back.', 'Gaze over the front hand.'],
+    checks: ['Front knee tracks over the ankle', 'Front thigh working toward parallel', 'Torso upright, stacked over the hips', 'Arms active and level'],
+  },
+  triangle: {
+    steps: ['From a wide stance, straighten both legs, front foot forward.', 'Reach the front hand forward, then hinge from the hip.', 'Rest the bottom hand on the shin or a block.', 'Open the top arm skyward, chest rotating open.'],
+    checks: ['Hinge from the hip, not the waist', 'Both legs straight, knees soft', 'Long line from tailbone to crown', 'Chest open, not folding down'],
+  },
+  cobra: {
+    steps: ['Lie face down, hands under the shoulders, elbows hugging in.', 'Press the tops of the feet and the hips into the floor.', 'Inhale and lift the chest, leading with the sternum.', 'Keep the elbows bent and the shoulders back.'],
+    checks: ['Shoulders down and back, away from the ears', 'Elbows soft, not locked', 'Lift from the back, not by pushing hard', 'No pinching in the low back — ease off if so'],
+  },
+  thread_needle: {
+    steps: ['From all fours, reach one arm under the other, palm up.', 'Lower that shoulder and temple to the mat.', 'Reach the top hand forward or rest it on the low back.', 'Breathe into the upper back and rotate gently.'],
+    checks: ['Rotation comes from the mid-back', 'Hips stay stacked over the knees', 'Neck relaxed', "No forcing — go where it's comfortable"],
+  },
+  bridge: {
+    steps: ['Lie on your back, knees bent, feet flat and hip-width.', 'Arms by your sides, palms down.', 'Press into the feet and lift the hips.', 'Roll the shoulders under and lift the chest.'],
+    checks: ['Knees track over the ankles, not splaying', 'Glutes engaged, low back long', 'Chin slightly tucked, neck neutral', 'Feet flat and even'],
+  },
+  malasana: {
+    steps: ['Feet a little wider than the hips, toes turned slightly out.', 'Bend the knees and sink the hips toward the floor.', 'Bring the palms together at the chest.', 'Press the elbows lightly against the inner knees.'],
+    checks: ['Heels down — towel under them if they lift', 'Chest tall, spine long', 'Knees track over the toes', 'Weight in the heels'],
+  },
+  pigeon: {
+    steps: ['From down dog, draw one knee toward the same-side wrist.', 'Angle the shin forward, extend the other leg straight back.', 'Square the hips toward the floor.', 'Stay tall, or fold forward over the front leg.'],
+    checks: ['Hips level and square', 'Back leg straight, toes pointing back', 'No knee pain — flatten the shin angle if needed', 'Weight even, not dumped into one hip'],
+  },
+  lizard: {
+    steps: ['From down dog, step one foot to the outside of the same hand.', 'Lower the back knee if you like.', 'Walk the hands forward, keep the hips low.', 'Option: lower onto the forearms.'],
+    checks: ['Front knee over the ankle', 'Hips sinking, chest forward', 'Shoulders relaxed', 'Only lower as far as the hips allow'],
+  },
+  forward_fold: {
+    steps: ['Sit with the legs straight out in front.', 'Inhale and lengthen the spine tall.', 'Exhale and hinge forward from the hips.', 'Reach for the shins, ankles, or feet.'],
+    checks: ['Fold from the hips, not by rounding the back', 'Knees soft — bend them to keep the spine long', 'Reach the chest toward the toes', 'Neck and shoulders relaxed'],
+  },
+  happy_baby: {
+    steps: ['Lie on your back and draw the knees toward the chest.', 'Grip the outer feet, or the shins or big toes.', 'Open the knees wider than the torso, toward the armpits.', 'Gently rock side to side.'],
+    checks: ['Tailbone and low back stay on the floor', 'Ankles stacked over the knees', 'Shoulders relaxed on the mat', 'Easy breathing, no straining'],
+  },
+  seated_twist: {
+    steps: ['Sit tall, one leg extended or folded, the other knee up.', 'Cross the raised foot outside the opposite thigh.', 'Inhale and lengthen up.', 'Exhale and twist toward the raised knee, elbow as a gentle lever.'],
+    checks: ['Sit bones grounded and even', 'Twist from the mid-back, not the neck', 'Lengthen on the inhale, deepen on the exhale', 'Shoulders level'],
+  },
+  childs_pose: {
+    steps: ['Kneel with the big toes together, knees apart.', 'Sit the hips back toward the heels.', 'Walk the hands forward and lower the forehead.', 'Rest and breathe into the back of the ribs.'],
+    checks: ['Hips reaching back toward the heels', 'Forehead heavy, neck relaxed', 'Arms long or resting by the sides', 'Slow, full breaths'],
+  },
+  legs_up_wall: {
+    steps: ['Sit sideways right next to a wall.', 'Swing the legs up as you lie back.', 'Scoot the hips close to the wall.', 'Open the arms and relax completely.'],
+    checks: ['Legs light, no gripping', 'Low back settled on the floor', 'Shoulders and jaw soft', 'Just breathe — nothing to do here'],
+  },
+  ujjayi: {
+    steps: ['Sit tall and comfortable.', 'Breathe in and out through the nose.', 'Gently narrow the back of the throat to make a soft ocean sound.', 'Keep the breath slow and even.'],
+    checks: ['Sound is soft, not forced', 'Inhale and exhale roughly equal', 'Shoulders and face relaxed'],
+  },
+  box: {
+    steps: ['Sit tall and exhale fully.', 'Inhale for 4.', 'Hold for 4.', 'Exhale for 4, then hold for 4 — repeat.'],
+    checks: ['Smooth, unstrained holds', 'Even four-counts', 'Shoulders relaxed'],
+  },
+}
+export const guideFor = (id) => POSE_GUIDE[id] || { steps: [], checks: [] }
+
 // ---- logging + scoring ------------------------------------------------------
 export const yogaDone = (d) => !!(d?.yoga?.done || d?.yoga?.session)
 
