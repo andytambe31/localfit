@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SESSIONS, sessionSteps, yogaStage } from './yoga'
 import { BREATH_DEFAULT, BREATH_PATTERNS } from './yogaPoses'
-import { PoseFigure, BreathOrb } from './YogaAnim'
+import { PoseVisual, BreathOrb } from './YogaAnim'
 
 /* ---------- guided yoga flow: full-screen takeover, one pose per card --------
  * Pick a session length, then move through each pose with its cue and a hold-
@@ -105,7 +105,7 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
           </div>
           <h2 className="font-display text-[26px] font-semibold leading-[1.1] text-[#f4f1e8]">{pose.name}</h2>
           <p className="mt-1 text-[12px] leading-snug text-[#7f8a68]">{pose.targets.join(' · ')}</p>
-          {pose.kind !== 'breath' && <div className="mt-2"><PoseFigure id={pose.id} /></div>}
+          {pose.kind !== 'breath' && <div className="mt-2"><PoseVisual id={pose.id} key={pose.id} /></div>}
           <p className="mt-2 text-[14px] leading-relaxed text-[#cfccba]">{pose.cue}</p>
           <div className="mt-3"><BreathOrb pattern={breath} /></div>
           <p className="mt-2 text-center text-[12px] text-[#7f8a68]">{holdHint}</p>

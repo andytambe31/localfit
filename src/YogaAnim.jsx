@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FIGURES } from './yogaPoses'
 
 /* ---------- yoga animations: pose figure + breath orb ------------------------
@@ -93,6 +93,61 @@ export function PoseFigure({ id }) {
       {JOINT_DOTS.map((k) => <circle key={k} ref={(el) => { jointRefs.current[k] = el }} r="0" fill="#e7ecd8" />)}
       <circle ref={refs.head} {...S} strokeWidth="5" fill="#2b3324" />
     </svg>
+  )
+}
+
+// A detailed, static illustration of the full pose — the same joint skeleton
+// rendered as a solid filled "mannequin" (thick rounded limbs + torso + head,
+// with a darker outline behind for a clean silhouette). Reads as a real figure,
+// not a stick drawing; derived from the pose data so all 15 stay consistent.
+export function PoseIllustration({ id }) {
+  const fig = FIGURES[id]
+  if (!fig) return null
+  const J = { ...fig.base, ...fig.b }
+  const torso = J.hip && J.sh ? (J.S ? `M ${J.hip[0]} ${J.hip[1]} Q ${J.S[0]} ${J.S[1]} ${J.sh[0]} ${J.sh[1]}` : line(J.hip, J.sh)) : null
+  const neck = J.sh && J.H ? line(J.sh, J.H) : null
+  const limbs = [
+    J.hip && J.KB && J.FB && line(J.hip, J.KB, J.FB),
+    J.sh && J.E2 && J.Ha2 && line(J.sh, J.E2, J.Ha2),
+    J.hip && J.K && J.F && line(J.hip, J.K, J.F),
+    J.sh && J.E && J.Ha && line(J.sh, J.E, J.Ha),
+  ].filter(Boolean)
+  const cx = J.hip && J.sh ? (J.hip[0] + J.sh[0]) / 2 : 100
+  const low = J.hip && J.sh ? Math.max(J.hip[1], J.sh[1]) : 120
+  const cap = { strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }
+  const Body = ({ stroke, w, wT, wN }) => (
+    <g stroke={stroke} {...cap}>
+      {limbs.map((d, i) => <path key={i} d={d} strokeWidth={w} />)}
+      {torso && <path d={torso} strokeWidth={wT} />}
+      {neck && <path d={neck} strokeWidth={wN} />}
+    </g>
+  )
+  return (
+    <svg viewBox="0 0 200 160" className="mx-auto block h-[150px] w-full max-w-[300px]" role="img" aria-label="Pose illustration">
+      <ellipse cx={cx} cy={150} rx={44 + (low - 90) * 0.25} ry={4.5} fill="#171c12" opacity="0.5" />
+      <line x1="16" y1="147" x2="184" y2="147" stroke="#39402f" strokeWidth="2.5" strokeLinecap="round" />
+      <Body stroke="#2b3324" w={19} wT={27} wN={16} />
+      {J.H && <circle cx={J.H[0]} cy={J.H[1]} r={15.5} fill="#2b3324" />}
+      <Body stroke="#dfe6cf" w={13} wT={20.5} wN={10.5} />
+      {J.H && <circle cx={J.H[0]} cy={J.H[1]} r={12.5} fill="#dfe6cf" />}
+    </svg>
+  )
+}
+
+// Pose visual with a still-illustration / motion toggle. The detailed still is
+// the default reference; flip to Motion to watch the movement demonstrated.
+export function PoseVisual({ id }) {
+  const [mode, setMode] = useState('still')
+  return (
+    <div>
+      <div className="min-h-[150px]">{mode === 'still' ? <PoseIllustration id={id} /> : <PoseFigure id={id} />}</div>
+      <div className="mt-1 flex justify-center gap-1.5">
+        {[['still', 'Illustration'], ['motion', 'Motion']].map(([m, label]) => (
+          <button key={m} onClick={() => setMode(m)}
+            className={`rounded-full px-3 py-1 text-[11px] font-medium ${mode === m ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#3a4230] text-[#9aa581]'}`}>{label}</button>
+        ))}
+      </div>
+    </div>
   )
 }
 
