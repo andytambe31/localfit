@@ -22,11 +22,19 @@ function mix(A, B, t) {
   return out
 }
 const line = (...pts) => pts.filter(Boolean).map((p, i) => `${i ? 'L' : 'M'} ${p[0]} ${p[1]}`).join(' ')
+// Dwell easing: holds briefly on each end so the full pose is readable before
+// it morphs back — reads as a deliberate demonstration, not a constant wobble.
+const dwell = (tri) => smooth(Math.min(1, Math.max(0, (tri - 0.14) / 0.72)))
 
-// Animated side-profile stick figure demonstrating the pose's movement.
+const JOINT_DOTS = ['sh', 'hip', 'E', 'Ha', 'E2', 'Ha2', 'K', 'F', 'KB', 'FB']
+const CONTACT = new Set(['Ha', 'Ha2', 'F', 'FB']) // hands/feet read a touch larger
+
+// Animated side-profile figure demonstrating the pose's movement: articulated
+// joints, a weightier torso, and a soft ground shadow that shifts with it.
 export function PoseFigure({ id }) {
   const fig = FIGURES[id]
-  const refs = { torso: useRef(), arm1: useRef(), arm2: useRef(), legF: useRef(), legB: useRef(), neck: useRef(), head: useRef() }
+  const refs = { torso: useRef(), arm1: useRef(), arm2: useRef(), legF: useRef(), legB: useRef(), neck: useRef(), head: useRef(), shadow: useRef() }
+  const jointRefs = useRef({})
   const raf = useRef()
   useEffect(() => {
     if (!fig) return
@@ -41,8 +49,21 @@ export function PoseFigure({ id }) {
       set(refs.legB, J.hip && J.KB && J.FB ? line(J.hip, J.KB, J.FB) : '')
       set(refs.neck, J.sh && J.H ? line(J.sh, J.H) : '')
       if (refs.head.current) {
-        if (J.H) { refs.head.current.setAttribute('cx', J.H[0]); refs.head.current.setAttribute('cy', J.H[1]); refs.head.current.setAttribute('r', 8) }
+        if (J.H) { refs.head.current.setAttribute('cx', J.H[0]); refs.head.current.setAttribute('cy', J.H[1]); refs.head.current.setAttribute('r', 9) }
         else refs.head.current.setAttribute('r', 0)
+      }
+      for (const k of JOINT_DOTS) {
+        const el = jointRefs.current[k]; if (!el) continue
+        if (J[k]) { el.setAttribute('cx', J[k][0]); el.setAttribute('cy', J[k][1]); el.setAttribute('r', CONTACT.has(k) ? 3.8 : 2.9) }
+        else el.setAttribute('r', 0)
+      }
+      // Ground shadow tracks the figure's horizontal centre and shrinks as it
+      // lifts (down dog, bridge) for a hint of depth.
+      if (refs.shadow.current && J.hip && J.sh) {
+        const cx = (J.hip[0] + J.sh[0]) / 2
+        const low = Math.max(J.hip[1], J.sh[1])
+        refs.shadow.current.setAttribute('cx', cx)
+        refs.shadow.current.setAttribute('rx', 44 + (low - 90) * 0.25)
       }
     }
     if (prefersReduced()) { paint(1); return }
@@ -51,29 +72,29 @@ export function PoseFigure({ id }) {
     const tick = (now) => {
       if (start == null) start = now
       const phase = ((now - start) % (dur * 2)) / dur // 0..2 triangle
-      paint(smooth(phase <= 1 ? phase : 2 - phase))
+      paint(dwell(phase <= 1 ? phase : 2 - phase))
       raf.current = requestAnimationFrame(tick)
     }
     raf.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf.current)
   }, [id])
   if (!fig) return null
-  const S = { fill: 'none', stroke: '#cfd6bd', strokeWidth: 4.6, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  const S = { fill: 'none', stroke: '#cfd6bd', strokeLinecap: 'round', strokeLinejoin: 'round' }
   return (
-    <svg viewBox="0 0 200 152" className="mx-auto block h-[132px] w-full max-w-[280px]" role="img" aria-label="Pose demonstration">
-      <line x1="18" y1="146" x2="182" y2="146" stroke="#3a4230" strokeWidth="2.5" strokeLinecap="round" />
-      <path ref={refs.legB} {...S} />
-      <path ref={refs.arm2} {...S} />
-      <path ref={refs.torso} {...S} />
-      <path ref={refs.legF} {...S} />
-      <path ref={refs.arm1} {...S} />
-      <path ref={refs.neck} {...S} />
-      <circle ref={refs.head} {...S} fill="#2b3324" />
+    <svg viewBox="0 0 200 160" className="mx-auto block h-[144px] w-full max-w-[300px]" role="img" aria-label="Pose demonstration">
+      <ellipse ref={refs.shadow} cx="100" cy="150" rx="46" ry="4.5" fill="#171c12" opacity="0.55" />
+      <line x1="16" y1="147" x2="184" y2="147" stroke="#39402f" strokeWidth="2.5" strokeLinecap="round" />
+      <path ref={refs.legB} {...S} strokeWidth="5" />
+      <path ref={refs.arm2} {...S} strokeWidth="5" />
+      <path ref={refs.torso} {...S} strokeWidth="7.5" />
+      <path ref={refs.legF} {...S} strokeWidth="5" />
+      <path ref={refs.arm1} {...S} strokeWidth="5" />
+      <path ref={refs.neck} {...S} strokeWidth="5" />
+      {JOINT_DOTS.map((k) => <circle key={k} ref={(el) => { jointRefs.current[k] = el }} r="0" fill="#e7ecd8" />)}
+      <circle ref={refs.head} {...S} strokeWidth="5" fill="#2b3324" />
     </svg>
   )
 }
-
-const PHASE = [['Inhale', 0], ['Hold', 1], ['Exhale', 2], ['Rest', 3]]
 
 // Expanding-orb breath pacer. pattern = [inhale, holdFull, exhale, holdEmpty] sec.
 // Grows on the inhale, holds full, shrinks on the exhale — with a live label and
@@ -81,12 +102,13 @@ const PHASE = [['Inhale', 0], ['Hold', 1], ['Exhale', 2], ['Rest', 3]]
 export function BreathOrb({ pattern }) {
   const [inh, hf, exh, he] = pattern
   const cycle = inh + hf + exh + he
-  const orb = useRef(), label = useRef(), count = useRef()
+  const orb = useRef(), halo = useRef(), label = useRef(), count = useRef()
   const raf = useRef()
   useEffect(() => {
     const MIN = 0.5, MAX = 1
     const apply = (scale, text, n) => {
       if (orb.current) orb.current.style.transform = `scale(${scale})`
+      if (halo.current) { halo.current.style.transform = `scale(${scale + 0.14})`; halo.current.style.opacity = String(0.15 + 0.35 * ((scale - MIN) / (MAX - MIN))) }
       if (label.current && label.current.textContent !== text) label.current.textContent = text
       const c = n > 0 ? String(n) : ''
       if (count.current && count.current.textContent !== c) count.current.textContent = c
@@ -108,7 +130,8 @@ export function BreathOrb({ pattern }) {
     return () => cancelAnimationFrame(raf.current)
   }, [inh, hf, exh, he])
   return (
-    <div className="relative mx-auto grid h-[116px] w-[116px] place-items-center">
+    <div className="relative mx-auto grid h-[124px] w-[124px] place-items-center">
+      <div ref={halo} className="absolute h-[124px] w-[124px] rounded-full bg-[#7d8a5f]" style={{ transform: 'scale(0.5)', transformOrigin: 'center', opacity: 0.2, willChange: 'transform, opacity' }} />
       <div ref={orb} className="absolute h-[116px] w-[116px] rounded-full border-2 border-[#7d8a5f] bg-[#2f3826]" style={{ transform: 'scale(0.5)', transformOrigin: 'center', willChange: 'transform' }} />
       <div className="relative text-center">
         <div ref={label} className="text-[13px] font-semibold uppercase tracking-[0.14em] text-[#dfe6cf]">Inhale</div>
