@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SESSIONS, sessionSteps, yogaStage } from './yoga'
+import { BREATH_DEFAULT, BREATH_PATTERNS } from './yogaPoses'
+import { PoseFigure, BreathOrb } from './YogaAnim'
 
 /* ---------- guided yoga flow: full-screen takeover, one pose per card --------
  * Pick a session length, then move through each pose with its cue and a hold-
@@ -83,6 +85,12 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
 
   // --- a pose card -----------------------------------------------------------
   const pose = steps[i - 1]
+  const breath = BREATH_PATTERNS[pose.id] || BREATH_DEFAULT
+  const cyc = breath.reduce((a, b) => a + b, 0)
+  const nBreaths = Math.max(3, Math.round((pose.holdSec || 30) / cyc))
+  const holdHint = pose.kind === 'breath'
+    ? `Follow the orb for ${nBreaths} rounds.`
+    : `Hold for about ${nBreaths} breaths${pose.side ? ' each side' : ''}.`
   return (
     <Takeover onClose={requestClose} closing={closing}>
       <ProgressBar total={total} i={i - 1} label={SESSIONS[sessionId].label} />
@@ -90,15 +98,17 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
         {i > 1 && <EdgeTap side="left" onTap={() => go(i - 1, -1)} />}
         <EdgeTap side="right" onTap={() => go(i + 1, 1)} />
         <div className="relative z-0 mx-auto w-full max-w-md overflow-y-auto py-2">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="inline-flex rounded-full bg-[#3d4a32] px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-[#dfe4cf]">{PHASE_LABEL[pose.phase] || 'Pose'}</span>
             {pose.side && <span className="inline-flex rounded-full border border-[#3d4a32] px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-[#9aa581]">Both sides</span>}
             {pose.kind === 'breath' && <span className="inline-flex rounded-full border border-[#3d4a32] px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-[#9aa581]">Breath</span>}
           </div>
-          <h2 className="font-display text-[32px] font-semibold leading-[1.1] text-[#f4f1e8]">{pose.name}</h2>
-          <p className="mt-2 text-[13px] leading-snug text-[#7f8a68]">{pose.targets.join(' · ')}</p>
-          <p className="mt-4 text-[16px] leading-relaxed text-[#cfccba]">{pose.cue}</p>
-          <HoldTimer key={pose.id + i} seconds={pose.holdSec} side={pose.side} />
+          <h2 className="font-display text-[26px] font-semibold leading-[1.1] text-[#f4f1e8]">{pose.name}</h2>
+          <p className="mt-1 text-[12px] leading-snug text-[#7f8a68]">{pose.targets.join(' · ')}</p>
+          {pose.kind !== 'breath' && <div className="mt-2"><PoseFigure id={pose.id} /></div>}
+          <p className="mt-2 text-[14px] leading-relaxed text-[#cfccba]">{pose.cue}</p>
+          <div className="mt-3"><BreathOrb pattern={breath} /></div>
+          <p className="mt-2 text-center text-[12px] text-[#7f8a68]">{holdHint}</p>
         </div>
       </div>
       <div className="shrink-0 px-6 pb-8">
@@ -110,40 +120,6 @@ export default function YogaFlow({ state, defaultSession = 'mobility10', onCompl
 }
 
 const PHASE_LABEL = { warmup: 'Warm-up', flow: 'Flow', deep: 'Deep stretch', relax: 'Relax' }
-
-// Countdown for a pose hold. Manual start (get into the shape first); for a
-// two-sided pose it runs a second round for the other side.
-function HoldTimer({ seconds, side }) {
-  const [left, setLeft] = useState(seconds)
-  const [running, setRunning] = useState(false)
-  const [round, setRound] = useState(1)
-  const ref = useRef(null)
-  useEffect(() => () => clearInterval(ref.current), [])
-  const start = () => {
-    if (running) return
-    setRunning(true); setLeft(seconds)
-    ref.current = setInterval(() => setLeft((l) => {
-      if (l <= 1) { clearInterval(ref.current); setRunning(false); return 0 }
-      return l - 1
-    }), 1000)
-  }
-  const label = running ? 'Hold…'
-    : left === 0 ? (side && round === 1 ? 'Other side' : 'Restart')
-    : (side ? 'Start · side 1' : 'Start hold')
-  const onClick = () => {
-    if (running) return
-    if (left === 0 && side && round === 1) setRound(2)
-    start()
-  }
-  return (
-    <div className="mt-6 flex flex-col items-center">
-      <div className="font-mono text-[46px] font-semibold tabular-nums text-[#f4f1e8]">{left}s</div>
-      {side && <div className="mt-0.5 text-[11px] uppercase tracking-wider text-[#7f8a68]">Side {round} of 2</div>}
-      <button onClick={onClick} disabled={running}
-        className={`mt-3 rounded-full px-5 py-2 text-[13px] font-semibold ${running ? 'bg-[#2c3522] text-[#6f7857]' : 'bg-[#34402a] text-[#dfe6cf]'}`}>{label}</button>
-    </div>
-  )
-}
 
 function EdgeTap({ side, onTap }) {
   return <div onClick={onTap} aria-label={side === 'left' ? 'Previous' : 'Next'} className={`absolute inset-y-0 z-10 w-[20%] ${side === 'left' ? 'left-0' : 'right-0'}`} />
