@@ -96,29 +96,72 @@ export function PoseFigure({ id }) {
   )
 }
 
-// Flesh the joint skeleton into a human silhouette: tapered limbs (thick upper
-// arm/thigh → slim forearm/shin), broad shoulders and round hips (joint discs),
-// a neck and an oval head. Drawn as a dark outline pass behind a gradient fill
-// pass so it reads as a real body, not a stick figure — style preserved.
-// Tapered, round-capped limb segments whose wide ends overlap at the shoulders
-// and hips — that overlap gives real pelvis/shoulder mass without the "beaded"
-// look of explicit joint discs. Thick upper arm/thigh → slim forearm/shin.
+// Hand-drawn pose illustrations. Each is a set of filled body parts (gradient),
+// wrapped by IllusFrame which adds the outline, shadow and ground. Built one at
+// a time; poses not yet hand-drawn fall back to the procedural silhouette.
+const HAND_POSES = {
+  // Warrior II — front-facing: oval head, neck, a trunk that tapers to the
+  // waist, two arms reaching level with hands, front knee bent, back leg long.
+  warrior2: (
+    <>
+      <path d="M100 18 C107 18 111 24 111 31 C111 39 106 44 100 44 C94 44 89 39 89 31 C89 24 93 18 100 18 Z" />
+      <path d="M94 41 L106 41 L105 53 L95 53 Z" />
+      <path d="M77 55 C86 49 114 49 123 55 C121 72 120 90 116 101 C108 108 92 108 84 101 C80 90 79 72 77 55 Z" />
+      <path d="M82 60 C60 60 40 63 21 68 C16 69 15 74 20 75 C40 73 62 72 83 72 Z" />
+      <ellipse cx="19" cy="71" rx="5.5" ry="5" />
+      <path d="M118 60 C140 60 160 63 179 68 C184 69 185 74 180 75 C160 73 138 72 117 72 Z" />
+      <ellipse cx="181" cy="71" rx="5.5" ry="5" />
+      <path d="M88 99 C70 104 55 112 46 121 C41 126 48 131 54 127 C66 118 80 111 94 106 Z" />
+      <path d="M45 119 C43 131 43 141 44 149 C45 154 54 154 55 149 C57 139 58 128 60 118 Z" />
+      <ellipse cx="49" cy="150" rx="12" ry="4.5" />
+      <path d="M112 99 C130 108 146 124 158 143 C162 150 170 146 167 139 C154 117 136 106 118 100 Z" />
+      <ellipse cx="163" cy="150" rx="12.5" ry="4.5" />
+    </>
+  ),
+}
+
+// Frame + defs shared by hand-drawn poses: soft body gradient, a dilate-based
+// dark outline around the whole figure, a ground shadow and floor line.
+function IllusFrame({ children }) {
+  return (
+    <svg viewBox="0 0 200 160" className="mx-auto block h-[150px] w-full max-w-[300px]" role="img" aria-label="Pose illustration">
+      <defs>
+        <linearGradient id="yogaBody" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#eef1e3" />
+          <stop offset="1" stopColor="#bcc6a2" />
+        </linearGradient>
+        <filter id="poseOutline" x="-15%" y="-15%" width="130%" height="130%">
+          <feMorphology in="SourceAlpha" operator="dilate" radius="2.3" result="d" />
+          <feFlood floodColor="#2b3324" result="c" />
+          <feComposite in="c" in2="d" operator="in" result="o" />
+          <feMerge><feMergeNode in="o" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+      <ellipse cx="100" cy="151" rx="58" ry="4.5" fill="#171c12" opacity="0.5" />
+      <line x1="16" y1="148" x2="184" y2="148" stroke="#39402f" strokeWidth="2.5" strokeLinecap="round" />
+      <g filter="url(#poseOutline)" fill="url(#yogaBody)">{children}</g>
+    </svg>
+  )
+}
+
+// Procedural silhouette fallback for poses not yet hand-drawn.
 function bodyShapes(J) {
   const seg = (a, b) => (a && b ? line(a, b) : null)
   const torso = J.hip && J.sh ? (J.S ? `M ${J.hip[0]} ${J.hip[1]} Q ${J.S[0]} ${J.S[1]} ${J.sh[0]} ${J.sh[1]}` : line(J.hip, J.sh)) : null
-  const neckTo = J.sh && J.H ? [lerp(J.sh[0], J.H[0], 0.55), lerp(J.sh[1], J.H[1], 0.55)] : null // stop the neck short of the head
+  const neckTo = J.sh && J.H ? [lerp(J.sh[0], J.H[0], 0.55), lerp(J.sh[1], J.H[1], 0.55)] : null
   const segs = [
-    [seg(J.hip, J.K), 17], [seg(J.hip, J.KB), 17],   // thighs (drawn first, behind)
-    [seg(J.K, J.F), 10], [seg(J.KB, J.FB), 10],       // shins
-    [torso, 25],                                       // trunk
-    [seg(J.sh, J.E), 13], [seg(J.sh, J.E2), 13],       // upper arms
-    [seg(J.E, J.Ha), 8], [seg(J.E2, J.Ha2), 8],        // forearms
-    [J.sh && neckTo ? line(J.sh, neckTo) : null, 12],  // neck
+    [seg(J.hip, J.K), 17], [seg(J.hip, J.KB), 17],
+    [seg(J.K, J.F), 10], [seg(J.KB, J.FB), 10],
+    [torso, 25],
+    [seg(J.sh, J.E), 13], [seg(J.sh, J.E2), 13],
+    [seg(J.E, J.Ha), 8], [seg(J.E2, J.Ha2), 8],
+    [J.sh && neckTo ? line(J.sh, neckTo) : null, 12],
   ].filter(([d]) => d)
   return { segs, head: J.H || null }
 }
 
 export function PoseIllustration({ id }) {
+  if (HAND_POSES[id]) return <IllusFrame>{HAND_POSES[id]}</IllusFrame>
   const fig = FIGURES[id]
   if (!fig) return null
   const J = { ...fig.base, ...fig.b }
@@ -126,8 +169,6 @@ export function PoseIllustration({ id }) {
   const cx = J.hip && J.sh ? (J.hip[0] + J.sh[0]) / 2 : 100
   const low = J.hip && J.sh ? Math.max(J.hip[1], J.sh[1]) : 120
   const cap = { strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }
-  // One color pass: outline (dark, wider) or fill (gradient, base). Interior
-  // edges get covered by the fill pass, leaving a clean outer silhouette.
   const Pass = ({ paint, grow }) => (
     <g stroke={paint} {...cap}>
       {segs.map(([d, w], i) => <path key={i} d={d} strokeWidth={w + grow} />)}
