@@ -93,6 +93,9 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
           {!rest && session.emphasisReason && (
             <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{session.emphasisReason}</p>
           )}
+          {!rest && session.coreLine && (
+            <p className="mt-3 rounded-2xl border border-[#3a4a2c] bg-[#2b3422] px-4 py-3 text-[13px] leading-relaxed text-[#dfe6cf]">{session.coreLine}</p>
+          )}
           {!rest && (
             <p className="mt-5 text-[13px] text-[#8c9472]">
               {session.exercises.length} exercises · about {estimateSessionMinutes(session)} min. Once you start, you're in until you finish.
@@ -250,6 +253,7 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
     <Card onPrev={onPrev} onNext={onNext}>
       <div className="flex items-center gap-2">
         <Tag>{ex.muscle}</Tag>
+        {ex.focus && <span className="rounded-full bg-[#3d4a32] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#f4f1e8]">Core priority</span>}
         {ex.emphasized && <span className="rounded-full bg-[#4a5836] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#dfe6cf]">Lagging focus</span>}
         {beaten && <span className="rounded-full bg-[#3d6a32] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#e7f3df]">Beat last time</span>}
       </div>

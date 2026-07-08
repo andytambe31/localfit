@@ -55,7 +55,23 @@ export const EXERCISES = {
   cable_kickback:     { name: 'Cable Glute Kickback',       day: 'legs', muscle: 'glutes',    role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['glutes'] },
   calf_raise:         { name: 'Standing Calf Raise',        day: 'legs', muscle: 'calves',    role: 'isolation',  sets: 4, repLow: 10, repHigh: 15, inc: 10, emph: ['calves'] },
   tib_raise:          { name: 'Tibialis Raise',             day: 'legs', muscle: 'tibialis',  role: 'isolation',  sets: 3, repLow: 15, repHigh: 20, inc: 5,  emph: ['tibialis'] },
+
+  // --- CORE (the priority block — trained first, progressed like a main lift) ---
+  // Chosen to load progressively (add weight over time) rather than endless
+  // bodyweight reps. `core` groups them: one 'anterior' + one 'rotation' per day.
+  cable_crunch:       { name: 'Cable Crunch',               day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5,  core: 'anterior' },
+  hanging_leg_raise:  { name: 'Hanging Leg Raise',          day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 8,  repHigh: 15, inc: 5,  core: 'anterior' },
+  weighted_situp:     { name: 'Weighted Decline Sit-Up',    day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5,  core: 'anterior' },
+  ab_wheel:           { name: 'Ab-Wheel Rollout',           day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 8,  repHigh: 15, inc: 5,  core: 'anterior' },
+  cable_woodchop:     { name: 'Cable Woodchopper',          day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  core: 'rotation' },
+  pallof_press:       { name: 'Pallof Press',               day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  core: 'rotation' },
 }
+
+// The core priority pools — one anterior (flexion/lower-ab) + one rotation each
+// session, rotated by session count so it stays varied and complete.
+const CORE_ANTERIOR = ['cable_crunch', 'hanging_leg_raise', 'weighted_situp', 'ab_wheel']
+const CORE_ROTATION = ['cable_woodchop', 'pallof_press']
+const pickCore = (n) => [CORE_ANTERIOR[n % CORE_ANTERIOR.length], CORE_ROTATION[n % CORE_ROTATION.length]]
 
 // Two-dumbbell lifts: log ONE dumbbell's weight (the convention), not the pair.
 export const DB_EXERCISES = new Set(['incline_db_press', 'shoulder_press', 'db_curl', 'hammer_curl', 'shrug'])
@@ -416,8 +432,8 @@ export function buildSession(state, todayIso, opts = {}) {
   // Rest was recommended but the user chose to train anyway → run the next
   // rotation day regardless.
   let dayType = opts.dayType || decision.dayType
+  const hist = liftingHistory(state, todayIso)
   if (!opts.dayType && decision.rest) {
-    const hist = liftingHistory(state, todayIso)
     const lastTyped = [...hist].reverse().find((h) => h.day)
     dayType = lastTyped ? rotateAfter(lastTyped.day) : 'push'
   }
@@ -459,7 +475,28 @@ export function buildSession(state, todayIso, opts = {}) {
     }
   }
 
+  // Core priority block: abs are trained deliberately, not tacked on at the end.
+  // One anterior + one rotation move, progressed like a main lift. Placed FIRST
+  // on push/pull/upper; on leg/lower days it slots in right after the primary
+  // heavy lift so the squat/deadlift keeps a fresh, strong brace.
+  const coreExercises = pickCore(hist.length).map((id) => {
+    const meta = EXERCISES[id]
+    const target = targetFor(state, id, todayIso, phase)
+    return {
+      id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db,
+      repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
+      emphasized: false, focus: true, cue: cueFor(id), rir: null, target,
+      sets: prefillSets(state, id, todayIso, target, phase),
+    }
+  })
+  const legDay = dayType === 'legs' || dayType === 'lower'
+  exercises.splice(legDay ? 1 : 0, 0, ...coreExercises)
+
   return {
+    coreFocus: { placement: legDay ? 'after' : 'first' },
+    coreLine: legDay
+      ? 'Core is a priority now — it runs right after your first big lift, while you\'re still fresh, so the heavy work keeps a strong brace.'
+      : 'Core is a priority now — it runs first, before anything else, so it\'s trained fresh instead of half-assed at the end.',
     makeup: makeup.debt > 0 ? { owed: makeup.debt, extraSets: makeup.extraSets } : null,
     dayType, emphasis,
     label: plan.label,
@@ -526,6 +563,12 @@ const CUES = {
   cable_kickback: 'Squeeze the glute at the top, no lower-back arch, slow return.',
   calf_raise: 'Full stretch at the bottom, big squeeze at the top, pause both ends.',
   tib_raise: 'Pull the toes up hard, control down — protects your knees and shins.',
+  cable_crunch: 'Round the spine down and crunch with the abs — not the hips. Squeeze hard, resist the way up.',
+  hanging_leg_raise: 'Tilt the pelvis first, lift with the lower abs, no swinging. Control all the way down.',
+  weighted_situp: 'Curl up one vertebra at a time, weight to the chest, lower slow and controlled.',
+  ab_wheel: 'Ribs down, brace hard, roll out only as far as you can keep the low back flat.',
+  cable_woodchop: 'Pivot from the trunk — the arms just follow. Rotate with control, fight the return.',
+  pallof_press: 'Brace and press straight out; resist the cable trying to twist you. Pure anti-rotation.',
 }
 export function cueFor(exId) { return CUES[exId] || 'Controlled tempo, full range, squeeze at the top.' }
 
