@@ -22,6 +22,7 @@ import YogaFlow from './YogaFlow'
 import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName } from './cardio'
+import { journeysFor } from './journeys'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
@@ -781,7 +782,7 @@ export default function App() {
         )}
       </div>
 
-      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} onManageSupps={() => setManageSupps(true)} />
+      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} onManageSupps={() => setManageSupps(true)} onOpenSkin={() => setFlow(skinSlot)} />
 
       <YogaCard state={state} today={today} profile={profile} restToday={trainCall.rest} onStart={() => setYogaOpen(true)} />
 
@@ -3125,7 +3126,31 @@ function CardioCard({ state, today, profile, restToday, onStart, onLogHr }) {
   )
 }
 
-function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, onManageSupps }) {
+// One journey row: a level badge, focus line, progress bar and the next unlock.
+function JourneyRow({ j, onOpen }) {
+  return (
+    <button onClick={onOpen} className="flex items-center gap-3.5 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-3.5 text-left shadow-[0_2px_10px_-8px_rgba(60,55,40,0.35)] active:scale-[0.99]">
+      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-[14px] bg-[#23291f] text-center leading-none">
+        <span className="text-[8px] uppercase tracking-[0.12em] text-[#9aa581]">Lvl</span>
+        <span className="mt-1 font-display text-[19px] font-semibold text-[#f4f1e8]">{j.level}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-[15px] font-semibold text-[#23211c]">{j.name}</p>
+          {j.locked && <span className="rounded-full bg-[#eef0e6] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#7d8a5f]">Not locked</span>}
+        </div>
+        <p className="mt-0.5 text-[12px] leading-snug text-[#8a8474]">{j.focus}</p>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e5e0d2]">
+          <div className="h-full rounded-full bg-[#3d4a32]" style={{ width: `${j.pct}%` }} />
+        </div>
+        <p className="mt-1.5 text-[11px] leading-snug text-[#9aa581]">{j.nextLine}</p>
+      </div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b8b2a2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+    </button>
+  )
+}
+
+function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, onManageSupps, onOpenSkin }) {
   const [estimating, setEstimating] = useState(false)
   const [editingSleep, setEditingSleep] = useState(false)
   const days = state.days || {}
@@ -3133,79 +3158,21 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
   const latest = log[log.length - 1]
   const target = profile.bodyFatTarget || 12
 
-  // All five pillars on the same rolling-7-day footing.
-  const skinScore = pillar(days, today, skinQ)
-  const hairScore = pillar(days, today, hairQ)
-  const moveSc = pillar(days, today, (d) => moveQ(d, profile))
-  const dietSc = dietPillar(state, today, profile.proteinTarget || PROTEIN_TARGET_DEFAULT)
-  const slpScore = sleepScore(state, today, profile) // null until there's data
-  const yogaSc = yogaScore(state, today, profile) // null until the first session
-  const cardioSc = cardioScore(state, today, profile) // null until the first session
   const lastSleep = lastNightSleep(state, today)
-
-  // The seven pillars shown as rings. Each carries a directive weakest-link nudge.
-  const rings = [
-    { key: 'sleep', label: 'Sleep', score: slpScore, msg: `Sleep is your weak spot — aim for ${profile.sleepTargetHours || 7}h, lights out by ${clockGoal(profile.bedGoal || '23:30')}.` },
-    { key: 'skin', label: 'Skin', score: skinScore, msg: 'Skin is slipping — run the full AM and PM routine, every day.' },
-    { key: 'hair', label: 'Hair', score: hairScore, msg: 'Hair is falling behind — stay on your care schedule.' },
-    { key: 'diet', label: 'Diet', score: dietSc, msg: 'Diet is dragging — hit your protein and stay under your calorie ceiling.' },
-    { key: 'move', label: 'Move', score: moveSc, msg: 'Movement is light — hit your steps and train three times a week.' },
-    { key: 'mobility', label: 'Mobility', score: yogaSc, msg: `Mobility is lagging — get a yoga session in, ${profile.yogaTargetPerWeek || 2}× a week on your rest days.` },
-    { key: 'heart', label: 'Heart', score: cardioSc, msg: `Heart's the gap — get your Zone-2 cardio in, ${profile.cardioTargetPerWeek || 150} min a week.` },
-  ]
-
-  // Top-level: the rounded average of the pillars that actually have data.
-  const scored = rings.filter((p) => p.score != null)
-  const hasData = scored.length > 0
-  const overall = hasData ? Math.round(scored.reduce((s, p) => s + p.score, 0) / scored.length) : null
-  const word = !hasData ? 'Getting started' : overall >= 8 ? 'Dialed in' : overall >= 6 ? 'On track' : overall >= 4 ? 'Slipping' : 'Off track'
-  const weakest = hasData ? [...scored].sort((a, b) => a.score - b.score)[0] : null
-  const note = !hasData
-    ? 'Start logging and your scores will fill in.'
-    : overall >= 8 ? 'You’re doing the work. Keep it up.' : weakest.msg
-
+  const journeys = journeysFor(state, today, profile)
   const suppsLeft = (() => { const due = suppsDue(today, state); return (due.amCount - due.amTaken) + (due.pmCount - due.pmTaken) })()
+  // Tap a journey → its most useful action for now; full detail pages land next stage.
+  const openJourney = (key) => { if (key === 'skin') onOpenSkin?.(); else if (key === 'sleep') setEditingSleep(true); else setEstimating(true) }
 
   return (
-    <section className="mt-6 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
-      <h2 className="font-display text-xl font-semibold text-[#23211c]">Your goals</h2>
-
-      {/* Top-level on-track score */}
-      <div className="mt-3 rounded-2xl bg-[#23291f] px-4 py-3.5">
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-[#9aa581]">On track</p>
-            <p className="font-display text-3xl font-semibold leading-none text-[#f4f1e8]">{overall != null ? overall : '–'}<span className="text-lg text-[#9aa581]">/10</span></p>
-          </div>
-          <span className="text-[13px] font-medium text-[#cfccba]">{word}</span>
-        </div>
-        <p className="mt-2 text-[13px] text-[#cfccba]">{note}</p>
-
-        {/* The seven pillars, as progress rings — four then three */}
-        <div className="mt-3 grid grid-cols-4 gap-x-1.5 gap-y-3 border-t border-[#39402f] pt-3.5">
-          {rings.map((p) => <ScoreRing key={p.key} score={p.score} label={p.label} />)}
-        </div>
-
-        {/* Sleep detail — a small value the owner can correct */}
-        <div className="mt-3 flex items-start justify-between gap-3 border-t border-[#39402f] pt-2.5">
-          <div className="min-w-0">
-            {lastSleep ? (
-              <p className="text-[11px] leading-snug text-[#9aa581]">
-                Last night · {fmtDuration(lastSleep.minutes)} · in bed {fmtClock(lastSleep.start)}
-                {lastSleep.interruptions?.length ? ` · ${lastSleep.interruptions.length} wake-up${lastSleep.interruptions.length > 1 ? 's' : ''}` : ''}
-                {lastSleep.confident === false ? ' · estimated' : ''}
-              </p>
-            ) : (
-              <p className="text-[11px] leading-snug text-[#9aa581]">No sleep read yet — tap edit to log last night.</p>
-            )}
-          </div>
-          <button onClick={() => setEditingSleep(true)} className="shrink-0 text-[11px] font-medium text-[#9aa581] underline-offset-2 hover:underline">Edit</button>
-        </div>
+    <section className="mt-6">
+      <h2 className="mb-3 font-display text-xl font-semibold text-[#23211c]">Your journeys</h2>
+      <div className="flex flex-col gap-2.5">
+        {journeys.map((j) => <JourneyRow key={j.key} j={j} onOpen={() => openJourney(j.key)} />)}
       </div>
 
-      {/* Body fat + supplements — compact entries only. The full projection to
-          your target lives in Coach's Review; this just keeps the log actions. */}
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#ece5d7] pt-3.5">
+      {/* Body fat + supplements — quick log actions */}
+      <div className="mt-3 flex items-center justify-between gap-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-[#23211c]">Body fat {latest ? `${latest.pct}%` : '—'}<span className="font-normal text-[#8a8474]"> · {target}% goal</span></p>
           <p className="text-[12px] text-[#8a8474]">{suppsLeft > 0 ? `${suppsLeft} supplement${suppsLeft > 1 ? 's' : ''} left today` : 'Supplements taken'}</p>
