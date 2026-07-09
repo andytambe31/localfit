@@ -121,7 +121,10 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || bfOpen || sleepOpen || booting
+  // NOTE: only components that DON'T lock body-scroll themselves belong here.
+  // Self-locking takeovers (BodyFatFlow, CardioFlow, YogaFlow) manage their own
+  // lock and must stay out, or the two effects fight and freeze the dashboard.
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style

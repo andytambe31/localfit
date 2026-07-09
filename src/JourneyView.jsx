@@ -1,5 +1,4 @@
 import { createPortal } from 'react-dom'
-import { useEffect } from 'react'
 import { journeysFor, JOURNEY_LADDERS } from './journeys'
 
 /* ---------- journey detail page ---------------------------------------------
@@ -10,12 +9,9 @@ import { journeysFor, JOURNEY_LADDERS } from './journeys'
  * home-level overlay that stacks on top, so closing it returns you here.
  * -------------------------------------------------------------------------- */
 export default function JourneyView({ jkey, state, today, profile, tools, onBack }) {
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
-  }, [])
-
+  // Body-scroll lock is handled centrally by App's overlayOpen effect (journeyView
+  // is in it). Locking here too would double-manage document.body.style and leave
+  // the dashboard frozen after closing, so this component deliberately does not.
   const j = journeysFor(state, today, profile).find((x) => x.key === jkey)
   const ladder = JOURNEY_LADDERS[jkey] || []
   if (!j) return null
