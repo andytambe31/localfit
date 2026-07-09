@@ -65,12 +65,20 @@ export const EXERCISES = {
   ab_wheel:           { name: 'Ab-Wheel Rollout',           day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 8,  repHigh: 15, inc: 5,  core: 'anterior' },
   cable_woodchop:     { name: 'Cable Woodchopper',          day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  core: 'rotation' },
   pallof_press:       { name: 'Pallof Press',               day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  core: 'rotation' },
+  // Absolute-beginner core: floor-based bodyweight, no skill or equipment.
+  crunch:             { name: 'Floor Crunch',               day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  core: 'anterior' },
+  reverse_crunch:     { name: 'Reverse Crunch',             day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5,  core: 'anterior' },
+  dead_bug:           { name: 'Dead Bug',                   day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 8,  repHigh: 12, inc: 5,  core: 'anterior' },
+  lying_leg_raise:    { name: 'Lying Leg Raise',            day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5,  core: 'anterior' },
+  glute_bridge:       { name: 'Glute Bridge',               day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  core: 'rotation' },
+  bird_dog:           { name: 'Bird Dog',                   day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 8,  repHigh: 12, inc: 5,  core: 'rotation' },
+  bicycle_crunch:     { name: 'Bicycle Crunch',             day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  core: 'rotation' },
 }
 
-// The core priority pools — one anterior (flexion/lower-ab) + one rotation each
-// session, rotated by session count so it stays varied and complete.
-const CORE_ANTERIOR = ['cable_crunch', 'hanging_leg_raise', 'weighted_situp', 'ab_wheel']
-const CORE_ROTATION = ['cable_woodchop', 'pallof_press']
+// The core priority pools — one anterior (flexion/lower-ab) + one stability/
+// rotation each session, rotated by session count. Beginner floor moves only.
+const CORE_ANTERIOR = ['crunch', 'reverse_crunch', 'dead_bug', 'lying_leg_raise']
+const CORE_ROTATION = ['bird_dog', 'glute_bridge', 'bicycle_crunch']
 const pickCore = (n) => [CORE_ANTERIOR[n % CORE_ANTERIOR.length], CORE_ROTATION[n % CORE_ROTATION.length]]
 
 // Two-dumbbell lifts: log ONE dumbbell's weight (the convention), not the pair.
@@ -569,6 +577,13 @@ const CUES = {
   ab_wheel: 'Ribs down, brace hard, roll out only as far as you can keep the low back flat.',
   cable_woodchop: 'Pivot from the trunk — the arms just follow. Rotate with control, fight the return.',
   pallof_press: 'Brace and press straight out; resist the cable trying to twist you. Pure anti-rotation.',
+  crunch: 'Hands light by the ears, curl the shoulder blades off the floor, squeeze the abs, lower slow. A small range is plenty.',
+  reverse_crunch: 'Knees over the hips, curl the hips up toward the ribs — the lift comes from the lower abs, no swinging.',
+  dead_bug: 'Press the low back flat to the floor. Slowly lower an opposite arm and leg, keep it braced, then switch.',
+  lying_leg_raise: 'Knees bent to start (straighten as you get stronger). Lower slowly, stop before the low back arches, lift back up.',
+  glute_bridge: 'Feet flat, drive through the heels, squeeze the glutes up, brace the abs at the top, lower slow.',
+  bird_dog: 'On all fours, reach an opposite arm and leg out long and level. Pause, return with control, keep the hips square.',
+  bicycle_crunch: 'Slow and controlled — opposite elbow toward opposite knee, extend the other leg. Twist from the trunk, not the neck.',
 }
 export function cueFor(exId) { return CUES[exId] || 'Controlled tempo, full range, squeeze at the top.' }
 
