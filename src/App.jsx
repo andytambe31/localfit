@@ -20,6 +20,8 @@ import HairFlow from './HairFlow'
 import BodyFatFlow from './BodyFatFlow'
 import YogaFlow from './YogaFlow'
 import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
+import CardioFlow from './CardioFlow'
+import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName } from './cardio'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
@@ -94,6 +96,7 @@ export default function App() {
   const [hairFlow, setHairFlow] = useState(null) // 'am' | 'pm' | null — guided hair takeover
   const [training, setTraining] = useState(false) // guided gym session takeover
   const [yogaOpen, setYogaOpen] = useState(false) // guided yoga/mobility takeover
+  const [cardioOpen, setCardioOpen] = useState(false) // guided Zone-2 cardio takeover
   const [pendingSwap, setPendingSwap] = useState(null) // day-type to open the trainer pre-swapped to
   const [manageProducts, setManageProducts] = useState(false)
   const [manageSupps, setManageSupps] = useState(false)
@@ -349,6 +352,23 @@ export default function App() {
     setPending(true)
     scheduleSync()
   }
+
+  // Guided Zone-2 cardio finished — write the session onto today's cardio.
+  function saveCardio(payload) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today].cardio = payload
+      next.days[today]._ts = Date.now()
+      saveLocal(next)
+      return next
+    })
+    setCardioOpen(false)
+    setPending(true)
+    scheduleSync()
+  }
+  // Morning resting heart rate — the headline heart biomarker, trended over time.
+  function saveRestingHr(bpm) { if (bpm > 0) patch({ restingHr: bpm }) }
 
   // Resume a locked-in session: if today's workout is still 'active' on load,
   // drop straight back into the takeover instead of the dashboard.
@@ -765,6 +785,8 @@ export default function App() {
 
       <YogaCard state={state} today={today} profile={profile} restToday={trainCall.rest} onStart={() => setYogaOpen(true)} />
 
+      <CardioCard state={state} today={today} profile={profile} restToday={trainCall.rest} onStart={() => setCardioOpen(true)} onLogHr={saveRestingHr} />
+
       <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
@@ -792,6 +814,10 @@ export default function App() {
         <YogaFlow
           state={state} defaultSession={trainCall.rest ? 'full30' : 'mobility10'}
           onComplete={saveYoga} onClose={() => setYogaOpen(false)} />
+      )}
+      {cardioOpen && (
+        <CardioFlow profile={profile} onComplete={saveCardio}
+          onSetAge={(age) => updateProfile({ age })} onClose={() => setCardioOpen(false)} />
       )}
       {backupOpen && (
         <BackupSheet lastBackup={lastBackup} pending={pending} onExport={exportData} onImport={importData} onClose={() => setBackupOpen(false)} />
@@ -3045,6 +3071,60 @@ function YogaCard({ state, today, profile, restToday, onStart }) {
   )
 }
 
+// The "healthy inside" pillar: weekly Zone-2 minutes vs target, resting-heart-
+// rate trend (the biomarker that should fall over time), and the guided flow.
+function CardioCard({ state, today, profile, restToday, onStart, onLogHr }) {
+  const [hrOpen, setHrOpen] = useState(false)
+  const [hr, setHr] = useState('')
+  const target = profile.cardioTargetPerWeek || 150
+  const mins = cardioMinutesInWindow(state.days || {}, today, 7)
+  const trend = restingHrTrend(state, today)
+  const pct = Math.min(100, Math.round((mins / target) * 100))
+  const headline = mins >= target
+    ? `${mins} min of Zone 2 this week — target hit. Your heart's getting the work.`
+    : restToday
+      ? `Rest day — a prime slot for easy Zone 2. ${mins} / ${target} min so far this week.`
+      : `${mins} / ${target} min of Zone 2 this week. Easy steady cardio builds the engine and drops resting HR.`
+  const saveHr = () => { const n = Number(hr); if (n > 0) { onLogHr(n); setHr(''); setHrOpen(false) } }
+  const dropped = trend?.delta != null && trend.delta < 0
+  return (
+    <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-xl font-semibold text-[#23211c]">Heart &amp; cardio</h2>
+        {restToday && mins < target && <span className="rounded-full bg-[#eef0e6] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#3d4a32]">Good day for it</span>}
+      </div>
+      <p className="mt-1.5 text-[13px] leading-snug text-[#8a8474]">{headline}</p>
+      <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#e2dccd]">
+        <div className="h-full rounded-full bg-[#3d4a32]" style={{ width: `${pct}%` }} />
+      </div>
+
+      <div className="mt-3 flex items-center justify-between border-t border-[#ece5d7] pt-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wide text-[#a39c8d]">Resting heart rate</p>
+          <p className="text-[14px] font-medium text-[#23211c]">
+            {trend ? `${trend.latest} bpm` : 'Not logged yet'}
+            {trend?.delta != null && trend.delta !== 0 && (
+              <span className={`ml-1.5 text-[12px] font-normal ${dropped ? 'text-[#3d6a32]' : 'text-[#b0552a]'}`}>
+                {dropped ? '↓' : '↑'} {Math.abs(trend.delta)} vs last month
+              </span>
+            )}
+          </p>
+        </div>
+        <button onClick={() => setHrOpen((v) => !v)} className="shrink-0 text-[12px] font-medium text-[#3d4a32] active:opacity-70">{hrOpen ? 'Close' : 'Log'}</button>
+      </div>
+      {hrOpen && (
+        <div className="mt-2 flex items-center gap-2">
+          <input value={hr} onChange={(e) => setHr(e.target.value)} inputMode="numeric" placeholder="morning bpm"
+            className="flex-1 rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[#23211c] outline-none focus:border-[#3d4a32]" />
+          <button onClick={saveHr} className="rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-semibold text-[#f4f1e8]">Save</button>
+        </div>
+      )}
+
+      <button onClick={onStart} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Start cardio</button>
+    </section>
+  )
+}
+
 function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, onManageSupps }) {
   const [estimating, setEstimating] = useState(false)
   const [editingSleep, setEditingSleep] = useState(false)
@@ -3060,9 +3140,10 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
   const dietSc = dietPillar(state, today, profile.proteinTarget || PROTEIN_TARGET_DEFAULT)
   const slpScore = sleepScore(state, today, profile) // null until there's data
   const yogaSc = yogaScore(state, today, profile) // null until the first session
+  const cardioSc = cardioScore(state, today, profile) // null until the first session
   const lastSleep = lastNightSleep(state, today)
 
-  // The six pillars shown as rings. Each carries a directive weakest-link nudge.
+  // The seven pillars shown as rings. Each carries a directive weakest-link nudge.
   const rings = [
     { key: 'sleep', label: 'Sleep', score: slpScore, msg: `Sleep is your weak spot — aim for ${profile.sleepTargetHours || 7}h, lights out by ${clockGoal(profile.bedGoal || '23:30')}.` },
     { key: 'skin', label: 'Skin', score: skinScore, msg: 'Skin is slipping — run the full AM and PM routine, every day.' },
@@ -3070,6 +3151,7 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
     { key: 'diet', label: 'Diet', score: dietSc, msg: 'Diet is dragging — hit your protein and stay under your calorie ceiling.' },
     { key: 'move', label: 'Move', score: moveSc, msg: 'Movement is light — hit your steps and train three times a week.' },
     { key: 'mobility', label: 'Mobility', score: yogaSc, msg: `Mobility is lagging — get a yoga session in, ${profile.yogaTargetPerWeek || 2}× a week on your rest days.` },
+    { key: 'heart', label: 'Heart', score: cardioSc, msg: `Heart's the gap — get your Zone-2 cardio in, ${profile.cardioTargetPerWeek || 150} min a week.` },
   ]
 
   // Top-level: the rounded average of the pillars that actually have data.
@@ -3099,8 +3181,8 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
         </div>
         <p className="mt-2 text-[13px] text-[#cfccba]">{note}</p>
 
-        {/* The six pillars, as progress rings — two rows of three */}
-        <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-3 border-t border-[#39402f] pt-3.5">
+        {/* The seven pillars, as progress rings — four then three */}
+        <div className="mt-3 grid grid-cols-4 gap-x-1.5 gap-y-3 border-t border-[#39402f] pt-3.5">
           {rings.map((p) => <ScoreRing key={p.key} score={p.score} label={p.label} />)}
         </div>
 
