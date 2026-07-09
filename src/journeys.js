@@ -105,3 +105,30 @@ export function journeysFor(state, today, profile) {
     sleepJourney(state, today, profile),
   ]
 }
+
+// The full ladder for each journey — every level with a name and one line on
+// what that level is about. The detail page renders these with the current
+// level marked; the copy is the coaching, tiered from "just getting clear" to
+// the end state. `band` (where it exists) labels the result gate.
+export const JOURNEY_LADDERS = {
+  skin: [
+    { name: 'Calm the breakouts', note: 'Gentle cleanse morning and night, moisturise, SPF every day. Stop scrubbing and let the barrier settle.' },
+    { name: 'Unclog & steady', note: 'Add BHA twice a week for the nose and chin; niacinamide by day for oil and old marks.' },
+    { name: 'Treat & even', note: 'Bring in a retinoid two or three nights a week for texture and pigment. Never two actives in one night.' },
+    { name: 'Refine & barrier', note: 'Protect the gains: steady hydration, vitamin C by day, sunscreen without fail.' },
+    { name: 'Glass skin', note: 'Even tone, fine texture, real glow. Hold the routine — this is maintenance now.' },
+  ],
+  lean: [
+    { name: 'Foundation', band: '25%+ body fat', note: 'Lift three times a week, protein at every meal, walk your 10k. Build the base.' },
+    { name: 'Momentum', band: '22–25%', note: 'Keep the lifts progressing and hold a small deficit. The scale moves slowly; the mirror faster.' },
+    { name: 'Getting lean', band: '18–22%', note: 'Push protein high and guard muscle while the fat drops. Cardio starts to earn its place.' },
+    { name: 'Defined', band: '15–18%', note: 'Tighten the diet, keep training hard. Definition shows up here.' },
+    { name: 'Lean & strong', band: 'under 15%', note: 'Jacked and lean. Maintain strength, eat to hold it, don’t crash.' },
+  ],
+  sleep: [
+    { name: 'Anchor a bedtime', note: 'Pick a lights-out time and hold it, even on weekends.' },
+    { name: 'Consistent 7 hours', note: 'Hit seven hours most nights. Protect the wind-down hour.' },
+    { name: 'Steady & unbroken', note: 'Fewer wake-ups: cool, dark, screens off early.' },
+    { name: 'Fully recovered', note: 'Deep and consistent. You wake before the alarm.' },
+  ],
+}
