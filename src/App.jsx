@@ -25,7 +25,7 @@ import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTy
 import { journeysFor } from './journeys'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
 import RecipeBuilder from './RecipeBuilder'
-import { PRODUCTS, DEFAULT_OWNED, dueSummary } from './skincare'
+import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
 
@@ -611,13 +611,39 @@ export default function App() {
   const moveProgress = trainCall.rest ? stepFrac : 0.3 * stepFrac
   const waterTarget = profile.waterTarget || 8
 
+  const proteinNow = Math.round(dayTotals(day).protein)
+  const proteinTgt = profile.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const slotWord = (s) => (s === 'pm' ? 'Evening' : 'Morning')
   const areas = [
-    { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint },
-    { id: 'movement', label: 'Train', done: moveDone, progress: moveProgress, attn: w.session?.status === 'active' ? 'urgent' : 'idle' },
-    { id: 'diet', label: 'Diet', done: !!day.dietClosed, progress: Math.min(1, dayTotals(day).protein / (profile.proteinTarget || PROTEIN_TARGET_DEFAULT)) },
-    { id: 'water', label: 'Water', done: (day.water || 0) >= waterTarget, progress: Math.min(1, (day.water || 0) / waterTarget) },
-    { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint },
+    { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint,
+      sub: skinLocked ? skinHint : skinSlotDone ? 'Logged for today' : `${slotWord(skinSlot)} routine${skinDue.tonightActive && skinSlot === 'pm' ? ` · ${PRODUCT_BY_ID[skinDue.tonightActive]?.name || 'active'} tonight` : ''}` },
+    { id: 'movement', label: 'Train', done: moveDone, progress: moveProgress, attn: w.session?.status === 'active' ? 'urgent' : 'idle',
+      sub: w.session?.status === 'active' ? 'Session in progress' : moveDone ? (trainCall.rest ? 'Steps done — recovery day' : `${trainCall.label} logged`) : trainCall.rest ? 'Rest day — walk your 10k' : `${trainCall.label}${trainCall.estMin ? ` · ~${trainCall.estMin} min` : ''}` },
+    { id: 'diet', label: 'Diet', done: !!day.dietClosed, progress: Math.min(1, proteinNow / proteinTgt),
+      sub: day.dietClosed ? 'Closed for today' : `${proteinNow} of ${proteinTgt}g protein so far` },
+    { id: 'water', label: 'Water', done: (day.water || 0) >= waterTarget, progress: Math.min(1, (day.water || 0) / waterTarget),
+      sub: `${day.water || 0} of ${waterTarget} glasses` },
+    { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint,
+      sub: skinLocked ? skinHint : hairSlotDone ? 'Logged for today' : `${slotWord(hairSlot)} haircare` },
   ]
+
+  // Fold the two "healthy inside" pillars into the thread — but only surface them
+  // when they're actually relevant today (rest day or falling behind), so the
+  // list stays a short list of what's next, not a wall of cards.
+  const yogaDidToday = yogaDone(day)
+  const yogaWeek = yogaSessionsInWindow(state.days || {}, today, 7)
+  const yogaTarget = profile.yogaTargetPerWeek || 2
+  if (yogaDidToday || trainCall.rest || yogaDue(state, today)) {
+    areas.push({ id: 'yoga', label: 'Mobility', done: yogaDidToday, attn: trainCall.rest && !yogaDidToday ? 'attention' : 'idle',
+      sub: yogaDidToday ? 'Session done — recovery banked' : trainCall.rest ? 'Rest day — the best day for a full flow' : `${yogaWeek} of ${yogaTarget} sessions this week` })
+  }
+  const cardioWeek = cardioMinutesInWindow(state.days || {}, today, 7)
+  const cardioTarget = profile.cardioTargetPerWeek || 150
+  const cardioHit = cardioWeek >= cardioTarget
+  if (cardioHit || cardioDue(state, today)) {
+    areas.push({ id: 'cardio', label: 'Cardio', done: cardioHit, attn: trainCall.rest && !cardioHit ? 'attention' : 'idle',
+      sub: cardioHit ? `${cardioWeek} min Zone 2 — target hit` : `${cardioWeek} of ${cardioTarget} min Zone 2 this week` })
+  }
 
   const setWater = (delta) => patch({ water: Math.max(0, (day.water || 0) + delta) })
 
@@ -681,8 +707,9 @@ export default function App() {
         ) : null
       })()}
 
-      {/* Quiet progress — tap any to jump, no pressure. Sits above the focus card
-          so tapping a tile changes the card directly beneath it. */}
+      {/* Today's thread — one tappable line per area, in the order they matter.
+          Tapping routes to the right place: skin/hair to their flows, yoga/cardio
+          to theirs, everything else focuses the card below. */}
       <div className="mt-6">
         <div className="mb-2 flex items-baseline justify-between">
           <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
@@ -691,45 +718,15 @@ export default function App() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
           </button>
         </div>
-        <div className="grid grid-cols-5 gap-2">
-          {areas.map((a) => {
-            const urgent = a.attn === 'urgent', attention = a.attn === 'attention'
-            if (a.locked) {
-              return (
-                <div key={a.id} aria-disabled="true"
-                  className="relative rounded-2xl border border-[#e6dfd0] bg-[#f1ede4] px-1 py-3 text-center opacity-70">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b3ac9c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mx-auto mb-1">
-                    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  <span className="block text-[12px] font-medium text-[#9c968a]">{a.label}</span>
-                  <span className="mt-0.5 block text-[9px] leading-none text-[#b3ac9c]">{a.hint}</span>
-                </div>
-              )
-            }
-            const tile = focus === a.id
-              ? 'border-[#3d4a32] bg-[#eef0e6]'
-              : urgent ? 'border-[#3d4a32] bg-[#e8ede0] pulse-attention'
-              : attention ? 'border-[#aebb8f] bg-[#eef0e6]'
-              : 'border-[#e6dfd0] bg-[#fbf9f3] hover:bg-[#f3efe6]'
-            return (
-              <button key={a.id} onClick={() => (a.id === 'skin' ? setFlow(skinSlot) : a.id === 'hair' ? setHairFlow(hairSlot) : setOverride(a.id))}
-                className={`relative rounded-2xl border px-1 py-3 text-center transition ${tile}`}>
-                {(urgent || attention) && (
-                  <span className={`absolute -top-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${urgent ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Now</span>
-                )}
-                {a.done ? (
-                  <span className="mx-auto mb-1.5 grid h-4 w-4 place-items-center rounded-full bg-[#3d4a32]">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                  </span>
-                ) : a.progress != null ? (
-                  <ProgressRing value={a.progress} />
-                ) : (
-                  <span className={`mx-auto mb-1.5 block h-4 w-4 rounded-full border-2 ${urgent || attention ? 'border-[#7d8a5f]' : 'border-[#d8d1c2]'}`} />
-                )}
-                <span className="text-[12px] font-medium text-[#4a463c]">{a.label}</span>
-              </button>
-            )
-          })}
+        <div className="flex flex-col gap-2">
+          {areas.map((a) => (
+            <TodayRow key={a.id} a={a} active={focus === a.id}
+              onTap={() => (a.id === 'skin' ? setFlow(skinSlot)
+                : a.id === 'hair' ? setHairFlow(hairSlot)
+                : a.id === 'yoga' ? setYogaOpen(true)
+                : a.id === 'cardio' ? setCardioOpen(true)
+                : setOverride(a.id))} />
+          ))}
         </div>
       </div>
 
@@ -784,10 +781,6 @@ export default function App() {
 
       <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} onManageSupps={() => setManageSupps(true)} onOpenSkin={() => setFlow(skinSlot)} />
 
-      <YogaCard state={state} today={today} profile={profile} restToday={trainCall.rest} onStart={() => setYogaOpen(true)} />
-
-      <CardioCard state={state} today={today} profile={profile} restToday={trainCall.rest} onStart={() => setCardioOpen(true)} onLogHr={saveRestingHr} />
-
       <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
@@ -817,8 +810,8 @@ export default function App() {
           onComplete={saveYoga} onClose={() => setYogaOpen(false)} />
       )}
       {cardioOpen && (
-        <CardioFlow profile={profile} onComplete={saveCardio}
-          onSetAge={(age) => updateProfile({ age })} onClose={() => setCardioOpen(false)} />
+        <CardioFlow profile={profile} trend={restingHrTrend(state, today)} onComplete={saveCardio}
+          onSetAge={(age) => updateProfile({ age })} onLogHr={saveRestingHr} onClose={() => setCardioOpen(false)} />
       )}
       {backupOpen && (
         <BackupSheet lastBackup={lastBackup} pending={pending} onExport={exportData} onImport={importData} onClose={() => setBackupOpen(false)} />
@@ -2731,8 +2724,8 @@ function Chip({ on, disabled, onClick, children, hint, small }) {
 function ProgressRing({ value }) {
   const r = 7, c = 2 * Math.PI * r, pct = Math.max(0, Math.min(1, value || 0))
   return (
-    <span className="mb-1.5 flex justify-center">
-      <svg width="16" height="16" viewBox="0 0 18 18" className="-rotate-90">
+    <span className="grid h-8 w-8 place-items-center">
+      <svg width="20" height="20" viewBox="0 0 18 18" className="-rotate-90">
         <circle cx="9" cy="9" r={r} fill="none" stroke="#e0d9c9" strokeWidth="2.5" />
         <circle cx="9" cy="9" r={r} fill="none" stroke="#3d4a32" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
       </svg>
@@ -3039,90 +3032,55 @@ function diaryScore(state, iso, profile) {
   return Math.max(0, Math.min(1, avg))
 }
 
-// Recovery pillar on the dashboard: this week's yoga cadence, a directive
-// prompt (louder on rest days), and the launch button for the guided flow.
-function YogaCard({ state, today, profile, restToday, onStart }) {
-  const target = profile.yogaTargetPerWeek || 2
-  const doneWeek = yogaSessionsInWindow(state.days || {}, today, 7)
-  const didToday = yogaDone(state.days?.[today])
-  const behind = doneWeek < target
-  const headline = didToday
-    ? 'Mobility done today — recovery banked.'
-    : restToday
-      ? 'Rest day: the best day for a full session. Open the hips and spine, calm the system.'
-      : behind
-        ? `${doneWeek} of ${target} sessions this week. A short flow keeps you loose for your lifts.`
-        : `${doneWeek} of ${target} this week — you're on pace. Extra mobility never hurts.`
+// One line in today's thread: a status glyph, the label + a one-line sub, and a
+// chevron. Locked areas (skin/hair outside their window) render disabled with a
+// padlock. Everything else is a button that routes on tap.
+function TodayRow({ a, active, onTap }) {
+  const urgent = a.attn === 'urgent', attention = a.attn === 'attention'
+  if (a.locked) {
+    return (
+      <div aria-disabled="true" className="flex items-center gap-3 rounded-2xl border border-[#e6dfd0] bg-[#f1ede4] px-4 py-3 opacity-70">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-[#e0d9c9] bg-[#efece3]">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b3ac9c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14px] font-semibold text-[#9c968a]">{a.label}</span>
+          <span className="block text-[12px] leading-snug text-[#b3ac9c]">{a.sub}</span>
+        </span>
+      </div>
+    )
+  }
+  const shell = active
+    ? 'border-[#3d4a32] bg-[#eef0e6]'
+    : urgent ? 'border-[#3d4a32] bg-[#e8ede0] pulse-attention'
+    : attention ? 'border-[#aebb8f] bg-[#eef0e6]'
+    : 'border-[#e6dfd0] bg-[#fbf9f3] hover:bg-[#f3efe6]'
   return (
-    <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
-      <div className="flex items-center gap-2">
-        <h2 className="font-display text-xl font-semibold text-[#23211c]">Mobility &amp; recovery</h2>
-        {restToday && !didToday && <span className="rounded-full bg-[#eef0e6] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#3d4a32]">Good day for it</span>}
-      </div>
-      <p className="mt-1.5 text-[13px] leading-snug text-[#8a8474]">{headline}</p>
-      <div className="mt-2.5 flex gap-1.5">
-        {Array.from({ length: target }).map((_, n) => (
-          <span key={n} className={`h-1.5 w-8 rounded-full ${n < doneWeek ? 'bg-[#3d4a32]' : 'bg-[#e2dccd]'}`} />
-        ))}
-      </div>
-      <button onClick={onStart} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">
-        {didToday ? 'Another session' : 'Start yoga'}
-      </button>
-    </section>
-  )
-}
-
-// The "healthy inside" pillar: weekly Zone-2 minutes vs target, resting-heart-
-// rate trend (the biomarker that should fall over time), and the guided flow.
-function CardioCard({ state, today, profile, restToday, onStart, onLogHr }) {
-  const [hrOpen, setHrOpen] = useState(false)
-  const [hr, setHr] = useState('')
-  const target = profile.cardioTargetPerWeek || 150
-  const mins = cardioMinutesInWindow(state.days || {}, today, 7)
-  const trend = restingHrTrend(state, today)
-  const pct = Math.min(100, Math.round((mins / target) * 100))
-  const headline = mins >= target
-    ? `${mins} min of Zone 2 this week — target hit. Your heart's getting the work.`
-    : restToday
-      ? `Rest day — a prime slot for easy Zone 2. ${mins} / ${target} min so far this week.`
-      : `${mins} / ${target} min of Zone 2 this week. Easy steady cardio builds the engine and drops resting HR.`
-  const saveHr = () => { const n = Number(hr); if (n > 0) { onLogHr(n); setHr(''); setHrOpen(false) } }
-  const dropped = trend?.delta != null && trend.delta < 0
-  return (
-    <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
-      <div className="flex items-center gap-2">
-        <h2 className="font-display text-xl font-semibold text-[#23211c]">Heart &amp; cardio</h2>
-        {restToday && mins < target && <span className="rounded-full bg-[#eef0e6] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#3d4a32]">Good day for it</span>}
-      </div>
-      <p className="mt-1.5 text-[13px] leading-snug text-[#8a8474]">{headline}</p>
-      <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#e2dccd]">
-        <div className="h-full rounded-full bg-[#3d4a32]" style={{ width: `${pct}%` }} />
-      </div>
-
-      <div className="mt-3 flex items-center justify-between border-t border-[#ece5d7] pt-3">
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wide text-[#a39c8d]">Resting heart rate</p>
-          <p className="text-[14px] font-medium text-[#23211c]">
-            {trend ? `${trend.latest} bpm` : 'Not logged yet'}
-            {trend?.delta != null && trend.delta !== 0 && (
-              <span className={`ml-1.5 text-[12px] font-normal ${dropped ? 'text-[#3d6a32]' : 'text-[#b0552a]'}`}>
-                {dropped ? '↓' : '↑'} {Math.abs(trend.delta)} vs last month
-              </span>
-            )}
-          </p>
-        </div>
-        <button onClick={() => setHrOpen((v) => !v)} className="shrink-0 text-[12px] font-medium text-[#3d4a32] active:opacity-70">{hrOpen ? 'Close' : 'Log'}</button>
-      </div>
-      {hrOpen && (
-        <div className="mt-2 flex items-center gap-2">
-          <input value={hr} onChange={(e) => setHr(e.target.value)} inputMode="numeric" placeholder="morning bpm"
-            className="flex-1 rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[#23211c] outline-none focus:border-[#3d4a32]" />
-          <button onClick={saveHr} className="rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-semibold text-[#f4f1e8]">Save</button>
-        </div>
-      )}
-
-      <button onClick={onStart} className="mt-4 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Start cardio</button>
-    </section>
+    <button onClick={onTap} className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition active:scale-[0.99] ${shell}`}>
+      <span className="shrink-0">
+        {a.done ? (
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-[#3d4a32]">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          </span>
+        ) : a.progress != null ? (
+          <ProgressRing value={a.progress} />
+        ) : (
+          <span className={`grid h-8 w-8 place-items-center rounded-full border-2 ${urgent || attention ? 'border-[#7d8a5f]' : 'border-[#d8d1c2]'}`} />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="text-[14px] font-semibold text-[#23211c]">{a.label}</span>
+          {(urgent || attention) && (
+            <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${urgent ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Now</span>
+          )}
+        </span>
+        <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">{a.sub}</span>
+      </span>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#b8b2a2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+    </button>
   )
 }
 

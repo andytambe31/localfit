@@ -8,7 +8,7 @@ import { CARDIO_TYPES, zone2, TALK_TEST } from './cardio'
  * you can also type them if you did the work elsewhere. Logs to today's cardio.
  *   profile · onComplete({type,minutes,avgHr,rpe,done,ts}) · onSetAge(age) · onClose()
  */
-export default function CardioFlow({ profile, onComplete, onSetAge, onClose }) {
+export default function CardioFlow({ profile, trend, onComplete, onSetAge, onLogHr, onClose }) {
   const [step, setStep] = useState(0)       // 0 = pick, 1 = session
   const [type, setType] = useState(null)
   const [age, setAge] = useState(profile.age ? String(profile.age) : '')
@@ -17,12 +17,17 @@ export default function CardioFlow({ profile, onComplete, onSetAge, onClose }) {
   const [manualMin, setManualMin] = useState('')
   const [rpe, setRpe] = useState(null)       // 'easy' | 'zone2' | 'hard'
   const [avgHr, setAvgHr] = useState('')
+  const [restHr, setRestHr] = useState('')
+  const [restOpen, setRestOpen] = useState(false)
+  const [restSaved, setRestSaved] = useState(false)
   const [closing, setClosing] = useState(false)
   const tick = useRef(null)
   useEffect(() => () => clearInterval(tick.current), [])
 
   const z = zone2(age)
   const requestClose = () => { if (closing) return; setClosing(true); setTimeout(onClose, 240) }
+  const dropped = trend?.delta != null && trend.delta < 0
+  const saveRest = () => { const n = Number(restHr); if (n > 0) { onLogHr?.(n); setRestHr(''); setRestOpen(false); setRestSaved(true) } }
 
   const startStop = () => {
     if (running) { clearInterval(tick.current); setRunning(false) }
@@ -70,6 +75,34 @@ export default function CardioFlow({ profile, onComplete, onSetAge, onClose }) {
               </button>
             ))}
           </div>
+
+          {/* Resting heart rate — the biomarker Zone-2 work should lower over time.
+              Best read first thing in the morning, so it lives here beside cardio. */}
+          {onLogHr && (
+            <div className="mt-4 rounded-2xl border border-[#3a4230] bg-[#2b3324] px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-[#9aa581]">Resting heart rate</p>
+                  <p className="mt-1 text-[14px] font-medium text-[#f4f1e8]">
+                    {restSaved ? 'Logged' : trend ? `${trend.latest} bpm` : 'Not logged yet'}
+                    {!restSaved && trend?.delta != null && trend.delta !== 0 && (
+                      <span className={`ml-1.5 text-[12px] font-normal ${dropped ? 'text-[#9aa581]' : 'text-[#c98a5a]'}`}>
+                        {dropped ? '↓' : '↑'} {Math.abs(trend.delta)} vs last month
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <button onClick={() => { setRestOpen((v) => !v); setRestSaved(false) }} className="shrink-0 text-[12px] font-medium text-[#9aa581] active:opacity-70">{restOpen ? 'Close' : 'Log'}</button>
+              </div>
+              {restOpen && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <input value={restHr} onChange={(e) => setRestHr(e.target.value)} inputMode="numeric" placeholder="morning bpm"
+                    className="flex-1 rounded-lg border border-[#3a4230] bg-[#23291f] px-3 py-2 text-[14px] text-[#f4f1e8] outline-none focus:border-[#9aa581]" />
+                  <button onClick={saveRest} className="rounded-full bg-[#3d4a32] px-4 py-2 text-[13px] font-semibold text-[#f4f1e8]">Save</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Takeover>
     )
