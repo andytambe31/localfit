@@ -18,6 +18,7 @@ import { lookupBarcode, parsePortion } from './barcode'
 import { hairDue } from './hair'
 import HairFlow from './HairFlow'
 import BodyFatFlow from './BodyFatFlow'
+import JourneyView from './JourneyView'
 import YogaFlow from './YogaFlow'
 import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
@@ -105,6 +106,9 @@ export default function App() {
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
   const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
   const [groceriesOpen, setGroceriesOpen] = useState(false) // pantry stock + shopping list (declared before overlayOpen uses it)
+  const [journeyView, setJourneyView] = useState(null) // 'skin'|'lean'|'sleep' — full journey detail page
+  const [bfOpen, setBfOpen] = useState(false) // body-fat estimator (lifted so the journey page can open it too)
+  const [sleepOpen, setSleepOpen] = useState(false) // sleep correction (lifted for the journey page)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
 
@@ -117,7 +121,7 @@ export default function App() {
 
   // Lock page scroll while a full-screen overlay is open, so a swipe can't drag
   // the dashboard out from behind the card.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || bfOpen || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -654,6 +658,9 @@ export default function App() {
       <div className="mb-3 flex items-baseline justify-between">
         <span className="font-display text-lg font-semibold tracking-tight text-[#20201d]">localfit</span>
         <div className="flex items-center gap-2">
+          <button onClick={() => setDiaryOpen(true)} aria-label="Diary" className="grid h-7 w-7 place-items-center rounded-full text-[#7d8a5f] active:opacity-70">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+          </button>
           <BackupButton pending={pending} lastBackup={lastBackup} onOpen={() => setBackupOpen(true)} />
           <span className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">{prettyToday(today)}</span>
         </div>
@@ -730,28 +737,8 @@ export default function App() {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <button onClick={() => setDiaryOpen(true)}
-          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
-          Diary
-        </button>
-        <button onClick={() => setLiftsOpen(true)}
-          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v12a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V6a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v3" /><path d="M3 10v4M21 10v4" /></svg>
-          Your lifts
-        </button>
-        <button onClick={() => setRecipesOpen(true)}
-          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h13l5 5v15H3z" /><path d="M16 2v5h5M8 13h8M8 17h8M8 9h2" /></svg>
-          Recipes
-        </button>
-        <button onClick={() => setGroceriesOpen(true)}
-          className="flex items-center justify-center gap-2 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3 py-2.5 text-[13px] font-medium text-[#4a463c] active:scale-[0.99]">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h2l2.4 12.3a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L22 7H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>
-          Groceries{lowCount(state) ? ` · ${lowCount(state)}` : ''}
-        </button>
-      </div>
+      {/* Lifts / Recipes / Groceries moved onto the Lean & Strong journey page;
+          Diary lives in the header. Kept the home to today + journeys. */}
 
       {/* Today's Plate card hidden per request — restore by uncommenting the line below */}
       {/* <PlateCard state={state} today={today} onOpen={(id) => setRecipesOpen(id)} onBrowse={() => setRecipesOpen(true)} /> */}
@@ -779,7 +766,7 @@ export default function App() {
         )}
       </div>
 
-      <GoalsSection state={state} profile={profile} today={today} onBodyFat={saveBodyFat} onProfile={updateProfile} onSleep={saveSleep} onManageSupps={() => setManageSupps(true)} onOpenSkin={() => setFlow(skinSlot)} />
+      <GoalsSection state={state} profile={profile} today={today} onOpenJourney={setJourneyView} onEstimate={() => setBfOpen(true)} onManageSupps={() => setManageSupps(true)} />
 
       <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
@@ -832,6 +819,23 @@ export default function App() {
       {diaryOpen && <DiaryView state={state} profile={profile} today={today} onClose={() => setDiaryOpen(false)} />}
       {recipesOpen && <RecipeFlow state={state} dateIso={today} initialRecipeId={typeof recipesOpen === 'string' ? recipesOpen : null} onLog={logFood} onClose={() => setRecipesOpen(false)} />}
       {groceriesOpen && <GroceriesView state={state} today={today} onStock={setStock} onHaul={logHaul} onClose={() => setGroceriesOpen(false)} />}
+
+      {journeyView && (
+        <JourneyView jkey={journeyView} state={state} today={today} profile={profile}
+          onBack={() => setJourneyView(null)}
+          tools={journeyTools(journeyView, { skinSlot, low: lowCount(state), latestBf: (state.bodyFatLog || []).length,
+            onStartSkin: () => setFlow(skinSlot), onProducts: () => setManageProducts(true), onSupps: () => setManageSupps(true),
+            onEstimate: () => setBfOpen(true), onLifts: () => setLiftsOpen(true), onRecipes: () => setRecipesOpen(true),
+            onGroceries: () => setGroceriesOpen(true), onSleep: () => setSleepOpen(true) })} />
+      )}
+      {bfOpen && (
+        <BodyFatFlow profile={profile} onClose={() => setBfOpen(false)}
+          onSave={(pct, patch) => { saveBodyFat(pct); updateProfile(patch); setBfOpen(false) }} />
+      )}
+      {sleepOpen && (
+        <SleepModal current={lastSleep} onClose={() => setSleepOpen(false)}
+          onSave={(sleep) => { saveSleep(sleep); setSleepOpen(false) }} />
+      )}
     </div>
     </>
   )
@@ -3095,7 +3099,7 @@ function JourneyRow({ j, onOpen }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="text-[15px] font-semibold text-[#23211c]">{j.name}</p>
-          {j.locked && <span className="rounded-full bg-[#eef0e6] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#7d8a5f]">Not locked</span>}
+          {j.locked && <span className="rounded-full bg-[#eef0e6] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#7d8a5f]">Build the habit</span>}
         </div>
         <p className="mt-0.5 text-[12px] leading-snug text-[#8a8474]">{j.focus}</p>
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e5e0d2]">
@@ -3108,25 +3112,50 @@ function JourneyRow({ j, onOpen }) {
   )
 }
 
-function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, onManageSupps, onOpenSkin }) {
-  const [estimating, setEstimating] = useState(false)
-  const [editingSleep, setEditingSleep] = useState(false)
-  const days = state.days || {}
+// Small inline glyphs for the journey-page tool rows.
+const TI = {
+  skin: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2s6 6 6 11a6 6 0 0 1-12 0c0-5 6-11 6-11z" /></svg>,
+  products: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="9" width="12" height="12" rx="2" /><path d="M9 9V5a3 3 0 0 1 6 0v4" /></svg>,
+  supps: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.5 20.5 3.5 13.5a5 5 0 0 1 7-7l7 7a5 5 0 0 1-7 7z" /><path d="m8.5 8.5 7 7" /></svg>,
+  bodyfat: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></svg>,
+  lifts: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v12a2 2 0 0 0 2 2 2 2 0 0 0 2-2V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v3" /><path d="M3 10v4M21 10v4" /></svg>,
+  recipes: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h13l5 5v15H3z" /><path d="M16 2v5h5M8 13h8M8 17h8M8 9h2" /></svg>,
+  groceries: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h2l2.4 12.3a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L22 7H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>,
+  sleep: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>,
+}
+
+// Build the tool list a journey page shows. Each entry triggers a home-level
+// overlay (they stack above the page), so this is where the moved-off tools live.
+function journeyTools(key, h) {
+  if (key === 'skin') return [
+    { label: 'Start today’s routine', sub: h.skinSlot === 'pm' ? 'Evening steps' : 'Morning steps', icon: TI.skin, onTap: h.onStartSkin },
+    { label: 'Manage products', sub: 'What you own drives the plan', icon: TI.products, onTap: h.onProducts },
+    { label: 'Supplements', sub: 'Need-based, not just spend', icon: TI.supps, onTap: h.onSupps },
+  ]
+  if (key === 'lean') return [
+    { label: h.latestBf ? 'Re-estimate body fat' : 'Estimate body fat', sub: 'Tape-measure consensus', icon: TI.bodyfat, onTap: h.onEstimate },
+    { label: 'Your lifts', sub: 'Best sets and progress', icon: TI.lifts, onTap: h.onLifts },
+    { label: 'Recipes', sub: 'High-protein, built for you', icon: TI.recipes, onTap: h.onRecipes },
+    { label: 'Groceries', sub: h.low ? `${h.low} running low` : 'Pantry and shopping list', icon: TI.groceries, onTap: h.onGroceries },
+  ]
+  if (key === 'sleep') return [
+    { label: 'Correct last night', sub: 'Fix bed and wake times', icon: TI.sleep, onTap: h.onSleep },
+  ]
+  return []
+}
+
+function GoalsSection({ state, profile, today, onOpenJourney, onEstimate, onManageSupps }) {
   const log = state.bodyFatLog || []
   const latest = log[log.length - 1]
   const target = profile.bodyFatTarget || 12
-
-  const lastSleep = lastNightSleep(state, today)
   const journeys = journeysFor(state, today, profile)
   const suppsLeft = (() => { const due = suppsDue(today, state); return (due.amCount - due.amTaken) + (due.pmCount - due.pmTaken) })()
-  // Tap a journey → its most useful action for now; full detail pages land next stage.
-  const openJourney = (key) => { if (key === 'skin') onOpenSkin?.(); else if (key === 'sleep') setEditingSleep(true); else setEstimating(true) }
 
   return (
     <section className="mt-6">
       <h2 className="mb-3 font-display text-xl font-semibold text-[#23211c]">Your journeys</h2>
       <div className="flex flex-col gap-2.5">
-        {journeys.map((j) => <JourneyRow key={j.key} j={j} onOpen={() => openJourney(j.key)} />)}
+        {journeys.map((j) => <JourneyRow key={j.key} j={j} onOpen={() => onOpenJourney(j.key)} />)}
       </div>
 
       {/* Body fat + supplements — quick log actions */}
@@ -3137,20 +3166,11 @@ function GoalsSection({ state, profile, today, onBodyFat, onProfile, onSleep, on
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {onManageSupps && <button onClick={onManageSupps} className="text-[12px] font-medium text-[#3d4a32] active:opacity-70">Supplements</button>}
-          <button onClick={() => setEstimating(true)} className="rounded-full bg-[#3d4a32] px-3.5 py-1.5 text-[12px] font-semibold text-[#f4f1e8] active:scale-95">
+          <button onClick={onEstimate} className="rounded-full bg-[#3d4a32] px-3.5 py-1.5 text-[12px] font-semibold text-[#f4f1e8] active:scale-95">
             {latest ? 'Re-estimate' : 'Estimate BF'}
           </button>
         </div>
       </div>
-
-      {estimating && (
-        <BodyFatFlow profile={profile} onClose={() => setEstimating(false)}
-          onSave={(pct, patch) => { onBodyFat(pct); onProfile(patch); setEstimating(false) }} />
-      )}
-      {editingSleep && (
-        <SleepModal current={lastSleep} onClose={() => setEditingSleep(false)}
-          onSave={(sleep) => { onSleep(sleep); setEditingSleep(false) }} />
-      )}
     </section>
   )
 }
