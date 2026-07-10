@@ -568,14 +568,19 @@ export default function App() {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   // Today's training call, for the Train tile + movement focus card.
   const trainSession = buildSession(state, today)
+  const sessionDone = w.session?.status === 'done'
+  // Once today's session is done, label must reflect what was ACTUALLY trained
+  // (e.g. a swap legs→push), not buildSession's next-up plan — buildSession
+  // excludes today, so it keeps planning the upcoming day even after you finish.
+  const doneLabel = sessionDone ? (w.session?.label || w.type || trainSession.label) : null
   const trainCall = {
     active: w.session?.status === 'active',
-    done: w.session?.status === 'done',
-    rest: trainSession.dayType === 'rest',
-    label: trainSession.label || 'Rest',
-    dayType: trainSession.dayType,
+    done: sessionDone,
+    rest: !sessionDone && trainSession.dayType === 'rest',
+    label: doneLabel || trainSession.label || 'Rest',
+    dayType: sessionDone ? (w.session?.dayType || trainSession.dayType) : trainSession.dayType,
     estMin: trainSession.dayType !== 'rest' ? estimateSessionMinutes(trainSession) : null,
-    swaps: (trainSession.dayType !== 'rest' && w.session?.status !== 'active' && w.session?.status !== 'done')
+    swaps: (trainSession.dayType !== 'rest' && w.session?.status !== 'active' && !sessionDone)
       ? swapOptions(state, today, trainSession.dayType) : [],
   }
   const skinDue = dueSummary(today, state)
