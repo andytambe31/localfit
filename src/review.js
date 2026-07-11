@@ -197,6 +197,10 @@ export function buildReview(state, today) {
     weighIns: dc.weighIns ?? null, spanDays: dc.spanDays ?? null,
   }
 
+  // ---- milestone projections: at the current trend, what he'd weigh (and his
+  // body fat) on the dates that matter to him. ------------------------------
+  const milestones = milestoneProjections({ today, wNow, bfNow, loss, profile })
+
   // ---- momentum / consistency ----------------------------------------------
   const streak = currentStreak(days, today, profile)
   const best = longestStreak(days, profile)
@@ -351,11 +355,64 @@ export function buildReview(state, today) {
   return {
     hasData, daysTracked, generatedFor: today,
     standing, verdictWord, topline,
-    bodyFat, pacing, momentum,
+    bodyFat, pacing, momentum, milestones,
     pillars, overall, strongest, weakest,
     wins, gaps, pacePlan,
     suggestions, applyPatch,
   }
+}
+
+// The dates he checks himself against. Recurring by month/day so they roll to
+// next year once passed; overridable via profile.milestones for the future.
+const DEFAULT_MILESTONES = [
+  { label: 'Her birthday', mm: 8, dd: 9 },
+  { label: 'Your birthday', mm: 8, dd: 31 },
+  { label: '31 October', mm: 10, dd: 31 },
+  { label: "Year's end", mm: 12, dd: 31 },
+]
+const BF_FLOOR = 8 // won't project body fat below this athletic-lean floor
+
+function nextOccurrence(mm, dd, todayIso) {
+  const t = dayD(todayIso)
+  let d = new Date(t.getFullYear(), mm - 1, dd)
+  if (d < t) d = new Date(t.getFullYear() + 1, mm - 1, dd)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(mm)}-${p(dd)}`
+}
+
+// Straight-line the smoothed weekly loss onto each milestone date, holding lean
+// mass so every further kilo is treated as fat. Honest but coarse: real loss
+// decelerates and early drops are largely water, so far dates read optimistic —
+// the UI carries that caveat. Body fat is floored at BF_FLOOR (weight capped to
+// match) so the linear trend can't project sub-physiological numbers.
+export function milestoneProjections({ today, wNow, bfNow, loss, profile }) {
+  if (wNow == null) return { canProject: false, reason: 'no-weight', rows: [] }
+  const list = profile?.milestones?.length ? profile.milestones : DEFAULT_MILESTONES
+  const losing = loss != null && loss > 0.03
+  const leanNow = bfNow != null ? wNow * (1 - bfNow / 100) : null
+  const todayYear = dayD(today).getFullYear()
+  const rows = list.map((m) => {
+    const dateIso = nextOccurrence(m.mm, m.dd, today)
+    const d = dayD(dateIso)
+    const daysAhead = Math.round((d - dayD(today)) / MS_DAY)
+    const weeksAhead = daysAhead / 7
+    let weight = losing ? wNow - loss * weeksAhead : wNow
+    let bf = null, capped = false
+    if (leanNow != null) {
+      const minWeight = leanNow / (1 - BF_FLOOR / 100)
+      if (weight < minWeight) { weight = minWeight; capped = true }
+      bf = (1 - leanNow / weight) * 100
+    } else if (weight < wNow * 0.75) { weight = wNow * 0.75; capped = true }
+    const sameYear = d.getFullYear() === todayYear
+    return {
+      label: m.label, dateIso, daysAhead, capped,
+      dateLabel: d.toLocaleDateString('en-US', { day: 'numeric', month: 'long' }) + (sameYear ? '' : ` ${d.getFullYear()}`),
+      weight: Math.round(weight * 10) / 10,
+      weightDelta: Math.round((weight - wNow) * 10) / 10,
+      bf: bf != null ? Math.round(bf * 10) / 10 : null,
+    }
+  }).filter((r) => r.daysAhead >= 0).sort((a, b) => a.daysAhead - b.daysAhead)
+  return { canProject: losing, losing, perWeek: loss != null ? Math.round(loss * 100) / 100 : null, wNow, bfNow, rows }
 }
 
 // Oxford-comma join, e.g. ['a','b','c'] -> 'a, b, and c'.
