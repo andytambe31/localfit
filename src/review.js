@@ -366,8 +366,8 @@ export function buildReview(state, today) {
 // next year once passed; overridable via profile.milestones for the future.
 const DEFAULT_MILESTONES = [
   { label: 'Her birthday', mm: 8, dd: 9 },
-  { label: 'Your birthday', mm: 8, dd: 31 },
-  { label: '31 October', mm: 10, dd: 31 },
+  { label: '31 August', mm: 8, dd: 31 },
+  { label: 'Your birthday', mm: 10, dd: 31 },
   { label: "Year's end", mm: 12, dd: 31 },
 ]
 const BF_FLOOR = 8 // won't project body fat below this athletic-lean floor
