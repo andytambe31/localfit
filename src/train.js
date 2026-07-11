@@ -286,10 +286,18 @@ export function decideDayType(state, todayIso) {
   const sinceLast = last ? daysBetween(last.date, todayIso) : Infinity
   const weekCount = sessionsThisWeek(hist, todayIso)
 
-  // Rest recommendation: weekly target already met and trained within ~a day.
-  if (weekCount >= target && sinceLast <= 1) {
-    return { dayType: 'rest', rest: true,
-      reason: `You've trained ${weekCount}× this week and lifted ${sinceLast === 0 ? 'today' : 'yesterday'}. Recover — walk, hit your steps, let the work land.` }
+  // Rest recommendation: once the weekly target is met, recovery is the default
+  // for the REST of the week — three sessions is the goal, a fourth isn't owed.
+  // This used to also require training within ~a day (sinceLast <= 1), which made
+  // the recommendation flip from rest to the next rotation day as soon as a
+  // second rest day passed — e.g. trained Wed/Thu/Fri, still "rest" on Saturday
+  // but "legs" on Sunday. Dropping that guard keeps it rest all week. You can
+  // still train by swapping a day in; this is only the recommendation.
+  if (weekCount >= target) {
+    const reason = sinceLast <= 1
+      ? `You've trained ${weekCount}× this week and lifted ${sinceLast === 0 ? 'today' : 'yesterday'}. Recover — walk, hit your steps, let the work land.`
+      : `You've already hit your ${target} sessions this week. Rest the rest of the week — you can still train if you feel like it, but the work's done.`
+    return { dayType: 'rest', rest: true, reason }
   }
 
   // Owed day: a day-type swapped out earlier is prioritized once it's recovered,
