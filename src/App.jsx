@@ -52,7 +52,29 @@ const ensureProfile = (p = {}) => {
   return p
 }
 const loadLocal = () => { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null } }
-const saveLocal = (s) => { try { localStorage.setItem(LS_KEY, JSON.stringify(s)) } catch { /* quota */ } }
+
+// This state is the ONLY copy of the user's data — a failed write must never be
+// silent, or a logged meal/weight can vanish on the next reload. If a write
+// throws (storage pressure / quota), shed the throwaway activity log — just
+// foreground pings — and retry so the real data (days, food, weights) still
+// lands. If it STILL fails, shout via onSaveFailed so the UI can warn and push
+// an export before anything is lost. Returns true only when the write persisted.
+let onSaveFailed = null
+const writeLS = (obj) => { localStorage.setItem(LS_KEY, JSON.stringify(obj)); return true }
+const saveLocal = (s) => {
+  try { return writeLS(s) }
+  catch {
+    try {
+      // Retry without activity (non-critical, re-derived from live pings).
+      const ok = writeLS({ ...s, activity: [] })
+      if (ok && Array.isArray(s.activity)) s.activity.length = 0
+      return ok
+    } catch {
+      try { onSaveFailed?.() } catch { /* noop */ }
+      return false
+    }
+  }
+}
 
 // Record that the app is active right now. Appends/extends the current activity
 // interval and prunes anything older than 48h. Persists straight to localStorage
@@ -111,6 +133,11 @@ export default function App() {
   const [sleepOpen, setSleepOpen] = useState(false) // sleep correction (lifted for the journey page)
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false) // a localStorage write hard-failed → warn, don't lose data silently
+
+  // Wire saveLocal's hard-failure signal to a visible warning. A failed write
+  // means the change is only in memory — the user must export before a reload.
+  useEffect(() => { onSaveFailed = () => setSaveFailed(true); return () => { onSaveFailed = null } }, [])
 
   // Opening splash: hold the wordmark briefly, fade out, then reveal the app.
   useEffect(() => {
@@ -673,7 +700,16 @@ export default function App() {
           <span className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">{prettyToday(today)}</span>
         </div>
       </div>
-      {(!lastBackup || Date.now() - lastBackup > 7 * 86400000) && (
+      {saveFailed && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-[#e0b4b4] bg-[#f7dede] px-3 py-2.5 text-[12px] text-[#8a2e2e]">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+          <span className="min-w-0">
+            Couldn't save your last change — this device's storage is full, so it's only in memory and will be lost if the app reloads.
+            <button onClick={() => setBackupOpen(true)} className="ml-1 font-semibold underline">Export a backup now</button>, then free up space.
+          </span>
+        </div>
+      )}
+      {!saveFailed && (!lastBackup || Date.now() - lastBackup > 7 * 86400000) && (
         <button onClick={() => setBackupOpen(true)} className="mb-4 flex w-full items-center gap-2 rounded-xl border border-[#e7d4b6] bg-[#f7ecd6] px-3 py-2 text-left text-[12px] text-[#8a5a1e]">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
