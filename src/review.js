@@ -379,36 +379,44 @@ function nextOccurrence(mm, dd, todayIso) {
   return `${d.getFullYear()}-${p(mm)}-${p(dd)}`
 }
 
-// Straight-line the smoothed weekly loss onto each milestone date, holding lean
-// mass so every further kilo is treated as fat. Honest but coarse: real loss
-// decelerates and early drops are largely water, so far dates read optimistic —
-// the UI carries that caveat. Body fat is floored at BF_FLOOR (weight capped to
-// match) so the linear trend can't project sub-physiological numbers.
+// Project each milestone as a RANGE, holding lean mass so every further kilo is
+// treated as fat. Two bounds bracket the honest uncertainty:
+//   • low weight (fast) — today's smoothed rate holds, straight-line.
+//   • high weight (slow) — the rate tapers as you lean out, modelled as an
+//     exponential approach to the lean-floor weight whose initial slope matches
+//     today's rate. Real loss decelerates, so this is the realistic ceiling.
+// Near dates land in a tight band; far dates spread as the slowdown compounds.
+// Body fat derives from each weight; the floor keeps it physiological.
 export function milestoneProjections({ today, wNow, bfNow, loss, profile }) {
   if (wNow == null) return { canProject: false, reason: 'no-weight', rows: [] }
   const list = profile?.milestones?.length ? profile.milestones : DEFAULT_MILESTONES
   const losing = loss != null && loss > 0.03
   const leanNow = bfNow != null ? wNow * (1 - bfNow / 100) : null
+  const floorWeight = leanNow != null ? leanNow / (1 - BF_FLOOR / 100) : wNow * 0.8
+  const room = wNow - floorWeight // kg of fat there is left to lose before the floor
+  const k = losing && room > 0.5 ? loss / room : 0 // decay rate; makes the slow curve start at today's pace
+  const bfAt = (w) => (leanNow != null ? Math.round((1 - leanNow / w) * 1000) / 10 : null)
   const todayYear = dayD(today).getFullYear()
   const rows = list.map((m) => {
     const dateIso = nextOccurrence(m.mm, m.dd, today)
     const d = dayD(dateIso)
     const daysAhead = Math.round((d - dayD(today)) / MS_DAY)
-    const weeksAhead = daysAhead / 7
-    let weight = losing ? wNow - loss * weeksAhead : wNow
-    let bf = null, capped = false
-    if (leanNow != null) {
-      const minWeight = leanNow / (1 - BF_FLOOR / 100)
-      if (weight < minWeight) { weight = minWeight; capped = true }
-      bf = (1 - leanNow / weight) * 100
-    } else if (weight < wNow * 0.75) { weight = wNow * 0.75; capped = true }
+    const t = daysAhead / 7
+    let wFast, wSlow, capped = false
+    if (!losing || room <= 0.5) {
+      wFast = wSlow = wNow
+    } else {
+      wFast = wNow - loss * t
+      if (wFast < floorWeight) { wFast = floorWeight; capped = true }
+      wSlow = floorWeight + room * Math.exp(-k * t) // decelerating, asymptotes at the floor
+    }
+    const low = Math.min(wFast, wSlow), high = Math.max(wFast, wSlow)
     const sameYear = d.getFullYear() === todayYear
     return {
       label: m.label, dateIso, daysAhead, capped,
       dateLabel: d.toLocaleDateString('en-US', { day: 'numeric', month: 'long' }) + (sameYear ? '' : ` ${d.getFullYear()}`),
-      weight: Math.round(weight * 10) / 10,
-      weightDelta: Math.round((weight - wNow) * 10) / 10,
-      bf: bf != null ? Math.round(bf * 10) / 10 : null,
+      weightLow: Math.round(low * 10) / 10, weightHigh: Math.round(high * 10) / 10,
+      bfLow: bfAt(low), bfHigh: bfAt(high), // low weight → lower bf
     }
   }).filter((r) => r.daysAhead >= 0).sort((a, b) => a.daysAhead - b.daysAhead)
   return { canProject: losing, losing, perWeek: loss != null ? Math.round(loss * 100) / 100 : null, wNow, bfNow, rows }

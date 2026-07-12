@@ -2065,6 +2065,15 @@ function SuppsModal({ profile, onClose, onSave }) {
 // where the body-fat goal is, whether the pace is right (health-aware), what's
 // been earned, where it's slipping, and how to pace from here. Pure read; every
 // number comes from buildReview so the review never disagrees with the rings.
+// Format a low–high range to a step (0.5 kg, 1%). Collapses to a single number
+// when the rounded bounds match — near-term projections where the band is tight.
+function fmtRange(low, high, step) {
+  const r = (n) => Math.round(n / step) * step
+  const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
+  const a = r(low), b = r(high)
+  return a === b ? fmt(a) : `${fmt(a)}–${fmt(b)}`
+}
+
 function ReviewView({ state, today, onApply }) {
   const R = buildReview(state, today)
   const [applied, setApplied] = useState(false)
@@ -2158,7 +2167,7 @@ function ReviewView({ state, today, onApply }) {
           </div>
           {R.milestones.canProject ? (
             <p className="mt-1 mb-3 text-[13px] text-[#8a8474]">
-              Straight-lining your ~{R.milestones.perWeek?.toFixed(2)} kg/wk from {R.milestones.wNow} kg{R.milestones.bfNow != null ? ` · ${R.milestones.bfNow}%` : ''} today.
+              A range from {R.milestones.wNow} kg{R.milestones.bfNow != null ? ` · ${R.milestones.bfNow}%` : ''} today: the low end holds your ~{R.milestones.perWeek?.toFixed(2)} kg/wk, the high end assumes it slows as you lean out.
             </p>
           ) : (
             <p className="mt-1 mb-3 text-[13px] text-[#8a8474]">Your trend is flat right now — these hold near today's {R.milestones.wNow} kg until the scale moves. Log a few more weigh-ins to project forward.</p>
@@ -2171,20 +2180,19 @@ function ReviewView({ state, today, onApply }) {
                   <p className="mt-0.5 text-[12px] text-[#8a8474]">{m.dateLabel} · in {m.daysAhead} day{m.daysAhead === 1 ? '' : 's'}</p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className="font-display text-[22px] font-semibold leading-none text-[#23211c]">
-                    {m.capped && <span className="text-[14px] text-[#9a9482]">~</span>}{m.weight}<span className="text-[13px] font-normal text-[#9a9482]"> kg</span>
+                  <p className="font-display text-[21px] font-semibold leading-none text-[#23211c]">
+                    {fmtRange(m.weightLow, m.weightHigh, 0.5)}<span className="text-[13px] font-normal text-[#9a9482]"> kg</span>
                   </p>
-                  <p className="mt-1 text-[12px] text-[#6b6857]">
-                    {m.bf != null && <span className="font-medium text-[#3d4a32]">{m.capped ? '≈' : ''}{m.bf}% bf</span>}
-                    {R.milestones.canProject && m.weightDelta < 0 && <span className="text-[#8a8474]">{m.bf != null ? ' · ' : ''}{m.weightDelta} kg</span>}
-                  </p>
+                  {m.bfLow != null && (
+                    <p className="mt-1 text-[12px] font-medium text-[#3d4a32]">{fmtRange(m.bfLow, m.bfHigh, 1)}% bf</p>
+                  )}
                 </div>
               </li>
             ))}
           </ul>
           <p className="mt-3 flex items-start gap-2 rounded-xl bg-[#f3efe6] px-3 py-2 text-[12px] leading-snug text-[#7a7568]">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a39877" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
-            <span>A straight line is optimistic on the far dates — real loss slows as you lean out, and recent drops carry water weight. Treat the near dates as solid, the later ones as a best case.</span>
+            <span>The band widens further out because loss slows as you lean — and recent drops still carry some water. Near dates are tight; the far ones are a spread, not a promise.</span>
           </p>
         </section>
       )}
