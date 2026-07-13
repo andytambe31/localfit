@@ -34,6 +34,7 @@ export const EXERCISES = {
   overhead_ext:       { name: 'Overhead Cable Extension',   day: 'push', muscle: 'triceps',   role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5 },
 
   // --- PULL ---
+  pull_up:            { name: 'Pull-Up',                     day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 5,  repHigh: 15, inc: 5,  bodyweight: true, emph: ['lats'] },
   lat_pulldown:       { name: 'Lat Pulldown',               day: 'pull', muscle: 'back',      role: 'compound',   sets: 4, repLow: 8,  repHigh: 12, inc: 5,  emph: ['lats'] },
   barbell_row:        { name: 'Barbell Row',                day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5 },
   seated_row:         { name: 'Seated Cable Row',           day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 10, repHigh: 14, inc: 5,  emph: ['lats'] },
@@ -91,7 +92,7 @@ const DAY_PLAN = {
           core: ['bench_press', 'incline_db_press', 'shoulder_press', 'cable_fly', 'triceps_pushdown'],
           emphasisPool: { 'side-delts': ['lateral_raise'], neck: ['shrug'], calves: ['calf_raise'] } },
   pull: { label: 'Pull', muscles: ['back', 'biceps', 'rear-delts'],
-          core: ['lat_pulldown', 'barbell_row', 'seated_row', 'db_curl', 'hammer_curl'],
+          core: ['pull_up', 'lat_pulldown', 'barbell_row', 'db_curl', 'hammer_curl'],
           emphasisPool: { lats: ['seated_row'], 'rear-delts': ['rear_delt_fly', 'face_pull'], forearms: ['wrist_curl'], 'lower-back': ['back_ext'], neck: ['shrug'] } },
   legs: { label: 'Legs', muscles: ['quads', 'hamstrings', 'glutes'],
           core: ['squat', 'rdl', 'leg_press', 'leg_curl', 'leg_ext'],
@@ -99,7 +100,7 @@ const DAY_PLAN = {
   // Upper/Lower — for the 5-day split (Push/Pull/Legs/Upper/Lower). Composed from
   // the same exercise pool, so progression/prefill carries across day-types.
   upper: { label: 'Upper', muscles: ['chest', 'back', 'shoulders', 'biceps', 'triceps'],
-          core: ['bench_press', 'barbell_row', 'shoulder_press', 'lat_pulldown', 'triceps_pushdown', 'db_curl'],
+          core: ['bench_press', 'barbell_row', 'shoulder_press', 'pull_up', 'triceps_pushdown', 'db_curl'],
           emphasisPool: { 'side-delts': ['lateral_raise'], 'rear-delts': ['rear_delt_fly', 'face_pull'], lats: ['seated_row'], forearms: ['hammer_curl'], neck: ['shrug'] } },
   lower: { label: 'Lower', muscles: ['quads', 'hamstrings', 'glutes', 'calves'],
           core: ['squat', 'rdl', 'leg_press', 'leg_curl', 'calf_raise'],
@@ -351,7 +352,10 @@ function lastPerformed(state, exId, todayIso) {
     if (!sess || sess.status !== 'done') continue // only finished sessions are history; never the one being built
     if (sess.phase === 'deload' || sess.phase === 'intensify') continue
     const ex = sess.exercises?.find((e) => e.id === exId)
-    const sets = (ex?.sets || []).filter((s) => s.reps > 0 && s.weight > 0)
+    // Bodyweight lifts (pull-ups) count by reps alone — the "weight" is optional
+    // added load, so a real set can carry weight 0/blank.
+    const bw = EXERCISES[exId]?.bodyweight
+    const sets = (ex?.sets || []).filter((s) => s.reps > 0 && (bw || s.weight > 0))
     if (sets.length) return sets
   }
   return null
@@ -365,15 +369,30 @@ export function targetFor(state, exId, todayIso, phase = null) {
   const last = lastPerformed(state, exId, todayIso)
   let std
   if (!last) {
-    std = { weight: null, reps: ex.repLow, sets: ex.sets, first: true,
-      note: 'First time on record — log the weight you work with and we build from here.' }
+    std = { weight: ex.bodyweight ? 0 : null, reps: ex.repLow, sets: ex.sets, first: true,
+      note: ex.bodyweight
+        ? 'First time on record — do as many clean reps as you can and we build from there.'
+        : 'First time on record — log the weight you work with and we build from here.' }
   } else {
     // Anchor on the heaviest working set (handles ramping sets like 40→55→70,
     // where the most-reps set is the lightest). Tie-break by reps.
     const top = last.reduce((a, b) => (((b.weight || 0) > (a.weight || 0)) || ((b.weight || 0) === (a.weight || 0) && (b.reps || 0) > (a.reps || 0)) ? b : a))
     const topWeight = top.weight || 0
     const topReps = top.reps || 0
-    if (topReps >= ex.repHigh) {
+    if (ex.bodyweight) {
+      // Progress reps at bodyweight up to the rep cap, THEN start adding load.
+      const added = topWeight > 0 ? ` +${topWeight} lb` : ''
+      if (topReps >= ex.repHigh) {
+        std = { weight: topWeight + ex.inc, reps: ex.repLow, sets: ex.sets,
+          note: `Last: ${topReps} clean reps${added} — strong. Add ${ex.inc} lb and build the reps back up.` }
+      } else {
+        const goalReps = Math.min(ex.repHigh, topReps + 1)
+        std = { weight: topWeight, reps: goalReps, sets: ex.sets,
+          note: topWeight > 0
+            ? `Last: ${topReps} reps${added}. Beat it — get ${goalReps}.`
+            : `Last: ${topReps} bodyweight reps. Beat it — get ${goalReps}.` }
+      }
+    } else if (topReps >= ex.repHigh) {
       std = { weight: topWeight + ex.inc, reps: ex.repLow, sets: ex.sets,
         note: `Last top set: ${topReps} reps at ${topWeight} lb — top of the range. Up to ${topWeight + ex.inc} lb, back to ${ex.repLow} reps.` }
     } else {
@@ -468,7 +487,7 @@ export function buildSession(state, todayIso, opts = {}) {
     const meta = EXERCISES[id]
     const target = targetFor(state, id, todayIso, phase)
     return {
-      id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db,
+      id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db, bodyweight: !!meta.bodyweight,
       // rep range shown reflects the phase (heavy week => low reps)
       repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
       emphasized: (meta.emph || []).includes(emphasis),
@@ -499,7 +518,7 @@ export function buildSession(state, todayIso, opts = {}) {
     const meta = EXERCISES[id]
     const target = targetFor(state, id, todayIso, phase)
     return {
-      id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db,
+      id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db, bodyweight: !!meta.bodyweight,
       repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
       emphasized: false, focus: true, cue: cueFor(id), rir: null, target,
       sets: prefillSets(state, id, todayIso, target, phase),
@@ -560,6 +579,7 @@ const CUES = {
   cable_fly: 'Soft elbows, deep stretch, then hug the rep and squeeze the chest together.',
   triceps_pushdown: 'Elbows pinned to your sides, full lockout, control the way back up.',
   overhead_ext: 'Elbows tight, deep stretch behind the head, drive to lockout.',
+  pull_up: 'Dead hang, pull the elbows down to your ribs and lead with the chest until your chin clears the bar, then lower all the way under control.',
   lat_pulldown: 'Drive elbows down and back to the upper chest — feel the lats, not the arms.',
   barbell_row: 'Hinge, flat back, pull to the belt, squeeze the shoulder blades.',
   seated_row: 'Chest up, pull to the stomach, control the stretch forward. Width is in the lats.',
@@ -620,6 +640,14 @@ const COACHING = {
     breathe: 'Breath and brace before pressing, exhale near the top.',
     avoid: ['Arching the low back to cheat the weight up', 'Flaring elbows straight out', 'Bouncing out of the bottom'],
     feel: 'Shoulders doing the work, triceps finishing the press.',
+  },
+  pull_up: {
+    setup: ['Grip the bar slightly wider than shoulder-width, palms facing away. Start from a full dead hang, arms straight.', 'Pull your shoulder blades down and set your core — no loose swinging.'],
+    steps: ['Drive your elbows down toward your ribs and pull your chest up to the bar — think of pulling the bar down to you.', 'Get your chin clearly over the bar, then lower all the way back to a full dead hang under control.', 'No kipping or swinging — every rep starts from a dead stop.'],
+    breathe: 'Exhale as you pull up, inhale as you lower.',
+    avoid: ['Kipping / swinging the legs for momentum', 'Half reps — chin must clear the bar and arms must straighten at the bottom', 'Shrugging the shoulders up instead of pulling them down'],
+    feel: 'The lats and mid-back doing the work, biceps assisting.',
+    cant: 'Can\'t do full reps yet? Build them: 3–4 slow negatives (jump up, lower for 3–5 seconds), or band-assisted / lat-pulldown reps. Reps come fast.',
   },
   lat_pulldown: {
     setup: ['Set the thigh pad snug. Grip a bit wider than shoulders, palms forward.', 'Sit tall, chest up, take a small backward lean and hold it.'],

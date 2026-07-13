@@ -285,10 +285,12 @@ function ExerciseCard({ ex, effort, onPrev, onNext, onSet, onToggle, onRIR }) {
               <div className="rounded-lg bg-[#2b3422] px-2.5 py-2 text-[12.5px] leading-snug text-[#dfe6cf]"><span className="font-semibold text-[#9aa581]">Breathe · </span>{guide.breathe}</div>
               <GuideBlock label="Avoid" danger>{guide.avoid.map((s, i) => <li key={i} className="text-[13px] leading-snug text-[#cbb9a0]">{s}</li>)}</GuideBlock>
               <div className="text-[12.5px] leading-snug text-[#9aa581]"><span className="font-semibold">Feel it in · </span>{guide.feel}</div>
+              {guide.cant && <div className="rounded-lg border border-[#3a4a2c] bg-[#2b3422] px-2.5 py-2 text-[12.5px] leading-snug text-[#dfe6cf]"><span className="font-semibold text-[#9aa581]">Building up · </span>{guide.cant}</div>}
             </div>
           )}
         </div>
       )}
+      {ex.bodyweight && <p className="mt-2 rounded-xl border border-[#3a4a2c] bg-[#2b3422] px-3 py-2 text-[13px] leading-snug text-[#dfe6cf]"><span className="font-semibold text-[#9aa581]">Bodyweight · </span>log your reps; leave weight blank unless you clip on added plates.</p>}
       {ex.db && <p className="mt-2 rounded-xl border border-[#5a4f2c] bg-[#322d1d] px-3 py-2 text-[13px] leading-snug text-[#e3d9b4]"><span className="font-semibold">Log one dumbbell · </span>enter the weight of a single dumbbell, not both added together.</p>}
 
       <div className="mt-4 space-y-2">
