@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildSession, estimateSessionMinutes, targetFor, prefillSets, swapOptions } from './train'
+import { buildSession, estimateSessionMinutes, targetFor, prefillSets, swapOptions, coachingFor } from './train'
 
 // On resume, re-derive targets for exercises you haven't logged yet, so a session
 // built before a data change / fix picks up the right pre-filled weights. Exercises
@@ -176,7 +176,7 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
       )}
 
       {item?.kind === 'exercise' && (
-        <ExerciseCard ex={item.data}
+        <ExerciseCard ex={item.data} effort={session.effort}
           onPrev={cursor > 0 ? () => goto(cursor - 1) : null}
           onNext={() => goto(cursor + 1)}
           onSet={(setIdx, field, value) => commit((s) => {
@@ -244,8 +244,10 @@ function SessionHeader({ session, cursor, total, onFinish }) {
 }
 
 // ---- exercise card: pre-filled target + per-set logging ---------------------
-function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
+function ExerciseCard({ ex, effort, onPrev, onNext, onSet, onToggle, onRIR }) {
   const t = ex.target || {}
+  const guide = coachingFor(ex.id)
+  const [showGuide, setShowGuide] = useState(true)
   // Reinforcement: did a completed set meet/beat the target (weight & reps)?
   const beaten = !t.first && ex.sets.some((s) => s.done && s.reps && s.reps >= (t.reps || 0) && (s.weight || 0) >= (t.weight || 0))
   const RIR = [0, 1, 2, 3, '4+']
@@ -260,6 +262,33 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
       <h2 className="mt-2 font-display text-[28px] font-semibold leading-[1.12] text-[#f4f1e8]">{ex.name}</h2>
       <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{t.note}</p>
       {ex.cue && <p className="mt-3 rounded-xl border border-[#3a4230] bg-[#272d20] px-3 py-2 text-[13px] leading-snug text-[#cfccba]"><span className="font-semibold text-[#9aa581]">Cue · </span>{ex.cue}</p>}
+
+      {/* This week's intent — how hard to push, from the periodization block */}
+      {effort && (
+        <p className="mt-2 flex items-start gap-2 rounded-xl border border-[#3a4a2c] bg-[#2b3422] px-3 py-2 text-[13px] leading-snug text-[#dfe6cf]">
+          <span className="mt-px shrink-0 rounded-full bg-[#3d4a32] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#dfe4cf]">{effort.short}</span>
+          <span>{effort.line}</span>
+        </p>
+      )}
+
+      {/* Full trainer walkthrough — expanded by default, collapsible once you know it */}
+      {guide && (
+        <div className="mt-3 overflow-hidden rounded-xl border border-[#3a4230] bg-[#242a1d]">
+          <button onClick={() => setShowGuide((v) => !v)} className="flex w-full items-center justify-between px-3 py-2.5 text-left">
+            <span className="text-[12px] font-semibold uppercase tracking-wider text-[#9aa581]">How to perform this</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa581" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition ${showGuide ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          {showGuide && (
+            <div className="space-y-3 px-3 pb-3.5 pt-0.5">
+              <GuideBlock label="Set up">{guide.setup.map((s, i) => <li key={i} className="text-[13px] leading-snug text-[#cfccba]">{s}</li>)}</GuideBlock>
+              <GuideBlock label="The rep" ordered>{guide.steps.map((s, i) => <li key={i} className="text-[13px] leading-snug text-[#cfccba]">{s}</li>)}</GuideBlock>
+              <div className="rounded-lg bg-[#2b3422] px-2.5 py-2 text-[12.5px] leading-snug text-[#dfe6cf]"><span className="font-semibold text-[#9aa581]">Breathe · </span>{guide.breathe}</div>
+              <GuideBlock label="Avoid" danger>{guide.avoid.map((s, i) => <li key={i} className="text-[13px] leading-snug text-[#cbb9a0]">{s}</li>)}</GuideBlock>
+              <div className="text-[12.5px] leading-snug text-[#9aa581]"><span className="font-semibold">Feel it in · </span>{guide.feel}</div>
+            </div>
+          )}
+        </div>
+      )}
       {ex.db && <p className="mt-2 rounded-xl border border-[#5a4f2c] bg-[#322d1d] px-3 py-2 text-[13px] leading-snug text-[#e3d9b4]"><span className="font-semibold">Log one dumbbell · </span>enter the weight of a single dumbbell, not both added together.</p>}
 
       <div className="mt-4 space-y-2">
@@ -277,18 +306,32 @@ function ExerciseCard({ ex, onPrev, onNext, onSet, onToggle, onRIR }) {
       </div>
       <p className="mt-2 text-[11px] text-[#8c9472]">Type your weight and reps — the set logs itself once reps are in.</p>
 
-      <div className="mt-3 flex items-center justify-between rounded-2xl border border-[#3a4230] bg-[#272d20] px-3 py-2">
-        <span className="text-[12px] text-[#8c9472]">Reps left in the tank?</span>
-        <div className="flex gap-1.5">
-          {RIR.map((v, idx) => (
-            <button key={idx} onClick={() => onRIR(idx)}
-              className={`grid h-7 w-7 place-items-center rounded-full text-[12px] font-semibold ${ex.rir === idx ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#333b28] text-[#9aa581]'}`}>{v}</button>
-          ))}
+      <div className="mt-3 rounded-2xl border border-[#3a4230] bg-[#272d20] px-3 py-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] text-[#8c9472]">Reps left in the tank?</span>
+          <div className="flex gap-1.5">
+            {RIR.map((v, idx) => (
+              <button key={idx} onClick={() => onRIR(idx)}
+                className={`grid h-7 w-7 place-items-center rounded-full text-[12px] font-semibold ${ex.rir === idx ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'bg-[#333b28] text-[#9aa581]'}`}>{v}</button>
+            ))}
+          </div>
         </div>
+        {effort && <p className="mt-1.5 text-[11px] leading-snug text-[#8c9472]">Aim for <span className="font-semibold text-[#9aa581]">{effort.rirTarget} in reserve</span> this week — that last rep should be tough but clean, not a grind.</p>}
       </div>
 
       <Advance onClick={onNext} label="Next exercise" />
     </Card>
+  )
+}
+
+// One labelled block in the form guide: a heading + a tight list of lines.
+function GuideBlock({ label, children, ordered, danger }) {
+  const List = ordered ? 'ol' : 'ul'
+  return (
+    <div>
+      <p className={`mb-1 text-[10px] font-semibold uppercase tracking-wider ${danger ? 'text-[#c99a6a]' : 'text-[#7d8a5f]'}`}>{label}</p>
+      <List className={`space-y-1 ${ordered ? 'list-decimal' : 'list-disc'} pl-4 marker:text-[#5b6a44]`}>{children}</List>
+    </div>
   )
 }
 

@@ -518,7 +518,7 @@ export function buildSession(state, todayIso, opts = {}) {
     label: plan.label,
     // periodization stamp — persisted on the session, drives the off-ledger skip
     phase: phase.key, phaseLabel: phase.label, phaseShort: phase.short, phaseLine: phase.line,
-    deload: phase.deload, heavy: phase.heavy,
+    deload: phase.deload, heavy: phase.heavy, effort: weekEffort(phase),
     weekNumber: phase.weekNumber, totalWeeks: phase.totalWeeks, blockNumber: phase.blockNumber,
     swapped, swappedFrom: swapped ? decision.dayType : null,
     reason: (swapped
@@ -594,6 +594,143 @@ const CUES = {
   bicycle_crunch: 'Slow and controlled — opposite elbow toward opposite knee, extend the other leg. Twist from the trunk, not the neck.',
 }
 export function cueFor(exId) { return CUES[exId] || 'Controlled tempo, full range, squeeze at the top.' }
+
+// ---- full form guide: a trainer's walkthrough per lift ----------------------
+// setup = getting into position; steps = the rep in order; breathe = the breath
+// pattern; avoid = the common mistakes; feel = where it should be felt. Kept out
+// of the persisted session (looked up by id at render) so it never bloats storage.
+const COACHING = {
+  bench_press: {
+    setup: ['Lie back with your eyes under the bar. Pull your shoulder blades down and together and pin them there — a small arch in the low back is fine.', 'Grip a touch wider than shoulder-width. Plant both feet flat and screw them into the floor.'],
+    steps: ['Unrack and hold the bar straight over your shoulders, arms locked.', 'Lower under control to the lower-chest line — about 2 seconds down, elbows tucked to roughly 45°, not flared wide.', 'Touch the chest lightly with no bounce, then drive the bar up and slightly back toward your face.', 'Push your feet into the floor as you press. Stop just short of locking out to keep the chest loaded.'],
+    breathe: 'Big breath and brace at the top, hold it through the descent and the sticking point, exhale as you near lockout.',
+    avoid: ['Bouncing the bar off your chest', 'Elbows flaring straight out to the sides', 'Hips lifting off the bench', 'Cutting the rep short — touch the chest every time'],
+    feel: 'Chest and triceps under load, not the front of the shoulders.',
+  },
+  incline_db_press: {
+    setup: ['Set the bench to about 30°. Sit back and kick the dumbbells up to your shoulders with a knee.', 'Blades pinned back and down, feet flat, dumbbells stacked over the lower chest.'],
+    steps: ['Press up and slightly together until the arms are nearly straight — keep a hair of bend.', 'Lower slowly for 2–3 seconds until you feel a deep stretch across the upper chest, elbows at ~45°.', 'Drive back up on the same path and squeeze the upper chest at the top.'],
+    breathe: 'Inhale on the way down, exhale as you press up.',
+    avoid: ['Clashing the dumbbells at the top', 'Letting elbows drift below the bench into a painful stretch', 'Turning it into a shoulder press by leaning the bench too upright'],
+    feel: 'A stretch and squeeze in the upper chest, near the collarbone.',
+  },
+  shoulder_press: {
+    setup: ['Sit tall with back support, dumbbells at shoulder height, palms forward.', 'Brace your abs and keep the ribs down — no big arch.'],
+    steps: ['Press straight up and slightly in until the arms are almost locked.', 'Stop just short of lockout, then lower under control to ear/chin height.', 'Keep the elbows slightly in front of the body, not flared behind.'],
+    breathe: 'Breath and brace before pressing, exhale near the top.',
+    avoid: ['Arching the low back to cheat the weight up', 'Flaring elbows straight out', 'Bouncing out of the bottom'],
+    feel: 'Shoulders doing the work, triceps finishing the press.',
+  },
+  lat_pulldown: {
+    setup: ['Set the thigh pad snug. Grip a bit wider than shoulders, palms forward.', 'Sit tall, chest up, take a small backward lean and hold it.'],
+    steps: ['Start by pulling your shoulder blades down — think "put them in your back pockets".', 'Drive the elbows down and toward your ribs until the bar reaches your upper chest.', 'Squeeze the lats for a beat, then control the bar all the way up until the lats fully stretch.'],
+    breathe: 'Exhale as you pull down, inhale on the way up.',
+    avoid: ['Yanking with the arms and swinging the torso', 'Not letting the weight stretch you at the top', 'Pulling the bar behind the neck'],
+    feel: 'The lats (sides of your back), not the biceps.',
+  },
+  barbell_row: {
+    setup: ['Hinge at the hips to about 45°, flat back, bar hanging under the shoulders.', 'Grip just outside the knees, brace hard, chin neutral.'],
+    steps: ['Pull the bar to your lower ribs / belt line by driving the elbows back.', 'Squeeze the shoulder blades together at the top.', 'Lower under control to a full stretch without rounding the back.'],
+    breathe: 'Brace at the bottom, exhale as you finish the pull.',
+    avoid: ['Standing up / using the low back to heave the weight', 'Rounding the spine', 'Shrugging instead of rowing'],
+    feel: 'Mid-back and lats squeezing, low back steady and braced.',
+  },
+  seated_row: {
+    setup: ['Feet planted, soft knees, sit tall holding the handle with arms extended.', 'Chest up, shoulders down, small forward lean to load the stretch.'],
+    steps: ['Pull the handle to your stomach, driving the elbows straight back close to your sides.', 'Squeeze the mid-back at the end, then control the handle forward to a full stretch.'],
+    breathe: 'Exhale as you pull, inhale on the stretch.',
+    avoid: ['Rowing with a rounded back', 'Jerking the torso back and forth', 'Cutting the stretch short'],
+    feel: 'The width of your back working, not just the arms.',
+  },
+  squat: {
+    setup: ['Bar on your upper back (not the neck), hands pulling it tight. Step out into a shoulder-width stance, toes slightly out.', 'Take a big breath into your belly and brace like you\'re about to be punched.'],
+    steps: ['Break at the hips and knees together, sitting down between your hips.', 'Descend under control to at least parallel — hip crease below the knee if mobility allows.', 'Keep the knees tracking over the toes and the chest up.', 'Drive the floor away and stand tall, keeping the brace until you\'re locked out.'],
+    breathe: 'Breathe in and brace at the top, hold it all the way down and up, exhale at the top.',
+    avoid: ['Knees caving inward', 'Heels lifting or shifting to the toes', 'Rounding the lower back at the bottom', 'Cutting depth short'],
+    feel: 'Quads and glutes driving; the brace keeps your spine safe.',
+  },
+  rdl: {
+    setup: ['Stand with the bar (or dumbbells) at your thighs, feet hip-width, soft knees.', 'Blades set, brace the abs, weight over mid-foot.'],
+    steps: ['Push your hips straight back, letting the bar slide down your thighs.', 'Lower until you feel a strong hamstring stretch — usually mid-shin — keeping the back flat.', 'Drive the hips forward to stand, squeezing the glutes at the top. Don\'t lean back.'],
+    breathe: 'Big breath at the top, hold through the rep, exhale at lockout.',
+    avoid: ['Turning it into a squat by bending the knees too much', 'Rounding the back', 'Letting the bar drift away from the legs'],
+    feel: 'A deep stretch in the hamstrings, glutes finishing the lift.',
+  },
+  leg_press: {
+    setup: ['Feet mid-platform, shoulder-width, back and hips flat against the pads.', 'Release the safeties and hold the weight with legs nearly straight (knees soft).'],
+    steps: ['Lower under control until your knees reach about 90° — no lower-back rounding off the seat.', 'Press through mid-foot back up, stopping just short of locking the knees.'],
+    breathe: 'Inhale down, exhale as you press.',
+    avoid: ['Letting the hips curl up off the seat at the bottom', 'Slamming into lockout', 'Bouncing out of the bottom'],
+    feel: 'Quads and glutes; keep tension by not fully locking out.',
+  },
+  hip_thrust: {
+    setup: ['Upper back on a bench, bar padded across the hips, feet flat and about shoulder-width.', 'Tuck the chin, ribs down, eyes forward.'],
+    steps: ['Drive through your heels and push the hips up until the torso is parallel to the floor.', 'Squeeze the glutes hard at the top for a beat — don\'t hyperextend the low back.', 'Lower under control and repeat without resting the weight fully down.'],
+    breathe: 'Exhale as you drive up, inhale on the way down.',
+    avoid: ['Arching the low back instead of finishing with the glutes', 'Pushing through the toes', 'Short range at the top'],
+    feel: 'Glutes doing all of it at the top.',
+  },
+  // --- beginner core (floor moves) ---
+  crunch: {
+    setup: ['Lie on your back, knees bent, feet flat. Hands light by your ears, elbows wide.'],
+    steps: ['Curl your shoulder blades up off the floor by contracting the abs — a small range is plenty.', 'Pause and squeeze at the top, then lower slowly with control.'],
+    breathe: 'Exhale as you curl up, inhale as you lower.',
+    avoid: ['Yanking on your neck with your hands', 'Using momentum to bounce up', 'Coming all the way up (that\'s the hip flexors)'],
+    feel: 'A hard squeeze in the top of the abs.',
+  },
+  reverse_crunch: {
+    setup: ['Lie on your back, hands by your sides or under your hips, knees bent over your hips.'],
+    steps: ['Curl your hips up toward your ribs, lifting the tailbone off the floor.', 'The lift is small and comes from the lower abs — no leg swing. Lower slowly.'],
+    breathe: 'Exhale as you curl the hips up, inhale down.',
+    avoid: ['Swinging the legs for momentum', 'Pushing off the floor with your hands', 'Rushing the lowering'],
+    feel: 'The lower abs, below the belly button.',
+  },
+  dead_bug: {
+    setup: ['Lie on your back, arms pointing straight up, knees bent 90° over the hips.', 'Press your lower back flat into the floor and keep it there the whole time.'],
+    steps: ['Slowly lower one arm overhead and the opposite leg toward the floor.', 'Stop before your back arches, then return and switch sides. Slow and controlled.'],
+    breathe: 'Exhale as you extend, inhale as you return.',
+    avoid: ['Letting the lower back arch off the floor', 'Rushing — this is a slow control drill', 'Holding your breath'],
+    feel: 'The deep abs bracing to keep your back flat.',
+  },
+  lying_leg_raise: {
+    setup: ['Lie flat, hands under your glutes for support. Start with knees slightly bent (straighten them as you get stronger).'],
+    steps: ['Raise your legs until they\'re vertical, keeping the low back pressed down.', 'Lower slowly and stop just before your back arches, then lift again.'],
+    breathe: 'Exhale up, inhale down.',
+    avoid: ['Letting the low back peel off the floor', 'Dropping the legs fast', 'Swinging'],
+    feel: 'The lower abs; stop the range where your back would arch.',
+  },
+  glute_bridge: {
+    setup: ['Lie on your back, knees bent, feet flat and hip-width, arms by your sides.'],
+    steps: ['Drive through your heels and lift the hips until your body is a straight line from knees to shoulders.', 'Squeeze the glutes and brace the abs at the top, then lower with control.'],
+    breathe: 'Exhale as you lift, inhale down.',
+    avoid: ['Arching the low back instead of squeezing the glutes', 'Pushing through the toes', 'Bouncing'],
+    feel: 'Glutes squeezing at the top, abs braced.',
+  },
+  bird_dog: {
+    setup: ['On all fours, hands under shoulders, knees under hips, back flat and neutral.'],
+    steps: ['Reach one arm forward and the opposite leg back until both are long and level with your torso.', 'Pause, keep the hips square (don\'t rotate), then return with control and switch sides.'],
+    breathe: 'Exhale as you reach out, inhale as you return.',
+    avoid: ['Letting the hips twist open', 'Arching or sagging the back', 'Rushing the reach'],
+    feel: 'The core and glutes working to keep you steady.',
+  },
+  bicycle_crunch: {
+    setup: ['Lie on your back, hands light by your ears, knees up over the hips.'],
+    steps: ['Bring one elbow toward the opposite knee while extending the other leg out.', 'Switch sides in a slow, controlled pedal — twist from the trunk, not the neck.'],
+    breathe: 'Exhale on each crunch, breathe steadily.',
+    avoid: ['Going fast and losing control', 'Pulling on the neck', 'Not fully extending the straight leg'],
+    feel: 'The abs and the obliques (sides) on each twist.',
+  },
+}
+export function coachingFor(exId) { return COACHING[exId] || null }
+
+// This week's effort intent, from the periodization phase — coaches how hard to
+// push (reps in reserve) so the user trains by the block, not to failure daily.
+export function weekEffort(phase) {
+  if (!phase) return { rirTarget: '1–2', short: 'Build week', line: 'Leave 1–2 clean reps in the tank on your last set. You do not need to hit failure.' }
+  if (phase.deload) return { rirTarget: '3–4', short: 'Deload', line: 'Deload — leave 3–4 reps in the tank on every set. Light and easy; this is where you recover and grow.' }
+  if (phase.heavy) return { rirTarget: '1', short: 'Heavy week', line: 'Heavy week — fewer reps, more load. Push the last set to about 1 rep in reserve, but keep every rep clean. Never grind an ugly rep.' }
+  return { rirTarget: '1–2', short: phase.short || 'Build week', line: 'Build week — beat last time by a rep or a little weight, and stop each set with 1–2 solid reps still in you. Failure is not the goal.' }
+}
 
 // ---- progress: recent completed sessions, for the "you're getting stronger" view --
 export function recentSessions(state, limit = 6) {
