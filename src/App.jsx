@@ -11,6 +11,7 @@ import { trainingPhase } from './periodize'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
+import { strengthGoalsFor } from './strengthGoals'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
@@ -859,7 +860,7 @@ export default function App() {
         <FoodReview state={state} dateIso={today} day={day} proteinTarget={profile.proteinTarget || PROTEIN_TARGET_DEFAULT}
           onRemove={removeFood} onReset={resetFood} onMove={moveFood} onClose={() => setFoodReview(false)} />
       )}
-      {liftsOpen && <LiftsView state={state} onClose={() => setLiftsOpen(false)} />}
+      {liftsOpen && <LiftsView state={state} today={today} onClose={() => setLiftsOpen(false)} />}
       {diaryOpen && <DiaryView state={state} profile={profile} today={today} onClose={() => setDiaryOpen(false)} />}
       {recipesOpen && <RecipeFlow state={state} dateIso={today} initialRecipeId={typeof recipesOpen === 'string' ? recipesOpen : null} onLog={logFood} onClose={() => setRecipesOpen(false)} />}
       {groceriesOpen && <GroceriesView state={state} today={today} onStock={setStock} onHaul={logHaul} onClose={() => setGroceriesOpen(false)} />}
@@ -2414,9 +2415,10 @@ function GroceriesView({ state, today, onStock, onHaul, onClose }) {
   )
 }
 
-function LiftsView({ state, onClose }) {
+function LiftsView({ state, today, onClose }) {
   const lifts = bestLifts(state)
   const hasAny = lifts.some((l) => l.best)
+  const goals = strengthGoalsFor(state, today)
   const dayLabel = { push: 'Push', pull: 'Pull', legs: 'Legs' }
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-[#f1ede4] sk-takeover-in">
@@ -2425,7 +2427,17 @@ function LiftsView({ state, onClose }) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
         </button>
         <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Your lifts</h1>
-        <p className="mt-1 text-[13px] text-[#8a8474]">Best set on each main lift, and how far it's come.</p>
+        <p className="mt-1 text-[13px] text-[#8a8474]">Your strength goals, then the best set on every main lift.</p>
+
+        {/* Strength goals — concrete targets with a deadline and a pace read */}
+        <section className="mt-5">
+          <h2 className="mb-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Goals by year-end</h2>
+          <div className="space-y-2.5">
+            {goals.map((g) => <StrengthGoalCard key={g.id} g={g} />)}
+          </div>
+        </section>
+
+        <h2 className="mb-2 mt-7 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Personal records</h2>
 
         {!hasAny ? (
           <p className="mt-6 text-[14px] leading-relaxed text-[#8a8474]">No working sets logged yet. Once you finish a session, your bench, squat, RDL, press, row and pulldown records will show here.</p>
@@ -2461,6 +2473,34 @@ function LiftsView({ state, onClose }) {
       </div>
     </div>,
     document.body
+  )
+}
+
+// One strength goal: current vs target, a pace-coloured progress bar, and the
+// coach's read on whether the recent trend gets there by the deadline.
+function StrengthGoalCard({ g }) {
+  const unit = g.unit === 'lb' ? (g.perDumbbell ? 'lb/DB' : 'lb') : g.unit
+  const tone = g.achieved ? 'bg-[#3d6a32]' : g.onPace === false ? 'bg-[#c08a4a]' : 'bg-[#3d4a32]'
+  const daysChip = g.achieved ? 'Hit' : g.daysLeft > 0 ? `${g.daysLeft}d left` : 'Due'
+  return (
+    <div className="rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-display text-[16px] font-semibold text-[#23211c]">{g.name}</p>
+          <p className="text-[11px] text-[#a39c8d]">{g.basis}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${g.achieved ? 'bg-[#dfe6cf] text-[#3d4a32]' : g.onPace === false ? 'bg-[#f0dcc9] text-[#8a5a1e]' : 'bg-[#eef0e6] text-[#6b7355]'}`}>{daysChip}</span>
+      </div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className="font-display text-[24px] font-semibold text-[#3d4a32]">{g.current}</span>
+        <span className="text-[13px] text-[#8a8474]">/ {g.target} {unit}</span>
+        {!g.achieved && g.remaining > 0 && <span className="ml-auto text-[12px] text-[#8a8474]">{g.remaining} to go</span>}
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e6dfd0]">
+        <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${g.pct}%` }} />
+      </div>
+      <p className="mt-2 text-[12px] leading-snug text-[#6b6857]">{g.line}</p>
+    </div>
   )
 }
 
