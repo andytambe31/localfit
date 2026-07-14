@@ -12,6 +12,7 @@ import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { strengthGoalsFor } from './strengthGoals'
+import { allPhotos, putPhoto, deletePhoto, compressImage } from './photos'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
@@ -131,6 +132,7 @@ export default function App() {
   const [groceriesOpen, setGroceriesOpen] = useState(false) // pantry stock + shopping list (declared before overlayOpen uses it)
   const [journeyView, setJourneyView] = useState(null) // 'skin'|'lean'|'sleep' — full journey detail page
   const [shareOpen, setShareOpen] = useState(false) // Instagram-ready daily summary card
+  const [photosOpen, setPhotosOpen] = useState(false) // progress photos + collage (IndexedDB-backed)
   const [bfOpen, setBfOpen] = useState(false) // body-fat estimator (lifted so the journey page can open it too)
   const [sleepOpen, setSleepOpen] = useState(false) // sleep correction (lifted for the journey page)
   const [booting, setBooting] = useState(true) // opening splash
@@ -875,13 +877,14 @@ export default function App() {
           tools={journeyTools(journeyView, { skinSlot, low: lowCount(state), latestBf: (state.bodyFatLog || []).length,
             onStartSkin: () => setFlow(skinSlot), onProducts: () => setManageProducts(true), onSupps: () => setManageSupps(true),
             onEstimate: () => setBfOpen(true), onLifts: () => setLiftsOpen(true), onRecipes: () => setRecipesOpen(true),
-            onGroceries: () => setGroceriesOpen(true), onSleep: () => setSleepOpen(true) })} />
+            onGroceries: () => setGroceriesOpen(true), onSleep: () => setSleepOpen(true), onPhotos: () => setPhotosOpen(true) })} />
       )}
       {bfOpen && (
         <BodyFatFlow profile={profile} onClose={() => setBfOpen(false)}
           onSave={(pct, patch) => { saveBodyFat(pct); updateProfile(patch); setBfOpen(false) }} />
       )}
       {shareOpen && <ShareCard state={state} today={today} profile={profile} onClose={() => setShareOpen(false)} />}
+      {photosOpen && <ProgressPhotos state={state} today={today} onClose={() => setPhotosOpen(false)} />}
       {sleepOpen && (
         <SleepModal current={lastSleep} onClose={() => setSleepOpen(false)}
           onSave={(sleep) => { saveSleep(sleep); setSleepOpen(false) }} />
@@ -2230,6 +2233,201 @@ function MiniSpark({ values }) {
   )
 }
 
+/* ---------- progress photos + before/after collage --------------------------
+ * You shoot in the native camera; here you SELECT today's shot and the app keeps
+ * a compressed copy in IndexedDB (never localStorage, never uploaded). Your
+ * originals stay in Photos — these are working copies for the timeline and the
+ * before/after the app stitches for the reveal.
+ * -------------------------------------------------------------------------- */
+function ProgressPhotos({ state, today, onClose }) {
+  const [photos, setPhotos] = useState(null) // null = loading; [] = none
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [viewing, setViewing] = useState(null) // {date,url}
+  const [collage, setCollage] = useState(null) // dataURL
+  const [making, setMaking] = useState(false)
+  const fileRef = useRef(null)
+  const urls = useRef([]) // object URLs to revoke on unmount
+
+  const load = useCallback(async () => {
+    try {
+      const rows = await allPhotos()
+      urls.current.forEach((u) => URL.revokeObjectURL(u))
+      urls.current = []
+      const withUrls = rows.map((r) => { const url = URL.createObjectURL(r.blob); urls.current.push(url); return { ...r, url } })
+      setPhotos(withUrls)
+    } catch (e) { setErr('Photos need on-device storage, which this browser is blocking. Try the installed app.'); setPhotos([]) }
+  }, [])
+  useEffect(() => { load(); return () => urls.current.forEach((u) => URL.revokeObjectURL(u)) }, [load])
+
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const onPick = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
+    if (!file) return
+    setBusy(true); setErr(null)
+    try {
+      const { blob, w, h } = await compressImage(file)
+      await putPhoto(today, blob, { w, h })
+      await load()
+    } catch (e2) { setErr("Couldn't save that photo — try a different one.") }
+    setBusy(false)
+  }
+
+  const removeOne = async (date) => { await deletePhoto(date); setViewing(null); await load() }
+
+  const makeCollage = async () => {
+    if (!photos || photos.length < 2) return
+    setMaking(true)
+    try {
+      const before = photos[0], after = photos[photos.length - 1]
+      const url = await buildProgressCollage(before, after, state)
+      setCollage(url)
+    } catch (e) { setErr("Couldn't build the collage.") }
+    setMaking(false)
+  }
+
+  const lastDate = photos && photos.length ? photos[photos.length - 1].date : null
+  const daysSince = lastDate ? Math.round((new Date(today + 'T00:00:00') - new Date(lastDate + 'T00:00:00')) / 86400000) : null
+  const due = photos && (photos.length === 0 || daysSince >= 7)
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <input ref={fileRef} type="file" accept="image/*" onChange={onPick} className="hidden" />
+      <div className="mx-auto max-w-xl px-5 pb-16 pt-6">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Progress photos</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Shoot in your camera, then add today's here. Kept only on this phone — your originals stay in Photos. Same pose, same light, once a week.</p>
+
+        {err && <p className="mt-4 rounded-xl border border-[#e0b4b4] bg-[#f7dede] px-3 py-2 text-[12px] text-[#8a2e2e]">{err}</p>}
+
+        {due && !err && (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#cdd4bb] bg-[#eef0e6] px-3 py-2.5 text-[12px] text-[#3d4a32]">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+            <span>{photos.length === 0 ? 'No photos yet — add your day-one shot to start the timeline.' : `It's been ${daysSince} days — time for this week's photo.`}</span>
+          </div>
+        )}
+
+        <button onClick={() => fileRef.current?.click()} disabled={busy}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8] active:scale-[0.99] disabled:opacity-50">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>
+          {busy ? 'Saving…' : lastDate === today ? "Replace today's photo" : "Add today's photo"}
+        </button>
+
+        {photos && photos.length >= 2 && (
+          <button onClick={makeCollage} disabled={making}
+            className="mt-2.5 w-full rounded-full border border-[#cdd4bb] bg-[#fbf9f3] px-6 py-3 text-[14px] font-semibold text-[#3d4a32] active:scale-[0.99] disabled:opacity-50">
+            {making ? 'Building…' : 'Create before / after'}
+          </button>
+        )}
+
+        {photos === null ? (
+          <p className="mt-8 text-center text-[13px] text-[#a39c8d]">Loading…</p>
+        ) : photos.length > 0 ? (
+          <div className="mt-6">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Your timeline · {photos.length}</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[...photos].reverse().map((p) => (
+                <button key={p.date} onClick={() => setViewing(p)} className="relative aspect-[3/4] overflow-hidden rounded-xl border border-[#e6dfd0] bg-[#e8e2d5] active:scale-[0.98]">
+                  <img src={p.url} alt={p.date} className="h-full w-full object-cover" />
+                  <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-1.5 pb-1 pt-4 text-left text-[10px] font-medium text-white">{fmtMD(p.date)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* enlarge + delete */}
+      {viewing && (
+        <div className="fixed inset-0 z-20 flex flex-col bg-black/85 fade-in" onClick={() => setViewing(null)}>
+          <div className="flex shrink-0 items-center justify-between px-5 pt-5">
+            <span className="text-[13px] font-medium text-white/80">{fmtMD(viewing.date)}</span>
+            <button onClick={() => setViewing(null)} className="rounded-full px-3 py-1.5 text-[13px] font-medium text-white/80">Close</button>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4"><img src={viewing.url} alt="" className="max-h-full max-w-full rounded-xl object-contain" /></div>
+          <div className="shrink-0 px-6 pb-8" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => removeOne(viewing.date)} className="w-full rounded-full border border-[#e0b4b4]/60 px-6 py-3 text-[14px] font-medium text-[#f0c0c0]">Delete this photo</button>
+          </div>
+        </div>
+      )}
+
+      {/* collage result — long-press to save on iOS, or screenshot */}
+      {collage && (
+        <div className="fixed inset-0 z-20 flex flex-col bg-[#1a2016] fade-in">
+          <div className="flex shrink-0 justify-end px-5 pt-5">
+            <button onClick={() => setCollage(null)} className="rounded-full px-3 py-1.5 text-[13px] font-medium text-[#9aa581]">Close</button>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-5"><img src={collage} alt="Before and after" className="max-h-full max-w-full rounded-2xl object-contain shadow-[0_20px_50px_-20px_rgba(0,0,0,0.7)]" /></div>
+          <div className="shrink-0 px-6 pb-8 text-center">
+            <button onClick={() => shareImage(collage)} className="w-full rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Share / Save</button>
+            <p className="mt-2 text-[11px] text-[#6f7857]">Or press and hold the image to save it to Photos.</p>
+          </div>
+        </div>
+      )}
+    </div>,
+    document.body,
+  )
+}
+
+// Nearest logged weight to a date (kg), or null.
+function weightNear(state, date) {
+  const wl = state.weightLog || []
+  if (!wl.length) return null
+  const t = new Date(date + 'T00:00:00').getTime()
+  let best = wl[0]
+  for (const e of wl) if (Math.abs(new Date(e.date + 'T00:00:00') - t) < Math.abs(new Date(best.date + 'T00:00:00') - t)) best = e
+  return best.kg
+}
+
+// Stitch two photos into a portrait before/after with dates + weights.
+async function buildProgressCollage(before, after, state) {
+  const load = (blob) => new Promise((res, rej) => { const i = new Image(); const u = URL.createObjectURL(blob); i.onload = () => res({ i, u }); i.onerror = () => rej(new Error('img')); i.src = u })
+  const [B, A] = await Promise.all([load(before.blob), load(after.blob)])
+  const W = 1080, H = 1350, gap = 20
+  const c = document.createElement('canvas'); c.width = W; c.height = H
+  const x = c.getContext('2d')
+  x.fillStyle = '#1a2016'; x.fillRect(0, 0, W, H)
+  x.fillStyle = '#f4f1e8'; x.font = '600 46px Georgia, "Times New Roman", serif'; x.textAlign = 'left'; x.textBaseline = 'alphabetic'; x.fillText('localfit', 46, 86)
+  x.fillStyle = '#9aa581'; x.font = '600 24px system-ui, sans-serif'; x.textAlign = 'right'; x.fillText('PROGRESS', W - 46, 82)
+  const top = 122, footH = 180, imgH = H - top - footH, colW = (W - gap * 3) / 2
+  drawCover(x, B.i, gap, top, colW, imgH)
+  drawCover(x, A.i, gap * 2 + colW, top, colW, imgH)
+  const wb = weightNear(state, before.date), wa = weightNear(state, after.date)
+  const fy = top + imgH + 54
+  x.textAlign = 'left'; x.fillStyle = '#9aa581'; x.font = '600 24px system-ui'; x.fillText(fmtMD(before.date), gap + 8, fy)
+  x.fillStyle = '#f4f1e8'; x.font = '600 36px system-ui'; if (wb != null) x.fillText(`${wb} kg`, gap + 8, fy + 44)
+  x.textAlign = 'right'; x.fillStyle = '#9aa581'; x.font = '600 24px system-ui'; x.fillText(fmtMD(after.date), W - gap - 8, fy)
+  x.fillStyle = '#f4f1e8'; x.font = '600 36px system-ui'; if (wa != null) x.fillText(`${wa} kg`, W - gap - 8, fy + 44)
+  if (wb != null && wa != null) {
+    const d = Math.round((wa - wb) * 10) / 10
+    x.textAlign = 'center'; x.fillStyle = '#dfe6cf'; x.font = '600 32px system-ui'; x.fillText(`${d < 0 ? '−' : '+'}${Math.abs(d)} kg`, W / 2, fy + 44)
+  }
+  URL.revokeObjectURL(B.u); URL.revokeObjectURL(A.u)
+  return c.toDataURL('image/jpeg', 0.92)
+}
+function drawCover(x, img, dx, dy, dw, dh) {
+  const s = Math.max(dw / img.width, dh / img.height)
+  const iw = img.width * s, ih = img.height * s
+  x.save(); x.beginPath(); x.rect(dx, dy, dw, dh); x.clip()
+  x.drawImage(img, dx + (dw - iw) / 2, dy + (dh - ih) / 2, iw, ih); x.restore()
+}
+// iOS-friendly save: Web Share with the image file if available, else download.
+async function shareImage(dataUrl) {
+  try {
+    const blob = await (await fetch(dataUrl)).blob()
+    const file = new File([blob], 'localfit-progress.jpg', { type: 'image/jpeg' })
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return }
+  } catch { /* fall through */ }
+  const a = document.createElement('a'); a.href = dataUrl; a.download = 'localfit-progress.jpg'; a.click()
+}
+
 // Format a low–high range to a step (0.5 kg, 1%). Collapses to a single number
 // when the rounded bounds match — near-term projections where the band is tight.
 function fmtRange(low, high, step) {
@@ -3417,6 +3615,7 @@ const TI = {
   lifts: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v12a2 2 0 0 0 2 2 2 2 0 0 0 2-2V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v3" /><path d="M3 10v4M21 10v4" /></svg>,
   recipes: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h13l5 5v15H3z" /><path d="M16 2v5h5M8 13h8M8 17h8M8 9h2" /></svg>,
   groceries: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h2l2.4 12.3a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L22 7H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>,
+  photos: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>,
   sleep: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>,
 }
 
@@ -3430,7 +3629,8 @@ function journeyTools(key, h) {
   ]
   if (key === 'lean') return [
     { label: h.latestBf ? 'Re-estimate body fat' : 'Estimate body fat', sub: 'Tape-measure consensus', icon: TI.bodyfat, onTap: h.onEstimate },
-    { label: 'Your lifts', sub: 'Best sets and progress', icon: TI.lifts, onTap: h.onLifts },
+    { label: 'Your lifts', sub: 'Goals and personal records', icon: TI.lifts, onTap: h.onLifts },
+    { label: 'Progress photos', sub: 'Track the change · make a before/after', icon: TI.photos, onTap: h.onPhotos },
     { label: 'Recipes', sub: 'High-protein, built for you', icon: TI.recipes, onTap: h.onRecipes },
     { label: 'Groceries', sub: h.low ? `${h.low} running low` : 'Pantry and shopping list', icon: TI.groceries, onTap: h.onGroceries },
   ]
