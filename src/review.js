@@ -146,8 +146,8 @@ export function buildReview(state, today) {
   if (loss != null && safeCeiling != null && loss > safeCeiling + 0.05) {
     verdict = 'aggressive'
     headline = 'You are cutting too hard'
-    detail = `You're dropping ~${loss.toFixed(2)} kg/wk — past the ~${safeCeiling.toFixed(2)} kg/wk that's safe for your bodyweight. That fast, the scale is coming off muscle and water, not just fat.`
-    prescription = 'Add roughly 150–250 calories a day and slow it down. You protect the muscle you train for, and you still hit the goal.'
+    detail = `You're dropping ~${loss.toFixed(2)} kg/wk — past the ~${safeCeiling.toFixed(2)} kg/wk that's safe for your bodyweight. That fast, the scale starts pulling muscle and water, not just fat.`
+    prescription = 'Protect the muscle first: hit protein every day and keep lifting heavy. If your lifts start slipping, add ~150–200 calories on training days — that\'s the signal to ease off, not the scale.'
   } else if (dc.status === 'too-fast') {
     verdict = 'fast'; headline = 'Ahead of the pace you need'
     detail = dc.detail || `Trend ~${loss?.toFixed(2)} kg/wk vs ~${dc.needWk?.toFixed(2)} needed.`
