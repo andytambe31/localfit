@@ -617,7 +617,10 @@ export default function App() {
   const skinDue = dueSummary(today, state)
   const lastSleep = lastNightSleep(state, today)
   const coach = buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, today })
-  const focus = override || coach.action?.target || null
+  // The detail card shows only when you TAP an area — the coach's own suggestion
+  // rides on the hero's CTA button instead, so the big card no longer auto-opens
+  // and duplicates the coach + the Today row.
+  const focus = override || null
   // Routines are only loggable in their window: morning 6 AM–12 PM, evening 6 PM–12 AM.
   const inAmWindow = hour >= 6 && hour < 12
   const inPmWindow = hour >= 18
@@ -676,19 +679,38 @@ export default function App() {
   const yogaDidToday = yogaDone(day)
   const yogaWeek = yogaSessionsInWindow(state.days || {}, today, 7)
   const yogaTarget = profile.yogaTargetPerWeek || 2
-  if (yogaDidToday || trainCall.rest || yogaDue(state, today)) {
+  // Only on rest days (when they're the point) or once done today — otherwise a
+  // training day's thread stays short and about the lift, not padded with cards.
+  if (yogaDidToday || trainCall.rest) {
     areas.push({ id: 'yoga', label: 'Mobility', done: yogaDidToday, attn: trainCall.rest && !yogaDidToday ? 'attention' : 'idle',
       sub: yogaDidToday ? 'Session done — recovery banked' : trainCall.rest ? 'Rest day — the best day for a full flow' : `${yogaWeek} of ${yogaTarget} sessions this week` })
   }
   const cardioWeek = cardioMinutesInWindow(state.days || {}, today, 7)
   const cardioTarget = profile.cardioTargetPerWeek || 150
   const cardioHit = cardioWeek >= cardioTarget
-  if (cardioHit || cardioDue(state, today)) {
+  if (cardioHit || trainCall.rest) {
     areas.push({ id: 'cardio', label: 'Cardio', done: cardioHit, attn: trainCall.rest && !cardioHit ? 'attention' : 'idle',
       sub: cardioHit ? `${cardioWeek} min Zone 2 — target hit` : `${cardioWeek} of ${cardioTarget} min Zone 2 this week` })
   }
 
   const setWater = (delta) => patch({ water: Math.max(0, (day.water || 0) + delta) })
+
+  // The coach hero's action button — same routing as tapping that Today row, so
+  // the hero is self-sufficient (states the move AND does it) without the big
+  // auto-opening detail card underneath.
+  const doArea = (t) => {
+    if (t === 'skin') setFlow(skinSlot)
+    else if (t === 'hair') setHairFlow(hairSlot)
+    else if (t === 'movement' && !trainCall.rest && !trainedToday) setTraining(true)
+    else setOverride(t)
+  }
+  const heroCTA = coach.action?.target ? ({
+    skin: `Start ${slotWord(skinSlot).toLowerCase()} skincare`,
+    hair: 'Do your haircare',
+    movement: trainCall.rest ? 'Mark your steps' : trainedToday ? 'Review your session' : `Start ${trainCall.label} session`,
+    diet: 'Log your food',
+    water: 'Log water',
+  }[coach.action.target]) : null
 
   return (
     <>
@@ -726,11 +748,18 @@ export default function App() {
       )}
       {preTrip && <PreTripBanner vac={preTrip} />}
 
-      {/* The coach speaks — directive, one thing at a time */}
+      {/* The coach speaks — directive, one thing at a time, with a button to do it */}
       <section className="rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
         <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#9aa581]">{coach.eyebrow}</p>
         <h1 className="font-display mt-3 text-[26px] font-semibold leading-[1.16] text-[#f4f1e8]">{coach.headline}</h1>
         <p className="mt-3 text-[15px] leading-relaxed text-[#cfccba]">{coach.support}</p>
+        {heroCTA && (
+          <button onClick={() => doArea(coach.action.target)}
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#3d4a32] px-5 py-2.5 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.98]">
+            {heroCTA}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+        )}
       </section>
 
       <button onClick={() => setView('review')}
@@ -788,14 +817,25 @@ export default function App() {
         </div>
       </div>
 
-      {/* Lifts / Recipes / Groceries moved onto the Lean & Strong journey page;
-          Diary lives in the header. Kept the home to today + journeys. */}
+      {/* Quick access to the tools that live off the home — one tap each */}
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        {[
+          { label: 'Lifts', on: () => setLiftsOpen(true), icon: <path d="M6 9V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v12a2 2 0 0 0 2 2 2 2 0 0 0 2-2V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v3M3 10v4M21 10v4" /> },
+          { label: 'Recipes', on: () => setRecipesOpen(true), icon: <path d="M3 2h13l5 5v15H3zM16 2v5h5M8 13h8M8 17h8M8 9h2" /> },
+          { label: 'Groceries', on: () => setGroceriesOpen(true), icon: <><path d="M3 3h2l2.4 12.3a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L22 7H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></> },
+          { label: 'Diary', on: () => setDiaryOpen(true), icon: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></> },
+        ].map((q) => (
+          <button key={q.label} onClick={q.on}
+            className="flex flex-col items-center gap-1 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-1 py-2.5 text-[11px] font-medium text-[#4a463c] active:scale-[0.98]">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{q.icon}</svg>
+            {q.label}{q.label === 'Groceries' && lowCount(state) ? <span className="text-[#a3894a]"> · {lowCount(state)}</span> : ''}
+          </button>
+        ))}
+      </div>
 
-      {/* Today's Plate card hidden per request — restore by uncommenting the line below */}
-      {/* <PlateCard state={state} today={today} onOpen={(id) => setRecipesOpen(id)} onBrowse={() => setRecipesOpen(true)} /> */}
-
-      <div key={focus || 'none'} className="focus-swap mt-5">
-        {focus ? (
+      {/* The detail card only when you tap an area — otherwise the home stays short */}
+      {focus && (
+        <div key={focus} className="focus-swap mt-5">
           <FocusCard
             focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
             state={state} dateIso={today}
@@ -809,13 +849,8 @@ export default function App() {
             onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
             onWater={setWater}
             onWeight={saveWeight} />
-        ) : (
-          <div className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-6 text-center">
-            <p className="font-display text-lg text-[#23211c]">Nothing for you right now.</p>
-            <p className="mt-1 text-sm text-[#8a8474]">You’re on top of it. Come back when it’s time for the next move.</p>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <GoalsSection state={state} profile={profile} today={today} onOpenJourney={setJourneyView} onEstimate={() => setBfOpen(true)} onManageSupps={() => setManageSupps(true)} />
 
@@ -3189,6 +3224,27 @@ function activeName(id) {
   if (id === 'azelaic') return 'Azelaic acid tonight'
   return null
 }
+// When nothing is urgent, the coach shouldn't just say "on track" or nag protein
+// — it rotates a real optimization tip across the levers that actually move the
+// needle (strength, cardio/longevity, sleep, diet quality, protein timing),
+// varied by the day so it isn't one-note.
+function coachTip(state, today, profile) {
+  const tips = []
+  try {
+    const pull = strengthGoalsFor(state, today).find((g) => g.id === 'pull_up')
+    if (pull && !pull.achieved && pull.current > 0)
+      tips.push({ headline: `${pull.current} of ${pull.target} pull-ups.`, support: 'Add two sets of slow negatives when you train — reps climb fast, and it beats another isolation for your back.' })
+  } catch { /* no goals yet */ }
+  const cw = cardioMinutesInWindow(state.days || {}, today, 7)
+  if (cw < (profile.cardioTargetPerWeek || 150))
+    tips.push({ headline: 'Build the engine today.', support: 'Twenty to thirty easy minutes — a Zone-2 walk or ride. Cardio fitness is one of the strongest predictors of a long life, and it keeps the fat coming off.' })
+  tips.push({ headline: 'Protect tonight’s sleep.', support: `Lights out by ${clockGoal(profile.bedGoal)} — sleep is when the fat you're chasing actually burns and the muscle repairs. Miss it and hunger spikes tomorrow.` })
+  tips.push({ headline: 'Eat the rainbow today.', support: 'A vegetable or fruit at every meal — the fibre keeps you full on fewer calories and does more for your health than any supplement.' })
+  tips.push({ headline: 'Spread your protein.', support: 'Aim for ~30g at each meal instead of loading it all at dinner — even distribution is what actually holds muscle while you cut.' })
+  const idx = Math.floor(new Date(today + 'T00:00:00').getTime() / 86400000) % tips.length
+  return tips[idx]
+}
+
 function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, today }) {
   const r = day.routines, w = day.workout
   skinDue = skinDue || { amPending: !r.skincareAM, pmPending: !r.skincarePM, tonightActive: null, shaveDue: false }
@@ -3241,7 +3297,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
     const sleepTargetMin = (profile.sleepTargetHours || 7) * 60
     if (lastSleep && lastSleep.confident && lastSleep.minutes < sleepTargetMin)
       return { eyebrow, headline: `Good start. Keep moving.`, support: `Short night (${fmtDuration(lastSleep.minutes)}) — aim earlier tonight. Steps and water are going; keep at it.`, action: { target: 'movement' } }
-    return { eyebrow, headline: `Good start. Keep moving.`, support: `Steps ticking, water going. The day is yours to win.`, action: null }
+    { const tip = coachTip(state, today, profile); return { eyebrow, headline: tip.headline, support: tip.support, action: null } }
   }
 
   if (phase === 'midday') {
@@ -3249,7 +3305,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
     if (water < expectedWater(hour, wTarget)) return { eyebrow, headline: `You're at ${water} of ${wTarget} glasses. Drink up.`, support: `Behind on water for midday. Get a glass in before you forget.`, action: { target: 'water' } }
     if (tcall && (tcall.focus === 'train' || tcall.focus === 'both')) return move(tcall)
     if (!stepsIn) return { eyebrow, headline: `Your 10k isn't in yet. Get on your feet.`, support: `Ten minutes of walking now beats cramming it after dark. Mark it done once you've hit it.`, action: { target: 'movement' } }
-    return { eyebrow, headline: `Strong midday. Hold the line.`, support: `On track. Stay sharp through the afternoon.`, action: null }
+    { const tip = coachTip(state, today, profile); return { eyebrow, headline: tip.headline, support: tip.support, action: null } }
   }
 
   // evening + night (17–24): movement decision comes from the engine.
@@ -3260,7 +3316,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
   if (water < wTarget && hour < 22) return { eyebrow, headline: `Finish your water — ${water} of ${wTarget}.`, support: `Don't go to bed short on hydration. Knock out the rest now.`, action: { target: 'water' } }
   if (!r.skincarePM && skinDue.pmPending) return skincarePM()
   if (hour >= 21) return { eyebrow, headline: `That's a full day. Be in bed soon.`, support: `Recovery is non-negotiable. Weigh in first thing tomorrow — we track the trend, not the noise.`, action: null }
-  return { eyebrow, headline: `You've handled today.`, support: `Training, food, water, skin — all tended. This is what consistency looks like.`, action: null }
+  { const tip = coachTip(state, today, profile); return { eyebrow, headline: tip.headline, support: tip.support, action: null } }
 }
 function fmtTime(h, m) { const ap = h < 12 ? 'AM' : 'PM'; const hr = ((h + 11) % 12) + 1; return `${hr}:${String(m).padStart(2, '0')} ${ap}` }
 
