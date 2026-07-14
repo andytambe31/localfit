@@ -130,6 +130,7 @@ export default function App() {
   const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
   const [groceriesOpen, setGroceriesOpen] = useState(false) // pantry stock + shopping list (declared before overlayOpen uses it)
   const [journeyView, setJourneyView] = useState(null) // 'skin'|'lean'|'sleep' — full journey detail page
+  const [shareOpen, setShareOpen] = useState(false) // Instagram-ready daily summary card
   const [bfOpen, setBfOpen] = useState(false) // body-fat estimator (lifted so the journey page can open it too)
   const [sleepOpen, setSleepOpen] = useState(false) // sleep correction (lifted for the journey page)
   const [booting, setBooting] = useState(true) // opening splash
@@ -694,6 +695,9 @@ export default function App() {
       <div className="mb-3 flex items-baseline justify-between">
         <span className="font-display text-lg font-semibold tracking-tight text-[#20201d]">localfit</span>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShareOpen(true)} aria-label="Share today" className="grid h-7 w-7 place-items-center rounded-full text-[#7d8a5f] active:opacity-70">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><path d="M16 6l-4-4-4 4M12 2v13" /></svg>
+          </button>
           <button onClick={() => setDiaryOpen(true)} aria-label="Diary" className="grid h-7 w-7 place-items-center rounded-full text-[#7d8a5f] active:opacity-70">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
           </button>
@@ -877,6 +881,7 @@ export default function App() {
         <BodyFatFlow profile={profile} onClose={() => setBfOpen(false)}
           onSave={(pct, patch) => { saveBodyFat(pct); updateProfile(patch); setBfOpen(false) }} />
       )}
+      {shareOpen && <ShareCard state={state} today={today} profile={profile} onClose={() => setShareOpen(false)} />}
       {sleepOpen && (
         <SleepModal current={lastSleep} onClose={() => setSleepOpen(false)}
           onSave={(sleep) => { saveSleep(sleep); setSleepOpen(false) }} />
@@ -2066,6 +2071,165 @@ function SuppsModal({ profile, onClose, onSave }) {
 // where the body-fat goal is, whether the pace is right (health-aware), what's
 // been earned, where it's slipping, and how to pace from here. Pure read; every
 // number comes from buildReview so the review never disagrees with the rings.
+/* ---------- daily share card: an Instagram-ready summary of the day ----------
+ * Two full-screen "slides" you screenshot: a plain-language story anyone gets,
+ * and a stats slide for the fitness crowd. Dark + branded so a series looks
+ * consistent. All derived from data already on the device — nothing uploaded.
+ * -------------------------------------------------------------------------- */
+function ShareCard({ state, today, profile, onClose }) {
+  const [slide, setSlide] = useState(0)
+  const [closing, setClosing] = useState(false)
+  const leave = () => { if (closing) return; setClosing(true); setTimeout(onClose, 220) }
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const R = buildReview(state, today)
+  const bf = R.bodyFat, day = state.days?.[today] || {}
+  const totals = dayTotals(day)
+  const trained = day.workout?.session?.status === 'done'
+  const trainLabel = day.workout?.type || day.workout?.session?.label
+  const stepsDone = stepsHit(day, profile.stepTarget || 10000) || day.stepsDone
+  const sleep = sleepScore(state, today, profile)
+  const goals = strengthGoalsFor(state, today)
+  const pull = goals.find((g) => g.id === 'pull_up')
+  const wl = [...(state.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+
+  // Plain-language "what I did today"
+  const did = []
+  if (trained) did.push(trainLabel ? `Trained · ${trainLabel}` : 'Trained')
+  if (stepsDone) did.push('Walked my 10k')
+  if (day.dietClosed) did.push('Ate on plan')
+  else if (totals.protein >= (profile.proteinTarget || PROTEIN_TARGET_DEFAULT) * 0.7) did.push(`${Math.round(totals.protein)}g protein`)
+  if (sleep != null && sleep >= 7) did.push('Slept well')
+  if (day.routines?.skincareAM || day.routines?.skincarePM) did.push('Skin dialled')
+
+  return createPortal(
+    <div className={`fixed inset-0 z-50 flex flex-col overflow-hidden overscroll-none bg-[#1a2016] ${closing ? 'sk-takeover-out' : 'sk-takeover-in'}`}>
+      <div className="flex shrink-0 items-center justify-between px-5 pt-5">
+        <div className="flex gap-1.5">
+          {[0, 1].map((n) => (
+            <button key={n} onClick={() => setSlide(n)} aria-label={`Slide ${n + 1}`}
+              className={`h-1.5 rounded-full transition-all ${slide === n ? 'w-6 bg-[#f4f1e8]' : 'w-1.5 bg-[#4a5238]'}`} />
+          ))}
+        </div>
+        <button onClick={leave} className="rounded-full px-3 py-1.5 text-[13px] font-medium text-[#9aa581]">Close</button>
+      </div>
+
+      <div className="relative mx-auto flex w-full min-h-0 max-w-md flex-1 flex-col">
+        {slide === 0 ? <ShareStory bf={bf} R={R} wl={wl} did={did} /> : <ShareStats bf={bf} R={R} totals={totals} sleep={sleep} pull={pull} profile={profile} day={day} stepsDone={stepsDone} />}
+        {/* edge taps to flip slides */}
+        <div onClick={() => setSlide(0)} className="absolute inset-y-0 left-0 z-10 w-[22%]" aria-label="Story" />
+        <div onClick={() => setSlide(1)} className="absolute inset-y-0 right-0 z-10 w-[22%]" aria-label="Stats" />
+      </div>
+
+      <div className="shrink-0 px-6 pb-7 pt-2 text-center">
+        <p className="text-[11px] text-[#6f7857]">Screenshot to post{slide === 0 ? ' · tap right for the stats slide' : ' · tap left for the story'}</p>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// Slide 1 — the human story: big weight, the drop, a trend line, plain wins.
+function ShareStory({ bf, R, wl, did }) {
+  const lost = bf.weightLost
+  return (
+    <div className="flex min-h-0 flex-1 flex-col justify-center px-8 fade-in">
+      <div className="flex items-baseline justify-between">
+        <span className="font-display text-[18px] font-semibold tracking-tight text-[#f4f1e8]">localfit</span>
+        <span className="text-[11px] uppercase tracking-[0.2em] text-[#9aa581]">Day {R.daysTracked}</span>
+      </div>
+
+      {bf.weightNow != null ? (
+        <div className="mt-8">
+          <p className="text-[12px] uppercase tracking-[0.22em] text-[#9aa581]">Where I'm at</p>
+          <p className="font-display mt-2 text-[64px] font-semibold leading-none text-[#f4f1e8]">{bf.weightNow}<span className="text-[26px] text-[#9aa581]"> kg</span></p>
+          {lost != null && lost > 0 && (
+            <p className="mt-3 text-[17px] text-[#dfe6cf]">Down <span className="font-semibold text-[#f4f1e8]">{lost} kg</span> since I started.</p>
+          )}
+          {wl.length >= 3 && <MiniSpark values={wl.map((e) => e.kg)} />}
+        </div>
+      ) : (
+        <div className="mt-8">
+          <p className="font-display text-[40px] font-semibold leading-tight text-[#f4f1e8]">Day {R.daysTracked} of the work.</p>
+        </div>
+      )}
+
+      {did.length > 0 && (
+        <div className="mt-9">
+          <p className="text-[12px] uppercase tracking-[0.22em] text-[#9aa581]">Today I</p>
+          <div className="mt-3 flex flex-col gap-2">
+            {did.map((d, i) => (
+              <div key={i} className="flex items-center gap-2.5">
+                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#3d4a32]">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                </span>
+                <span className="text-[16px] text-[#eef0e6]">{d}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {R.momentum.streak >= 2 && (
+        <p className="mt-9 text-[15px] leading-relaxed text-[#9aa581]">
+          <span className="font-semibold text-[#dfe6cf]">{R.momentum.streak} days</span> in a row of doing the little things right.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// Slide 2 — the stats slide for the fitness crowd.
+function ShareStats({ bf, R, totals, sleep, pull, profile, day, stepsDone }) {
+  const loss = R.pacing.lossPerWk
+  const tiles = [
+    bf.has && { k: 'Body fat', v: `${bf.now}%`, s: `${bf.target}% goal` },
+    loss != null && { k: 'Weekly rate', v: `${loss.toFixed(2)}`, s: 'kg / week' },
+    { k: 'Protein', v: `${Math.round(totals.protein)}g`, s: `${profile.proteinTarget || PROTEIN_TARGET_DEFAULT}g target` },
+    totals.kcal > 0 && { k: 'Calories', v: `${totals.kcal}`, s: 'today' },
+    sleep != null && { k: 'Sleep', v: `${sleep}/10`, s: 'last night' },
+    { k: 'Steps', v: stepsDone ? '10k+' : '—', s: 'daily floor' },
+    pull && pull.current > 0 && { k: 'Pull-ups', v: `${pull.current}`, s: `${pull.target} goal` },
+    bf.weightLost != null && bf.weightLost !== 0 && { k: 'Total lost', v: `${bf.weightLost}kg`, s: `${R.daysTracked} days` },
+  ].filter(Boolean).slice(0, 6)
+  return (
+    <div className="flex min-h-0 flex-1 flex-col justify-center px-8 fade-in">
+      <div className="flex items-baseline justify-between">
+        <span className="font-display text-[18px] font-semibold tracking-tight text-[#f4f1e8]">localfit</span>
+        <span className="text-[11px] uppercase tracking-[0.2em] text-[#9aa581]">The numbers</span>
+      </div>
+      <div className="mt-7 grid grid-cols-2 gap-3">
+        {tiles.map((t) => (
+          <div key={t.k} className="rounded-2xl border border-[#3a4230] bg-[#232a1c] px-4 py-4">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-[#9aa581]">{t.k}</p>
+            <p className="font-display mt-1.5 text-[30px] font-semibold leading-none text-[#f4f1e8]">{t.v}</p>
+            <p className="mt-1 text-[11px] text-[#7d8a5f]">{t.s}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-6 text-[12px] leading-relaxed text-[#7d8a5f]">Cutting body fat while holding strength — tracked on localfit, no wearable.</p>
+    </div>
+  )
+}
+
+// A tiny inline weight sparkline for the story slide.
+function MiniSpark({ values }) {
+  const n = values.length
+  const min = Math.min(...values), max = Math.max(...values)
+  const span = max - min || 1
+  const w = 260, h = 44
+  const pts = values.map((v, i) => `${(i / (n - 1)) * w},${h - ((v - min) / span) * h}`).join(' ')
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height="44" className="mt-5 overflow-visible" preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke="#9aa581" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={w} cy={h - ((values[n - 1] - min) / span) * h} r="3.5" fill="#f4f1e8" />
+    </svg>
+  )
+}
+
 // Format a low–high range to a step (0.5 kg, 1%). Collapses to a single number
 // when the rounded bounds match — near-term projections where the band is tight.
 function fmtRange(low, high, step) {
