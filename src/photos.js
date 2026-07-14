@@ -4,46 +4,62 @@
  * quota failures that lose real data). Everything stays on the device; nothing
  * is ever uploaded. The user's originals remain in their Photos library — these
  * are just working copies for the timeline and the before/after collage.
+ *
+ * Each shot is tagged with an ANGLE (front / side / back) so whole-body change
+ * can be compared like-for-like — the side profile is where belly fat reads
+ * most dramatically. Keyed by `${date}__${pose}`.
  * -------------------------------------------------------------------------- */
 const DB_NAME = 'localfit-photos'
-const STORE = 'progress'
-const VERSION = 1
+const STORE = 'shots'
+const VERSION = 2
+
+export const POSES = [
+  { id: 'front', label: 'Front' },
+  { id: 'side', label: 'Side' },
+  { id: 'back', label: 'Back' },
+]
 
 function openDB() {
   return new Promise((resolve, reject) => {
     if (!('indexedDB' in window)) return reject(new Error('no-indexeddb'))
     const req = indexedDB.open(DB_NAME, VERSION)
     req.onupgradeneeded = () => {
-      const db = req.result
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'date' })
+      const db = req.result, tx = req.transaction
+      if (!db.objectStoreNames.contains(STORE)) {
+        const shots = db.createObjectStore(STORE, { keyPath: 'id' })
+        shots.createIndex('date', 'date')
+        // Migrate v1 records (keyed by date, no angle) → treat each as a front shot.
+        if (db.objectStoreNames.contains('progress')) {
+          tx.objectStore('progress').openCursor().onsuccess = (ev) => {
+            const cur = ev.target.result
+            if (cur) {
+              const r = cur.value
+              shots.put({ id: `${r.date}__front`, date: r.date, pose: 'front', blob: r.blob, ts: r.ts || 0, w: r.w, h: r.h })
+              cur.continue()
+            } else {
+              db.deleteObjectStore('progress')
+            }
+          }
+        }
+      }
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
 }
 
-// Store (or replace) the photo for a given ISO date. `blob` is the compressed
-// image; meta carries width/height for aspect handling.
-export async function putPhoto(date, blob, meta = {}) {
+// Store (or replace) the photo for a date + angle.
+export async function putPhoto(date, pose, blob, meta = {}) {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).put({ date, blob, ts: Date.now(), ...meta })
+    tx.objectStore(STORE).put({ id: `${date}__${pose}`, date, pose, blob, ts: Date.now(), ...meta })
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
 }
 
-export async function getPhoto(date) {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const rq = db.transaction(STORE, 'readonly').objectStore(STORE).get(date)
-    rq.onsuccess = () => resolve(rq.result || null)
-    rq.onerror = () => reject(rq.error)
-  })
-}
-
-// All photos, ascending by date.
+// All shots, ascending by date.
 export async function allPhotos() {
   const db = await openDB()
   return new Promise((resolve, reject) => {
@@ -53,11 +69,11 @@ export async function allPhotos() {
   })
 }
 
-export async function deletePhoto(date) {
+export async function deletePhoto(id) {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).delete(date)
+    tx.objectStore(STORE).delete(id)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })

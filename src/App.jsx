@@ -12,7 +12,7 @@ import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { strengthGoalsFor } from './strengthGoals'
-import { allPhotos, putPhoto, deletePhoto, compressImage } from './photos'
+import { allPhotos, putPhoto, deletePhoto, compressImage, POSES } from './photos'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
@@ -2239,11 +2239,23 @@ function MiniSpark({ values }) {
  * originals stay in Photos — these are working copies for the timeline and the
  * before/after the app stitches for the reveal.
  * -------------------------------------------------------------------------- */
+// One labelled rule in the photo guide.
+function PhotoRule({ label, children }) {
+  return (
+    <div className="flex gap-2.5">
+      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#3d4a32]" />
+      <p><span className="font-semibold text-[#23211c]">{label}.</span> {children}</p>
+    </div>
+  )
+}
+
 function ProgressPhotos({ state, today, onClose }) {
   const [photos, setPhotos] = useState(null) // null = loading; [] = none
+  const [pose, setPose] = useState('front')
+  const [showGuide, setShowGuide] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const [viewing, setViewing] = useState(null) // {date,url}
+  const [viewing, setViewing] = useState(null) // {id,date,pose,url}
   const [collage, setCollage] = useState(null) // dataURL
   const [making, setMaking] = useState(false)
   const fileRef = useRef(null)
@@ -2272,20 +2284,26 @@ function ProgressPhotos({ state, today, onClose }) {
     setBusy(true); setErr(null)
     try {
       const { blob, w, h } = await compressImage(file)
-      await putPhoto(today, blob, { w, h })
+      await putPhoto(today, pose, blob, { w, h })
       await load()
     } catch (e2) { setErr("Couldn't save that photo — try a different one.") }
     setBusy(false)
   }
 
-  const removeOne = async (date) => { await deletePhoto(date); setViewing(null); await load() }
+  const removeOne = async (id) => { await deletePhoto(id); setViewing(null); await load() }
+
+  const byPose = {}
+  POSES.forEach((p) => { byPose[p.id] = [] })
+  ;(photos || []).forEach((ph) => { (byPose[ph.pose] || (byPose[ph.pose] = [])).push(ph) })
+  const poseShots = byPose[pose] || []
+  const poseLabel = POSES.find((p) => p.id === pose)?.label || 'Front'
+  const todayHasPose = poseShots.some((s) => s.date === today)
 
   const makeCollage = async () => {
-    if (!photos || photos.length < 2) return
+    if (poseShots.length < 2) return
     setMaking(true)
     try {
-      const before = photos[0], after = photos[photos.length - 1]
-      const url = await buildProgressCollage(before, after, state)
+      const url = await buildProgressCollage(poseShots[0], poseShots[poseShots.length - 1], state, poseLabel)
       setCollage(url)
     } catch (e) { setErr("Couldn't build the collage.") }
     setMaking(false)
@@ -2303,43 +2321,83 @@ function ProgressPhotos({ state, today, onClose }) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
         </button>
         <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Progress photos</h1>
-        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Shoot in your camera, then add today's here. Kept only on this phone — your originals stay in Photos. Same pose, same light, once a week.</p>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Three angles a week — front, side, back — shot the same way each time. Kept only on this phone; your originals stay in Photos.</p>
 
         {err && <p className="mt-4 rounded-xl border border-[#e0b4b4] bg-[#f7dede] px-3 py-2 text-[12px] text-[#8a2e2e]">{err}</p>}
+
+        {/* How to take them — the whole game is consistency */}
+        <div className="mt-4 overflow-hidden rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3]">
+          <button onClick={() => setShowGuide((v) => !v)} className="flex w-full items-center justify-between px-4 py-3 text-left">
+            <span className="text-[13px] font-semibold text-[#23211c]">How to take them</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9a9482" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition ${showGuide ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          {showGuide && (
+            <div className="space-y-3 px-4 pb-4 pt-0.5 text-[13px] leading-snug text-[#4a463c]">
+              <PhotoRule label="Same everything">Same spot and wall, same natural light, same time — morning, before eating or drinking, is the most consistent. Consistency is what makes the change obvious.</PhotoRule>
+              <PhotoRule label="Full body in frame">Phone upright, propped at hip-to-chest height about 2 metres away. Frame from just above your head to below your knees so your thighs are in shot. Use the 3-second timer.</PhotoRule>
+              <PhotoRule label="Shorts, relaxed">Topless, same shorts each time. Stand relaxed and natural — don't flex or suck in. The honest, relaxed shot is where the real change shows.</PhotoRule>
+              <PhotoRule label="Three angles, every time">
+                <span className="font-semibold text-[#3d4a32]">Front</span> — arms slightly off your sides so waist and arms show (chest, belly, arms). <span className="font-semibold text-[#3d4a32]">Side</span> — turn 90°, arms relaxed; this profile is where belly fat reads most dramatically. <span className="font-semibold text-[#3d4a32]">Back</span> — lower back and overall leanness.
+              </PhotoRule>
+              <PhotoRule label="Lock the pose">Mark your feet on the floor (or line up with a tile) so you stand in the exact same place and pose each week.</PhotoRule>
+            </div>
+          )}
+        </div>
 
         {due && !err && (
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#cdd4bb] bg-[#eef0e6] px-3 py-2.5 text-[12px] text-[#3d4a32]">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
-            <span>{photos.length === 0 ? 'No photos yet — add your day-one shot to start the timeline.' : `It's been ${daysSince} days — time for this week's photo.`}</span>
+            <span>{photos.length === 0 ? 'No photos yet — add your day-one set (front, side, back) to start.' : `It's been ${daysSince} days — time for this week's set.`}</span>
           </div>
         )}
 
+        {/* angle selector */}
+        <div className="mt-4 flex gap-1.5 rounded-full bg-[#e7e1d4] p-1">
+          {POSES.map((p) => {
+            const has = (byPose[p.id] || []).length
+            return (
+              <button key={p.id} onClick={() => setPose(p.id)}
+                className={`flex-1 rounded-full px-3 py-2 text-[13px] font-semibold transition ${pose === p.id ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'text-[#6b6857]'}`}>
+                {p.label}{has ? <span className={`ml-1 text-[11px] ${pose === p.id ? 'text-[#9aa581]' : 'text-[#a39c8d]'}`}>{has}</span> : ''}
+              </button>
+            )
+          })}
+        </div>
+
         <button onClick={() => fileRef.current?.click()} disabled={busy}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8] active:scale-[0.99] disabled:opacity-50">
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8] active:scale-[0.99] disabled:opacity-50">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>
-          {busy ? 'Saving…' : lastDate === today ? "Replace today's photo" : "Add today's photo"}
+          {busy ? 'Saving…' : `${todayHasPose ? 'Replace' : 'Add'} today's ${poseLabel.toLowerCase()} photo`}
         </button>
 
-        {photos && photos.length >= 2 && (
+        {poseShots.length >= 2 && (
           <button onClick={makeCollage} disabled={making}
             className="mt-2.5 w-full rounded-full border border-[#cdd4bb] bg-[#fbf9f3] px-6 py-3 text-[14px] font-semibold text-[#3d4a32] active:scale-[0.99] disabled:opacity-50">
-            {making ? 'Building…' : 'Create before / after'}
+            {making ? 'Building…' : `${poseLabel} before / after`}
           </button>
         )}
 
         {photos === null ? (
           <p className="mt-8 text-center text-[13px] text-[#a39c8d]">Loading…</p>
         ) : photos.length > 0 ? (
-          <div className="mt-6">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">Your timeline · {photos.length}</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[...photos].reverse().map((p) => (
-                <button key={p.date} onClick={() => setViewing(p)} className="relative aspect-[3/4] overflow-hidden rounded-xl border border-[#e6dfd0] bg-[#e8e2d5] active:scale-[0.98]">
-                  <img src={p.url} alt={p.date} className="h-full w-full object-cover" />
-                  <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-1.5 pb-1 pt-4 text-left text-[10px] font-medium text-white">{fmtMD(p.date)}</span>
-                </button>
-              ))}
-            </div>
+          <div className="mt-6 space-y-5">
+            {POSES.map((p) => {
+              const shots = byPose[p.id] || []
+              if (!shots.length) return null
+              return (
+                <div key={p.id}>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">{p.label} · {shots.length}</p>
+                  <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                    {[...shots].reverse().map((ph) => (
+                      <button key={ph.id} onClick={() => setViewing(ph)} className="relative aspect-[3/4] w-[30%] shrink-0 overflow-hidden rounded-xl border border-[#e6dfd0] bg-[#e8e2d5] active:scale-[0.98]">
+                        <img src={ph.url} alt={ph.date} className="h-full w-full object-cover" />
+                        <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-1.5 pb-1 pt-4 text-left text-[10px] font-medium text-white">{fmtMD(ph.date)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         ) : null}
       </div>
@@ -2348,12 +2406,12 @@ function ProgressPhotos({ state, today, onClose }) {
       {viewing && (
         <div className="fixed inset-0 z-20 flex flex-col bg-black/85 fade-in" onClick={() => setViewing(null)}>
           <div className="flex shrink-0 items-center justify-between px-5 pt-5">
-            <span className="text-[13px] font-medium text-white/80">{fmtMD(viewing.date)}</span>
+            <span className="text-[13px] font-medium text-white/80">{POSES.find((p) => p.id === viewing.pose)?.label} · {fmtMD(viewing.date)}</span>
             <button onClick={() => setViewing(null)} className="rounded-full px-3 py-1.5 text-[13px] font-medium text-white/80">Close</button>
           </div>
           <div className="flex min-h-0 flex-1 items-center justify-center p-4"><img src={viewing.url} alt="" className="max-h-full max-w-full rounded-xl object-contain" /></div>
           <div className="shrink-0 px-6 pb-8" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => removeOne(viewing.date)} className="w-full rounded-full border border-[#e0b4b4]/60 px-6 py-3 text-[14px] font-medium text-[#f0c0c0]">Delete this photo</button>
+            <button onClick={() => removeOne(viewing.id)} className="w-full rounded-full border border-[#e0b4b4]/60 px-6 py-3 text-[14px] font-medium text-[#f0c0c0]">Delete this photo</button>
           </div>
         </div>
       )}
@@ -2387,7 +2445,7 @@ function weightNear(state, date) {
 }
 
 // Stitch two photos into a portrait before/after with dates + weights.
-async function buildProgressCollage(before, after, state) {
+async function buildProgressCollage(before, after, state, poseLabel = '') {
   const load = (blob) => new Promise((res, rej) => { const i = new Image(); const u = URL.createObjectURL(blob); i.onload = () => res({ i, u }); i.onerror = () => rej(new Error('img')); i.src = u })
   const [B, A] = await Promise.all([load(before.blob), load(after.blob)])
   const W = 1080, H = 1350, gap = 20
@@ -2395,7 +2453,7 @@ async function buildProgressCollage(before, after, state) {
   const x = c.getContext('2d')
   x.fillStyle = '#1a2016'; x.fillRect(0, 0, W, H)
   x.fillStyle = '#f4f1e8'; x.font = '600 46px Georgia, "Times New Roman", serif'; x.textAlign = 'left'; x.textBaseline = 'alphabetic'; x.fillText('localfit', 46, 86)
-  x.fillStyle = '#9aa581'; x.font = '600 24px system-ui, sans-serif'; x.textAlign = 'right'; x.fillText('PROGRESS', W - 46, 82)
+  x.fillStyle = '#9aa581'; x.font = '600 24px system-ui, sans-serif'; x.textAlign = 'right'; x.fillText(`PROGRESS${poseLabel ? ` · ${poseLabel.toUpperCase()}` : ''}`, W - 46, 82)
   const top = 122, footH = 180, imgH = H - top - footH, colW = (W - gap * 3) / 2
   drawCover(x, B.i, gap, top, colW, imgH)
   drawCover(x, A.i, gap * 2 + colW, top, colW, imgH)
