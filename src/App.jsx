@@ -704,10 +704,14 @@ export default function App() {
     else if (t === 'movement' && !trainCall.rest && !trainedToday) setTraining(true)
     else setOverride(t)
   }
+  // A training day still to be done → show a small session preview card (which
+  // carries its own Start button), so the hero CTA skips the movement case to
+  // avoid two Start buttons.
+  const showSessionPreview = trainSession.dayType !== 'rest' && !trainCall.done && !trainCall.active
   const heroCTA = coach.action?.target ? ({
     skin: `Start ${slotWord(skinSlot).toLowerCase()} skincare`,
     hair: 'Do your haircare',
-    movement: trainCall.rest ? 'Mark your steps' : trainedToday ? 'Review your session' : `Start ${trainCall.label} session`,
+    movement: trainCall.rest ? 'Mark your steps' : trainedToday ? 'Review your session' : (showSessionPreview ? null : `Start ${trainCall.label} session`),
     diet: 'Log your food',
     water: 'Log water',
   }[coach.action.target]) : null
@@ -761,6 +765,10 @@ export default function App() {
           </button>
         )}
       </section>
+
+      {showSessionPreview && (
+        <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
+      )}
 
       <button onClick={() => setView('review')}
         className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-5 py-4 text-left transition active:scale-[0.99] hover:bg-[#e8ecdd]">
@@ -3388,6 +3396,35 @@ function DeficitCard({ state, today, onApply }) {
       )}
     </section>
   )
+}
+
+// A small glanceable preview of today's session before you commit to starting:
+// the day, the week's intent, time/count, and the main lifts you'll hit.
+function SessionPreview({ session, estMin, onStart }) {
+  if (!session?.exercises?.length) return null
+  const bigLifts = session.exercises.filter((e) => e.role === 'compound').slice(0, 3).map((e) => e.name)
+  const lifts = (bigLifts.length ? bigLifts : session.exercises.slice(0, 3).map((e) => e.name))
+  const extra = Math.max(0, session.exercises.length - lifts.length)
+  const focus = session.emphasis ? labelForEmphasis(session.emphasis) : null
+  return (
+    <section className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4 shadow-[0_2px_10px_-8px_rgba(60,55,40,0.35)]">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today's session</p>
+        {session.effort && <span className="rounded-full bg-[#eef0e6] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#3d4a32]">{session.effort.short}</span>}
+      </div>
+      <div className="mt-1 flex items-baseline justify-between gap-2">
+        <p className="font-display text-[18px] font-semibold text-[#23211c]">{session.label} day</p>
+        <span className="shrink-0 text-[12px] text-[#8a8474]">{session.exercises.length} moves{estMin ? ` · ~${estMin} min` : ''}</span>
+      </div>
+      <p className="mt-1.5 text-[13px] leading-snug text-[#6b6857]">{lifts.join(' · ')}{extra ? ` · +${extra} more` : ''}</p>
+      {focus && <p className="mt-0.5 text-[12px] text-[#9aa581]">Extra focus: {focus}</p>}
+      <button onClick={onStart} className="mt-3 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Start {session.label.toLowerCase()} session</button>
+    </section>
+  )
+}
+// Human label for an emphasis body-part key (mirrors the trainer's labelFor).
+function labelForEmphasis(part) {
+  return { 'side-delts': 'side delts', 'rear-delts': 'rear delts', 'lower-back': 'lower back', lats: 'lats / back width' }[part] || part
 }
 
 function WeightCard({ weightLog, today, day, onSave }) {
