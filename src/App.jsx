@@ -870,8 +870,6 @@ export default function App() {
           <FocusCard
             focus={focus} day={day} profile={profile} hour={hour} weightLog={state.weightLog || []}
             state={state} dateIso={today}
-            onStartSkin={setFlow} onManageProducts={() => setManageProducts(true)}
-            onSkinSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })}
             onStepsDone={setStepsDone}
             onStartTrain={() => setTraining(true)} train={trainCall}
             onSwapDay={(dt) => { setPendingSwap(dt); setTraining(true) }}
@@ -926,7 +924,8 @@ export default function App() {
       )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
-          onSave={(owned) => { updateProfile({ skincare: { ...profile.skincare, ownedProducts: owned } }); setManageProducts(false) }} />
+          onSave={(owned) => { updateProfile({ skincare: { ...profile.skincare, ownedProducts: owned } }); setManageProducts(false) }}
+          onSensitive={(v) => updateProfile({ skincare: { ...profile.skincare, sensitive: v } })} />
       )}
       {foodReview && (
         <FoodReview state={state} dateIso={today} day={day} proteinTarget={profile.proteinTarget || PROTEIN_TARGET_DEFAULT}
@@ -1166,29 +1165,15 @@ function StepsToggle({ done, target, onDone }) {
   )
 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStartSkin, onManageProducts, onSkinSensitive, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
       <h2 className="font-display mb-3 text-xl font-semibold text-[#23211c]">{FOCUS_TITLE[focus]}</h2>
 
-      {focus === 'skin' && (
-        <div>
-          <div className="space-y-2">
-            <SkinStart label="Start morning routine" done={r.skincareAM} primary={hour < 17} locked={!(hour >= 6 && hour < 12)} hint="Opens 6 AM" onClick={() => onStartSkin('am')} />
-            <SkinStart label="Start evening routine" done={r.skincarePM} primary={hour >= 17} locked={hour < 18} hint="Opens 6 PM" onClick={() => onStartSkin('pm')} />
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <button onClick={onManageProducts} className="text-[13px] font-medium text-[#6f6a5d] underline-offset-2 hover:underline">Manage products</button>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[12px] text-[#a39c8d]">Skin:</span>
-              <Chip small on={!profile.skincare?.sensitive} onClick={() => onSkinSensitive(false)}>Calm</Chip>
-              <Chip small on={!!profile.skincare?.sensitive} onClick={() => onSkinSensitive(true)}>Reacting</Chip>
-            </div>
-          </div>
-          {profile.skincare?.sensitive && <p className="mt-2 text-[12px] text-[#b08a3a]">Easing your actives — spacing them out until your skin settles.</p>}
-        </div>
-      )}
+      {/* Skin/hair are not focus targets — tapping their Today rows opens the guided
+          flow directly. Skin's product + sensitivity controls live in the Manage
+          products modal (reachable from the skin journey). */}
 
       {focus === 'hair' && (
         <div className="space-y-2">
@@ -2010,8 +1995,9 @@ function SkinStart({ label, done, primary, locked, hint, onClick }) {
 }
 
 // Manage which products are in the routine vs the shopping list.
-function ProductsModal({ profile, onClose, onSave }) {
+function ProductsModal({ profile, onClose, onSave, onSensitive }) {
   const [owned, setOwned] = useState(() => [...(profile.skincare?.ownedProducts || [])])
+  const sensitive = !!profile.skincare?.sensitive
   const toggle = (id) => setOwned((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]))
   // Shave is always owned and not user-managed here.
   const list = PRODUCTS.filter((p) => p.id !== 'shave')
@@ -2047,6 +2033,21 @@ function ProductsModal({ profile, onClose, onSave }) {
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
         </div>
+
+        {/* Skin state right now — flip to Reacting and the app eases your actives
+            (spaces out BHA/adapalene) until your barrier settles. Applies live. */}
+        {onSensitive && (
+          <div className="mt-5 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[13px] font-semibold text-[#23211c]">How's your skin right now?</p>
+              <div className="flex items-center gap-1.5">
+                <Chip small on={!sensitive} onClick={() => onSensitive(false)}>Calm</Chip>
+                <Chip small on={sensitive} onClick={() => onSensitive(true)}>Reacting</Chip>
+              </div>
+            </div>
+            {sensitive && <p className="mt-2 text-[12px] leading-snug text-[#b08a3a]">Easing your actives — spacing BHA and adapalene out until your skin settles.</p>}
+          </div>
+        )}
 
         <p className="mt-5 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">In your routine</p>
         <div className="divide-y divide-[#ece6da]">
