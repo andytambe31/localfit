@@ -2034,8 +2034,11 @@ function ProductsModal({ profile, onClose, onSave }) {
     )
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
+  // Portal to <body> so `fixed` pins to the viewport, not a transformed ancestor.
+  // Opened from the (scrolled) skin journey, an un-portaled modal renders far
+  // off-screen — which reads as "clicking Manage products does nothing".
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-[#f4f1ea] p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div>
@@ -2069,7 +2072,8 @@ function ProductsModal({ profile, onClose, onSave }) {
           <button onClick={() => onSave(owned)} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
