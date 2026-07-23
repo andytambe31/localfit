@@ -56,17 +56,33 @@ export function inferSleep(dateIso, activity, profile) {
 
   const bedH = hourOf(sleepStart), wakeH = hourOf(sleepEnd)
   const bedOk = (bedH >= 20 && bedH <= 23) || (bedH >= 0 && bedH <= 3)
-  let confident = true
-  if (!bedOk || wakeH > 12 || minutes > 660 || minutes < 120) confident = false
-
-  return { start: sleepStart, end: sleepEnd, minutes, interruptions, source: 'auto', confident }
+  const plausible = bedOk && wakeH <= 12 && minutes <= 660 && minutes >= 120
+  // Inference is a proxy (phone inactivity), never a certainty. Even a clean gap
+  // caps at 'medium' — 'high' requires a manual confirmation from the user.
+  return {
+    start: sleepStart, end: sleepEnd, minutes, interruptions,
+    source: 'inferred', confidence: plausible ? 'medium' : 'low', confident: plausible,
+    estimatedBedtime: sleepStart, estimatedWakeTime: sleepEnd, estimatedDuration: minutes,
+    userQualityRating: null,
+  }
 }
 
-// Last night's sleep: a stored manual override wins; otherwise live inference.
+// Last night's sleep. A full manual edit wins outright (confidence high). A
+// quality-only tap ("Poor sleep" / a rating) merges onto the inference (mixed).
 export function lastNightSleep(state, dateIso) {
   const stored = state?.days?.[dateIso]?.sleep
-  if (stored && stored.source === 'manual') return stored
-  return inferSleep(dateIso, state?.activity || [], state?.profile || {})
+  if (stored && stored.source === 'manual') {
+    return { ...stored, source: 'manual', confidence: 'high', userQualityRating: stored.userQualityRating ?? null,
+      estimatedBedtime: stored.start, estimatedWakeTime: stored.end, estimatedDuration: stored.minutes }
+  }
+  const inf = inferSleep(dateIso, state?.activity || [], state?.profile || {})
+  if (stored && stored.source === 'quality' && stored.userQualityRating != null) {
+    if (inf) return { ...inf, source: 'mixed', confidence: 'high', userQualityRating: stored.userQualityRating }
+    // No usable inference, but the user rated it — carry the rating alone.
+    return { start: null, end: null, minutes: null, interruptions: [], source: 'mixed', confidence: 'medium',
+      userQualityRating: stored.userQualityRating, estimatedBedtime: null, estimatedWakeTime: null, estimatedDuration: null }
+  }
+  return inf
 }
 
 // Score one night /10 from its sleep object + profile goals.
@@ -74,41 +90,98 @@ const HHMM = (s, fallback) => {
   const m = /^(\d{1,2}):(\d{2})$/.exec(s || fallback)
   return m ? Number(m[1]) * 60 + Number(m[2]) : 0
 }
-function nightScore(sleep, profile) {
+// The objective (duration + schedule) score /10 from the sleep times alone.
+// Returns null if there are no usable times (a quality-only night).
+function objectiveScore(sleep, profile) {
+  if (sleep.start == null || sleep.minutes == null) return null
   const target = (profile.sleepTargetHours || 7) * 60
   const minutes = sleep.minutes || 0
   const durationScore = minutes >= target ? 10 : Math.max(0, 10 - ((target - minutes) / 30) * 1.5)
 
-  // Bedtime penalty, measured from a grace time = bedGoal + 30 min.
   const bedGoalMin = HHMM(profile.bedGoal, '23:30')
-  const graceMin = (bedGoalMin + 30) % (24 * 60) // default 00:00
+  const graceMin = (bedGoalMin + 30) % (24 * 60)
   const bed = new Date(sleep.start)
-  // Minutes-into-the-evening for both bedtime and grace, on a 18:00→ timeline so
-  // post-midnight reads as "late", and anything before grace reads as on-time.
-  const evMin = (mins) => (mins < 18 * 60 ? mins + 24 * 60 : mins) // shift early-AM past midnight
+  const evMin = (mins) => (mins < 18 * 60 ? mins + 24 * 60 : mins)
   const bedEv = evMin(bed.getHours() * 60 + bed.getMinutes())
   const graceEv = evMin(graceMin)
   const minutesLate = Math.max(0, bedEv - graceEv)
   const bedtimePenalty = minutesLate > 0 ? Math.min(4, Math.ceil(minutesLate / 30)) : 0
-
   const interruptionPenalty = Math.min(2, 0.5 * (sleep.interruptions?.length || 0))
-  return Math.max(0, Math.min(10, durationScore - bedtimePenalty - interruptionPenalty))
+  return { total: Math.max(0, Math.min(10, durationScore - bedtimePenalty - interruptionPenalty)),
+    durationScore: Math.round(durationScore * 10) / 10, bedtimePenalty, interruptionPenalty }
 }
 
-// Average per-night score over the last 7 dates (today back 6) that have sleep
-// data (manual override OR inferable). Integer /10, or null if no nights.
+// The final /10 for a night, confidence-aware. Inference can't hit a clean 10 —
+// a proxy that only *looks* like enough sleep is capped. A subjective rating,
+// when given, is the anchor: the night is the WORSE of felt-quality and the
+// measured duration, so "6/10 quality" can't sit at 10/10 on duration alone.
+export function scoreNight(sleep, profile) {
+  if (!sleep) return null
+  const p = profile || {}
+  const obj = objectiveScore(sleep, p)
+  const quality = sleep.userQualityRating
+  const confidence = sleep.confidence || (sleep.source === 'manual' ? 'high' : sleep.confident ? 'medium' : 'low')
+  let final
+  if (quality != null && obj) final = Math.min(quality, Math.round(obj.total))
+  else if (quality != null) final = quality
+  else {
+    const cap = confidence === 'high' ? 10 : confidence === 'medium' ? 8 : 6
+    final = Math.min(Math.round(obj ? obj.total : cap), cap)
+  }
+  return {
+    finalScore: Math.max(0, Math.min(10, final)),
+    confidence, source: sleep.source,
+    scoreComponents: {
+      duration: obj ? obj.durationScore : null,
+      schedule: obj ? Math.max(0, 10 - obj.bedtimePenalty * 2.5) : null,
+      quality: quality ?? null,
+    },
+  }
+}
+
+// Rolling average /10 over the last 7 nights that have data. Integer, or null.
 export function sleepScore(state, dateIso, profile) {
   const p = profile || state?.profile || {}
   let sum = 0, n = 0
   for (let i = 0; i < 7; i++) {
-    const iso = shiftIso(dateIso, -i)
-    const sleep = lastNightSleep(state, iso)
-    if (!sleep) continue
-    sum += nightScore(sleep, p)
-    n++
+    const sleep = lastNightSleep(state, shiftIso(dateIso, -i))
+    const sc = scoreNight(sleep, p)
+    if (!sc) continue
+    sum += sc.finalScore; n++
   }
   if (!n) return null
   return Math.round(sum / n)
+}
+
+// A recovery read for the trainer: pull training aggressiveness down when sleep
+// is genuinely poor (multiple bad nights / very short), NOT for one off night.
+export function recoveryState(state, dateIso, profile) {
+  const p = profile || state?.profile || {}
+  const scores = []
+  let veryShort = 0
+  for (let i = 0; i < 4; i++) {
+    const sleep = lastNightSleep(state, shiftIso(dateIso, -i))
+    const sc = scoreNight(sleep, p)
+    if (!sc) continue
+    scores.push(sc.finalScore)
+    if (sleep?.minutes != null && sleep.minutes < 330) veryShort++
+  }
+  if (scores.length < 2) return { level: 'ok', poorNights: 0 }
+  const poor = scores.filter((s) => s <= 5).length
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length
+  // Two-plus poor nights, a very short streak, or a low running average → ease off.
+  const strained = poor >= 2 || veryShort >= 2 || avg <= 5.5
+  return { level: strained ? 'reduce' : 'ok', poorNights: poor, avg: Math.round(avg * 10) / 10 }
+}
+
+// Whether to ask the one-tap morning confirmation: an inferred night today with
+// no manual/quality confirmation yet, during the morning window.
+export function sleepNeedsConfirm(state, dateIso, hour) {
+  if (hour == null || hour < 6 || hour >= 12) return false
+  const stored = state?.days?.[dateIso]?.sleep
+  if (stored && (stored.source === 'manual' || stored.source === 'quality')) return false
+  const inf = inferSleep(dateIso, state?.activity || [], state?.profile || {})
+  return !!inf // only ask when there's actually an estimate to confirm
 }
 
 // ---- display helpers ----

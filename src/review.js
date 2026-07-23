@@ -10,7 +10,7 @@
  * -------------------------------------------------------------------------- */
 import { deficitCoach, weightTrend } from './adapt'
 import { sleepScore } from './sleep'
-import { dietScore as foodScore, PROTEIN_TARGET_DEFAULT, calorieTarget } from './diet'
+import { dietScore as foodScore, PROTEIN_TARGET_DEFAULT, calorieTarget, proteinRange, intakeAverages } from './diet'
 import { bestLifts } from './train'
 import { stepsHit } from './makeup'
 
@@ -129,6 +129,8 @@ export function buildReview(state, today) {
     weightStart: wStart, weightNow: wNow,
     weightLost: wStart != null && wNow != null ? Math.round((wStart - wNow) * 10) / 10 : null,
     staleDays: bfStale, deadline, weeksLeft: Math.round(weeksLeft),
+    // Waist-to-height: a less-noisy long-term health metric than a consumer BF%.
+    waistToHeight: profile.measurements?.waist && profile.height ? Math.round((profile.measurements.waist / profile.height) * 100) / 100 : null,
   }
 
   // ---- pacing: rate-based AND health-aware ---------------------------------
@@ -191,9 +193,45 @@ export function buildReview(state, today) {
     }
   }
 
+  // Three DISTINCT judgments the app used to conflate into one "on track / behind".
+  const needed = dc.needWk ?? null
+  const lossRateVerdict = loss == null ? 'unknown'
+    : loss <= 0.02 ? 'stalled'
+      : (safeCeiling != null && loss > safeCeiling + 0.05) ? 'aggressive'
+        : loss < 0.15 ? 'slow' : 'safe'
+  const deadlineVerdict = (bfNow != null && bfNow <= target) ? 'on-pace'
+    : (needed == null || loss == null) ? 'unknown'
+      : loss >= needed ? 'on-pace'
+        : loss >= needed * 0.8 ? 'borderline' : 'off-pace'
+  const measurementConfidence = bfStale == null ? 'none' : bfStale <= 14 ? 'current' : bfStale <= 28 ? 'aging' : 'stale'
+
+  // A SAFE, sustainable rate that's merely behind the deadline must NOT read as
+  // "cutting too hard" or trigger a "tighten the ceiling / eat less" prescription.
+  if ((lossRateVerdict === 'safe' || lossRateVerdict === 'slow') && (deadlineVerdict === 'off-pace' || deadlineVerdict === 'borderline') && verdict !== 'aggressive') {
+    verdict = 'behind-pace'
+    headline = 'Sustainable rate — behind the December date'
+    detail = `Losing ~${loss.toFixed(2)} kg/wk is a healthy, muscle-sparing rate. It just doesn't presently project to ${target}% by ${monthYear(dayD(deadline))}${measurementConfidence === 'stale' ? ", and your body-fat reading is over a month old, so that projection is low-confidence" : ''}.`
+    prescription = 'Don\'t cut deeper for the calendar. Hold this rate, lock in protein and consistency, and let the date move if it needs to. Re-measure body fat to sharpen the read.'
+  }
+
+  // Deficit safeguard: intake already aggressive AND protein under the floor →
+  // fix protein first, never advise a deeper cut. Overrides any pace verdict.
+  const pr = proteinRange(state)
+  const intake = intakeAverages(state, today)
+  const proteinShort = intake.avgProtein != null && intake.avgProtein < pr.floor
+  const caloriesLow = intake.avgCalories != null && intake.avgCalories < 1600
+  if (caloriesLow && proteinShort && verdict !== 'at-goal') {
+    verdict = 'protein-first'
+    headline = 'Fix protein before cutting anything'
+    detail = `You're averaging ${intake.avgProtein}g protein on ~${intake.avgCalories} calories — under your ${pr.floor}g floor while intake is already aggressive. Cutting deeper here costs muscle.`
+    prescription = `Calories are already aggressive. Fix protein and logging accuracy before cutting further — add lean protein (whey, chicken, Greek yogurt, egg whites) to reach at least the ${pr.floor}g floor.`
+  }
+
   const pacing = {
     verdict, headline, detail, prescription,
-    lossPerWk: loss, neededPerWk: dc.needWk ?? null, safeCeiling, projection,
+    lossPerWk: loss, neededPerWk: needed, safeCeiling, projection,
+    lossRateVerdict, deadlineVerdict, measurementConfidence, bfStaleDays: bfStale,
+    proteinRange: pr, intake,
     weighIns: dc.weighIns ?? null, spanDays: dc.spanDays ?? null,
   }
 
@@ -229,7 +267,10 @@ export function buildReview(state, today) {
   else if (best >= 5) wins.push(`Your best run reached ${best} straight strong days.`)
   const lifts = bestLifts(state)
   const stronger = lifts.filter((l) => l.best && l.trend > 0).length
-  if (stronger >= 2) wins.push(`${stronger} of your main lifts are heavier than day one — you're holding muscle while you cut.`)
+  // Don't claim confirmed muscle retention off a stale body-fat reading — just state the lift facts.
+  if (stronger >= 2) wins.push(measurementConfidence === 'stale'
+    ? `${stronger} of your main lifts are heavier than day one — strength is climbing.`
+    : `${stronger} of your main lifts are heavier than day one — you're holding muscle while you cut.`)
   const claimedCount = Object.values(state.rewardsClaimed || {}).filter(Boolean).length
   if (claimedCount > 0) wins.push(`${claimedCount} reward${claimedCount > 1 ? 's' : ''} earned and banked.`)
   const dialed = scored.filter((p) => p.score >= 8).map((p) => p.label.toLowerCase())
@@ -269,8 +310,10 @@ export function buildReview(state, today) {
   const cutting = loss != null && loss > 0.05
 
   // Calories — raise or tighten the baseline via the deficit (ceiling = TDEE − deficit).
+  // Never surface a calorie-DOWN suggestion while the protein-first safeguard is
+  // active — intake is already aggressive; fixing protein comes first.
   if (ct) {
-    if (dc.adjust && dc.adjust.deficit != null && dc.adjust.deficit !== curDeficit) {
+    if (dc.adjust && dc.adjust.deficit != null && dc.adjust.deficit !== curDeficit && !(dc.adjust.dir === 'down' && verdict === 'protein-first')) {
       const up = dc.adjust.dir === 'up'
       suggestions.push({
         id: 'calories', patch: { deficit: dc.adjust.deficit }, title: 'Daily calories',
@@ -349,6 +392,8 @@ export function buildReview(state, today) {
   else if (verdict === 'at-goal') { standing = 'excellent'; verdictWord = 'Goal reached'; topline = "You've hit the target most people quit before. Now it's about holding it." }
   else if ((overall ?? 0) >= 8 && (verdict === 'on-track' || verdict === 'fast')) { standing = 'excellent'; verdictWord = 'Dialed in'; topline = 'Pace is right and the habits are sharp. This is exactly what winning looks like — keep it boring.' }
   else if (verdict === 'on-track' || verdict === 'fast') { standing = 'good'; verdictWord = 'On track'; topline = 'The fat-loss pace is right. Tighten the weak habits and this is a clean run to December.' }
+  else if (verdict === 'protein-first') { standing = 'behind'; verdictWord = 'Fix protein first'; topline = 'Your intake is already aggressive and protein is under the floor. Raise protein and log accurately before any deeper cut — that\'s what protects your muscle.' }
+  else if (verdict === 'behind-pace') { standing = 'behind'; verdictWord = 'Sustainable, but behind'; topline = `Your current loss rate is sustainable, but it does not presently project to ${target}% by the deadline. Hold the rate — don't cut deeper for the calendar.` }
   else if (verdict === 'behind' || verdict === 'stalled') { standing = 'behind'; verdictWord = 'Needs a nudge'; topline = 'The plan is sound but the pace has drifted. A small correction now beats a scramble in December.' }
   else { standing = 'building'; verdictWord = 'Building the read'; topline = 'A little more data and the coaching gets precise. Weigh in daily and log the basics.' }
 
