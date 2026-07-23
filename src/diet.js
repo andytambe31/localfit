@@ -296,6 +296,34 @@ export function dayTotals(day) {
   return { kcal, protein, carbs: r1(carbs), fat: r1(fat), fiber: r1(fiber), sugar: r1(sugar), count: log.length, provisional }
 }
 
+// Protein coached as a RANGE, not one pass/fail number. Derived from bodyweight
+// (~1.7 / 1.9 / 2.1 g/kg) — the practical floor / target / stretch for holding
+// muscle on a cut. Falls back to proteinTarget when weight is unknown.
+export function proteinRange(state) {
+  const wl = [...(state?.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+  const kg = wl.length ? wl[wl.length - 1].kg : null
+  if (kg) return { floor: Math.round(1.7 * kg), preferred: Math.round(1.9 * kg), stretch: Math.round(2.1 * kg) }
+  const t = state?.profile?.proteinTarget || PROTEIN_TARGET_DEFAULT
+  return { floor: Math.round(t * 0.8), preferred: Math.round(t * 0.9), stretch: t }
+}
+
+// Where today's protein sits vs the range.
+export function proteinStatus(gramsToday, range) {
+  if (gramsToday < range.floor) return 'below-floor'
+  if (gramsToday < range.preferred) return 'acceptable'
+  if (gramsToday <= range.stretch) return 'target-met'
+  return 'above-stretch'
+}
+
+// 14-day averages of logged protein + calories, with how many days were logged.
+export function intakeAverages(state, todayIso, days = 14) {
+  const D = state?.days || {}
+  const shift = (iso, d) => { const [y, m, dd] = iso.split('-').map(Number); const nd = new Date(new Date(y, m - 1, dd).getTime() + d * 86400000); const p = (n) => String(n).padStart(2, '0'); return `${nd.getFullYear()}-${p(nd.getMonth() + 1)}-${p(nd.getDate())}` }
+  let pSum = 0, kSum = 0, n = 0
+  for (let i = 0; i < days; i++) { const day = D[shift(todayIso, -i)]; if (day?.food?.length) { const t = dayTotals(day); pSum += t.protein; kSum += t.kcal; n++ } }
+  return { avgProtein: n ? Math.round(pSum / n) : null, avgCalories: n ? Math.round(kSum / n) : null, daysLogged: n }
+}
+
 // --- recommendation: protein-first, fit the remaining calorie room ----------
 export function recommend(state, dateIso, loc, proteinTarget = PROTEIN_TARGET_DEFAULT) {
   const day = state.days?.[dateIso] || {}

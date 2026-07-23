@@ -9,8 +9,8 @@ import { buildReview } from './review'
 import { bestLifts, recentSessions } from './train'
 import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend } from './cardio'
-import { sleepScore } from './sleep'
-import { dayTotals, calorieTarget, PROTEIN_TARGET_DEFAULT } from './diet'
+import { sleepScore, lastNightSleep, scoreNight } from './sleep'
+import { dayTotals, calorieTarget, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus } from './diet'
 
 const shiftIso = (iso, delta) => {
   const [y, m, d] = iso.split('-').map(Number)
@@ -32,6 +32,32 @@ function dietAverages(state, today, days = 14) {
 
 // The suggested prompt shipped alongside the JSON.
 export const STATS_PROMPT = "You are an elite, evidence-based physique, strength and longevity coach. Below is my current training and body-composition data as JSON, exported from my tracking app. Read it, then: (1) tell me honestly where I stand and what's working; (2) name what's lagging or concerning; (3) give me the 3 highest-impact, specific changes to make over the next two weeks to keep losing fat while holding muscle and improving long-term health. Be direct and specific — reference my actual numbers.\n\nDATA:"
+
+// Sleep is inferred from phone inactivity — export it WITH its source and
+// confidence so an assessment can weight it honestly (never a bare 10/10).
+function sleepSummary(state, today, profile) {
+  const nights = []
+  let confirmed = 0
+  for (let i = 0; i < 7; i++) {
+    const s = lastNightSleep(state, shiftIso(today, -i))
+    const sc = scoreNight(s, profile)
+    if (!sc) continue
+    nights.push({ score: sc.finalScore, confidence: sc.confidence, source: sc.source, minutes: s?.minutes ?? null })
+    if (s?.source === 'manual' || s?.source === 'mixed') confirmed++
+  }
+  if (!nights.length) return { avgScore10: null, note: 'no sleep data yet' }
+  const durNights = nights.filter((n) => n.minutes != null)
+  const confDist = {}
+  nights.forEach((n) => { confDist[n.confidence] = (confDist[n.confidence] || 0) + 1 })
+  return {
+    avgScore10: Math.round(nights.reduce((a, b) => a + b.score, 0) / nights.length),
+    lastNight: { score10: nights[0].score, source: nights[0].source, confidence: nights[0].confidence },
+    avgDurationMin: durNights.length ? Math.round(durNights.reduce((a, b) => a + b.minutes, 0) / durNights.length) : null,
+    confidenceDistribution: confDist,
+    manuallyConfirmedNights: confirmed,
+    nightsWithData: nights.length,
+  }
+}
 
 export function buildStatsExport(state, today, generatedAt) {
   const profile = state.profile || {}
@@ -61,7 +87,8 @@ export function buildStatsExport(state, today, generatedAt) {
       bodyFatPct: bf.now, startBodyFatPct: bf.start, bodyFatPointsLost: bf.pointsLost,
       waistToHeightRatio: whr,
       trendKgPerWeek: r2(pace.lossPerWk), neededKgPerWeek: r2(pace.neededPerWk),
-      paceVerdict: pace.verdict,
+      lossRateVerdict: pace.lossRateVerdict, deadlineVerdict: pace.deadlineVerdict,
+      bodyFatMeasurementConfidence: pace.measurementConfidence, bodyFatReadingAgeDays: pace.bfStaleDays,
     },
     training: {
       sessionsPerWeekTarget: profile.gymTargetPerWeek || 3,
@@ -75,14 +102,21 @@ export function buildStatsExport(state, today, generatedAt) {
       restingHrBpm: hr?.latest ?? null,
       restingHrDeltaVsMonth: hr?.delta ?? null,
     },
-    sleep: { score10: sleepScore(state, today, profile) },
-    diet: {
-      proteinTargetG: profile.proteinTarget || PROTEIN_TARGET_DEFAULT,
-      avgProteinG14d: diet.avgProteinG,
-      avgCalories14d: diet.avgCalories,
-      daysLogged14d: diet.daysLogged,
-      calorieCeiling: ct?.ceiling ?? null,
-    },
+    sleep: sleepSummary(state, today, profile),
+    diet: (() => {
+      const pr = proteinRange(state)
+      return {
+        proteinFloorG: pr.floor, proteinPreferredG: pr.preferred, proteinStretchG: pr.stretch,
+        legacyProteinTargetG: profile.proteinTarget || PROTEIN_TARGET_DEFAULT,
+        avgProteinG14d: diet.avgProteinG,
+        avgProteinStatus: diet.avgProteinG != null ? proteinStatus(diet.avgProteinG, pr) : null,
+        avgCalories14d: diet.avgCalories,
+        daysLogged14d: diet.daysLogged,
+        calorieCeiling: ct?.ceiling ?? null,
+        note: (diet.avgCalories != null && diet.avgCalories < 1600 && diet.avgProteinG != null && diet.avgProteinG < pr.floor)
+          ? 'Intake is already aggressive and protein is under the floor — the app recommends raising protein, NOT cutting calories further.' : undefined,
+      }
+    })(),
     consistency: {
       currentStreakDays: R.momentum.streak,
       strongDaysLast14: R.momentum.strong14,
@@ -90,11 +124,14 @@ export function buildStatsExport(state, today, generatedAt) {
       pillarScores10: pillars,
       overallScore10: R.overall,
     },
-    projections: (R.milestones?.rows || []).map((m) => ({
-      label: m.label, date: m.dateIso,
-      weightKg: m.weightLow === m.weightHigh ? m.weightLow : [m.weightLow, m.weightHigh],
-      bodyFatPct: m.bfLow == null ? null : (m.bfLow === m.bfHigh ? m.bfLow : [m.bfLow, m.bfHigh]),
-    })),
+    projections: {
+      confidence: pace.measurementConfidence === 'stale' ? 'low (body-fat reading is stale)' : 'modeled from current trend',
+      milestones: (R.milestones?.rows || []).map((m) => ({
+        label: m.label, date: m.dateIso,
+        weightKg: m.weightLow === m.weightHigh ? m.weightLow : [m.weightLow, m.weightHigh],
+        bodyFatPct: m.bfLow == null ? null : (m.bfLow === m.bfHigh ? m.bfLow : [m.bfLow, m.bfHigh]),
+      })),
+    },
     coachAssessment: { standing: R.verdictWord, summary: R.topline, wins: R.wins, gaps: R.gaps, plan: R.pacePlan },
   }
 }

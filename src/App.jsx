@@ -27,10 +27,10 @@ import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName } from './cardio'
 import { journeysFor } from './journeys'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID } from './skincare'
-import { inferSleep, lastNightSleep, sleepScore, fmtDuration, fmtClock } from './sleep'
+import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
 
 /* ---------- data layer: localStorage-first, best-effort backend mirror ---------- */
@@ -324,7 +324,10 @@ export default function App() {
     scheduleSync()
   }
   // Manual sleep correction — writes today's sleep object (override wins over inference).
-  function saveSleep(sleep) { patch({ sleep }) }
+  function saveSleep(sleep) { patch({ sleep: { ...sleep, source: 'manual' } }) }
+  // Morning one-tap confirmations of the inferred estimate.
+  function confirmSleep(inferred) { if (inferred) patch({ sleep: { ...inferred, source: 'manual', confirmed: true } }) }
+  function poorSleep() { patch({ sleep: { source: 'quality', userQualityRating: 5, ts: Date.now() } }) }
   function claimReward(days) {
     setState((prev) => {
       const next = clone(prev)
@@ -617,6 +620,7 @@ export default function App() {
   }
   const skinDue = dueSummary(today, state)
   const lastSleep = lastNightSleep(state, today)
+  const sleepConfirmDue = sleepNeedsConfirm(state, today, hour)
   const coach = buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, today })
   // The detail card shows only when you TAP an area — the coach's own suggestion
   // rides on the hero's CTA button instead, so the big card no longer auto-opens
@@ -659,7 +663,9 @@ export default function App() {
   const waterTarget = profile.waterTarget || 8
 
   const proteinNow = Math.round(dayTotals(day).protein)
-  const proteinTgt = profile.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const pRange = proteinRange(state)
+  const proteinTgt = pRange.preferred // the ring fills toward the realistic target, not the too-high number
+  const pStatus = proteinStatus(proteinNow, pRange)
   const slotWord = (s) => (s === 'pm' ? 'Evening' : 'Morning')
   const areas = [
     { id: 'skin', label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, hint: skinHint,
@@ -667,7 +673,11 @@ export default function App() {
     { id: 'movement', label: 'Train', done: moveDone, progress: moveProgress, attn: w.session?.status === 'active' ? 'urgent' : 'idle',
       sub: w.session?.status === 'active' ? 'Session in progress' : moveDone ? (trainCall.rest ? 'Steps done — recovery day' : `${trainCall.label} logged`) : trainCall.rest ? 'Rest day — walk your 10k' : `${trainCall.label}${trainCall.estMin ? ` · ~${trainCall.estMin} min` : ''}` },
     { id: 'diet', label: 'Diet', done: !!day.dietClosed, progress: Math.min(1, proteinNow / proteinTgt),
-      sub: day.dietClosed ? 'Closed for today' : `${proteinNow} of ${proteinTgt}g protein so far` },
+      sub: day.dietClosed ? 'Closed for today'
+        : pStatus === 'below-floor' ? `${proteinNow}g protein · floor ${pRange.floor}`
+        : pStatus === 'acceptable' ? `${proteinNow}g · one serving to the ${pRange.preferred}g target`
+        : pStatus === 'target-met' ? `${proteinNow}g protein · target met`
+        : `${proteinNow}g protein` },
     { id: 'water', label: 'Water', done: (day.water || 0) >= waterTarget, progress: Math.min(1, (day.water || 0) / waterTarget),
       sub: `${day.water || 0} of ${waterTarget} glasses` },
     { id: 'hair', label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, hint: skinHint,
@@ -769,6 +779,17 @@ export default function App() {
 
       {showSessionPreview && (
         <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
+      )}
+
+      {sleepConfirmDue && lastSleep && (
+        <section className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+          <p className="text-[13px] leading-snug text-[#4a463c]">Was last night's sleep about right?{lastSleep.minutes != null && <span className="text-[#8a8474]"> Estimated {fmtDuration(lastSleep.minutes)}{lastSleep.start ? `, ${fmtClock(lastSleep.start)}–${fmtClock(lastSleep.end)}` : ''}.</span>}</p>
+          <div className="mt-2.5 flex gap-2">
+            <button onClick={() => confirmSleep(lastSleep)} className="flex-1 rounded-full bg-[#3d4a32] px-3 py-2 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.98]">Yes</button>
+            <button onClick={() => setSleepOpen(true)} className="flex-1 rounded-full border border-[#cdd4bb] bg-[#fbf9f3] px-3 py-2 text-[13px] font-semibold text-[#3d4a32] active:scale-[0.98]">Edit</button>
+            <button onClick={poorSleep} className="flex-1 rounded-full border border-[#e0c9a8] bg-[#f7ecd6] px-3 py-2 text-[13px] font-semibold text-[#8a5a1e] active:scale-[0.98]">Poor sleep</button>
+          </div>
+        </section>
       )}
 
       <button onClick={() => setView('review')}
@@ -2597,9 +2618,10 @@ function ReviewView({ state, today, onApply }) {
     starting: { chip: 'bg-[#e6e2d6] text-[#6f6a5d]', word: 'New' },
   }[R.standing] || { chip: 'bg-[#e6e2d6] text-[#6f6a5d]', word: '—' }
   const bf = R.bodyFat, p = R.pacing
-  const paceAccent = p.verdict === 'aggressive' || p.verdict === 'behind' || p.verdict === 'stalled'
+  const paceAccent = ['aggressive', 'behind', 'stalled', 'behind-pace', 'protein-first'].includes(p.verdict)
     ? 'border-[#e7d4b6] bg-[#f7ecd6]' : p.verdict === 'no-data' || p.verdict === 'building'
     ? 'border-[#e6dfd0] bg-[#fbf9f3]' : 'border-[#cdd4bb] bg-[#eef0e6]'
+  const staleLabel = { stale: 'Reading is stale', aging: 'Reading is aging' }[p.measurementConfidence]
   const Item = ({ children, good }) => (
     <li className="flex items-start gap-2.5 py-1.5">
       <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${good ? 'bg-[#3d4a32]' : 'bg-[#c08a4a]'}`} />
@@ -2644,8 +2666,13 @@ function ReviewView({ state, today, onApply }) {
       <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Body fat</h2>
-          <span className="text-[11px] uppercase tracking-[0.18em] text-[#9a9482]">the goal</span>
+          {staleLabel
+            ? <span className="rounded-full bg-[#f0dcc9] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#8a5a1e]">{staleLabel}</span>
+            : <span className="text-[11px] uppercase tracking-[0.18em] text-[#9a9482]">the goal</span>}
         </div>
+        {p.measurementConfidence === 'stale' && (
+          <p className="mt-2 rounded-xl bg-[#f7ecd6] px-3 py-2 text-[12px] leading-snug text-[#8a5a1e]">Your last body-fat reading is {p.bfStaleDays} days old — treat the % and its projections as low-confidence, and re-measure (tape is enough) to make the read honest again. Weight and waist trends still hold.</p>
+        )}
         {bf.has ? (
           <>
             <div className="mt-3 flex items-end gap-4">
@@ -2668,6 +2695,12 @@ function ReviewView({ state, today, onApply }) {
               {bf.weightLost != null && bf.weightLost !== 0 && <span className="text-[#8a8474]">Scale <span className="font-medium text-[#33322c]">{bf.weightLost > 0 ? '−' : '+'}{Math.abs(bf.weightLost)} kg</span></span>}
               {bf.weeksLeft != null && <span className="text-[#8a8474]">Deadline <span className="font-medium text-[#33322c]">{bf.weeksLeft} wk</span></span>}
             </div>
+            {bf.waistToHeight != null && (
+              <p className="mt-3 border-t border-[#ece5d7] pt-3 text-[13px] text-[#8a8474]">
+                Waist-to-height <span className="font-medium text-[#33322c]">{bf.waistToHeight}</span> · {bf.waistToHeight <= 0.5 ? 'in the healthy zone' : `working toward below 0.50`}
+                <span className="block text-[12px] text-[#a39c8d]">A steadier long-term health read than body-fat %, and it holds when the % is noisy.</span>
+              </p>
+            )}
           </>
         ) : (
           <p className="mt-2 text-[14px] text-[#8a8474]">No body-fat estimate yet. Log one from the dashboard and this fills in with your real trend.</p>
@@ -2733,6 +2766,14 @@ function ReviewView({ state, today, onApply }) {
             <span className="text-[12px] text-[#6b6857]">~{p.lossPerWk.toFixed(2)} kg/wk{p.neededPerWk != null ? ` · need ${p.neededPerWk.toFixed(2)}` : ''}</span>
           )}
         </div>
+        {(p.lossRateVerdict && p.lossRateVerdict !== 'unknown') && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${p.lossRateVerdict === 'aggressive' || p.lossRateVerdict === 'stalled' ? 'bg-[#f0dcc9] text-[#8a5a1e]' : 'bg-[#dfe6cf] text-[#3d4a32]'}`}>Rate: {p.lossRateVerdict}</span>
+            {p.deadlineVerdict && p.deadlineVerdict !== 'unknown' && (
+              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${p.deadlineVerdict === 'on-pace' ? 'bg-[#dfe6cf] text-[#3d4a32]' : 'bg-[#f0dcc9] text-[#8a5a1e]'}`}>Deadline: {p.deadlineVerdict}</span>
+            )}
+          </div>
+        )}
         <p className="mt-2 text-[15px] font-medium text-[#23211c]">{p.headline}</p>
         <p className="mt-1 text-[13px] leading-relaxed text-[#6b6857]">{p.detail}</p>
         {p.projection && (
@@ -3328,6 +3369,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
   // Diet (protein-first) + training, pulled from the engines so the hero reflects
   // what you've actually logged today.
   const proteinTarget = profile.proteinTarget || PROTEIN_TARGET_DEFAULT
+  const pRange = state ? proteinRange(state) : { floor: proteinTarget, preferred: proteinTarget, stretch: proteinTarget }
   const dt = dayTotals(day)
   const ct = state ? calorieTarget(state) : null
   const over = ct && dt.kcal > ct.ceiling
@@ -3336,14 +3378,27 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
   const tcall = state ? decideEveningPriority(state, today, hour, minute) : null
   const move = (c) => ({ eyebrow, headline: c.headline, support: c.support, action: { target: 'movement' } })
 
-  // Protein nudge when meaningfully behind pace for the time of day (no nag in the
-  // morning when protein is naturally low).
+  // Protein coached as a range: urgent below the floor, a gentle "one more
+  // serving" between floor and preferred, quiet once the target band is hit.
+  // Paced to the time of day so mornings don't nag.
   const proteinNudge = () => {
+    if (!dt.count) return null
     const frac = Math.max(0, Math.min(1, (hour - 8) / 13))
-    if (dt.count && dt.protein < proteinTarget * frac - 25)
-      return { eyebrow, headline: `Protein's lagging — ${Math.round(dt.protein)}g of ${proteinTarget}.`,
-        support: over ? `You're over calories, so keep it lean — whey or egg whites, nothing heavy.` : `Grab a lean source (whey, chicken, Greek yogurt) to get back on pace.`,
+    const g = Math.round(dt.protein)
+    const floorByNow = pRange.floor * frac
+    const gap = Math.round(pRange.preferred - dt.protein)
+    if (dt.protein < floorByNow - 20) {
+      return { eyebrow, headline: `Protein's low — ${g}g, floor is ${pRange.floor}.`,
+        support: over
+          ? `Keep it lean — a scoop of whey or egg whites (~25g, ~120 cal) without piling on calories. Protein's the priority on a cut.`
+          : `You're ${gap > 0 ? `~${gap}g` : 'a bit'} short. A Greek yogurt + whey, or a chicken serving, closes it — protein protects muscle while you lose fat.`,
         action: { target: 'diet' } }
+    }
+    if (dt.protein < pRange.preferred * Math.min(1, frac + 0.15) && hour >= 15) {
+      return { eyebrow, headline: `Protein's on track — ${g}g. One more serving.`,
+        support: `You're past the floor. One lean feeding gets you into the ${pRange.preferred}–${pRange.stretch}g target band that holds muscle best.`,
+        action: { target: 'diet' } }
+    }
     return null
   }
   const skincareAM = () => {
@@ -3902,6 +3957,7 @@ function SleepModal({ current, onClose, onSave }) {
   const [bed, setBed] = useState(() => toHHMM(current?.start) || '23:30')
   const [wake, setWake] = useState(() => toHHMM(current?.end) || '07:30')
   const [wakeups, setWakeups] = useState(() => current?.interruptions?.length || 0)
+  const [quality, setQuality] = useState(() => current?.userQualityRating ?? null)
 
   // Build epoch ms for bed (last night) and wake (this morning), handling crossover.
   const buildTimes = () => {
@@ -3920,7 +3976,7 @@ function SleepModal({ current, onClose, onSave }) {
 
   const save = () => {
     const interruptions = Array.from({ length: wakeups }, () => ({ at: null, minutes: 0 }))
-    onSave({ start, end, minutes, interruptions, source: 'manual', confident: true })
+    onSave({ start, end, minutes, interruptions, source: 'manual', confident: true, userQualityRating: quality })
   }
 
   return (
@@ -3955,7 +4011,21 @@ function SleepModal({ current, onClose, onSave }) {
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl bg-[#23291f] px-5 py-4 text-center">
+        <div className="mt-4">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-[#23211c]">How rested? <span className="font-normal text-[#8a8474]">(optional)</span></label>
+            {quality != null && <button onClick={() => setQuality(null)} className="text-[12px] text-[#a39c8d]">clear</button>}
+          </div>
+          <div className="mt-2 flex gap-1">
+            {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+              <button key={n} onClick={() => setQuality(n)}
+                className={`h-8 flex-1 rounded-lg text-[12px] font-semibold ${quality === n ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#ddd5c5] bg-white text-[#6b6857]'}`}>{n}</button>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-[#a39c8d]">Your felt quality anchors the score — a restless 6 won't read as a 10 just because the hours looked fine.</p>
+        </div>
+
+        <div className="mt-4 rounded-2xl bg-[#23291f] px-5 py-4 text-center">
           <p className="text-[11px] uppercase tracking-[0.2em] text-[#9aa581]">That’s</p>
           <p className="font-display text-3xl font-semibold text-[#f4f1e8]">{fmtDuration(minutes)}</p>
         </div>
