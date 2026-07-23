@@ -11,7 +11,9 @@
 import { deficitCoach, weightTrend } from './adapt'
 import { sleepScore } from './sleep'
 import { dietScore as foodScore, PROTEIN_TARGET_DEFAULT, calorieTarget, proteinRange, intakeAverages } from './diet'
-import { bestLifts } from './train'
+import { bestLifts, liftingHistory } from './train'
+import { rotationState, rotationCoachLine } from './rotation'
+import { muscleAudit, muscleAuditCoachLine } from './muscleAudit'
 import { stepsHit } from './makeup'
 
 const MS_DAY = 86400000
@@ -235,6 +237,19 @@ export function buildReview(state, today) {
     weighIns: dc.weighIns ?? null, spanDays: dc.spanDays ?? null,
   }
 
+  // ---- training: rolling PPL rotation + weekly muscle-set audit ------------
+  // The primary training-adherence read is rotation completion, NOT a Monday
+  // session count — and underneath it, whether each muscle is getting its sets.
+  const hist = liftingHistory(state, today)
+  const rot = rotationState(hist, today, { targetPerWeek: profile.gymTargetPerWeek || 3 })
+  const audit = muscleAudit(state, today, 7)
+  const training = {
+    rotation: rot,
+    rotationCoach: rotationCoachLine(rot),
+    audit,
+    auditCoach: muscleAuditCoachLine(audit),
+  }
+
   // ---- milestone projections: at the current trend, what he'd weigh (and his
   // body fat) on the dates that matter to him. ------------------------------
   const milestones = milestoneProjections({ today, wNow, bfNow, loss, profile })
@@ -400,7 +415,7 @@ export function buildReview(state, today) {
   return {
     hasData, daysTracked, generatedFor: today,
     standing, verdictWord, topline,
-    bodyFat, pacing, momentum, milestones,
+    bodyFat, pacing, momentum, milestones, training,
     pillars, overall, strongest, weakest,
     wins, gaps, pacePlan,
     suggestions, applyPatch,

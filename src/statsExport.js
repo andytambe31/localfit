@@ -8,7 +8,7 @@
 import { buildReview } from './review'
 import { bestLifts, recentSessions } from './train'
 import { strengthGoalsFor } from './strengthGoals'
-import { cardioMinutesInWindow, restingHrTrend } from './cardio'
+import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight } from './sleep'
 import { dayTotals, calorieTarget, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus } from './diet'
 
@@ -66,8 +66,12 @@ export function buildStatsExport(state, today, generatedAt) {
   const lifts = bestLifts(state).filter((l) => l.best).map((l) => ({
     lift: l.name, weightLb: l.best.weight, reps: l.best.reps, e1rmLb: Math.round(l.best.e1rm), gainedLb: l.trend, sessions: l.sessions,
   }))
+  // Strength goals carry explicit load semantics so an auditor never compares a
+  // per-hand dumbbell number against a total-bar-load target.
   const goals = strengthGoalsFor(state, today).map((g) => ({
-    name: g.name, current: g.current, target: g.target, unit: g.unit, onPace: g.achieved ? true : g.onPace, deadline: g.deadline,
+    name: g.name, current: g.current, target: g.target, unit: g.unit,
+    loadSemantics: g.loadSemantics, loadBasis: g.basis || null,
+    onPace: g.achieved ? true : g.onPace, deadline: g.deadline,
   }))
   const ct = calorieTarget(state)
   const diet = dietAverages(state, today)
@@ -90,18 +94,47 @@ export function buildStatsExport(state, today, generatedAt) {
       lossRateVerdict: pace.lossRateVerdict, deadlineVerdict: pace.deadlineVerdict,
       bodyFatMeasurementConfidence: pace.measurementConfidence, bodyFatReadingAgeDays: pace.bfStaleDays,
     },
-    training: {
-      sessionsPerWeekTarget: profile.gymTargetPerWeek || 3,
-      bestLifts: lifts,
-      strengthGoals: goals,
-      recentSessions: recentSessions(state, 6),
-    },
-    cardio: {
-      weeklyZone2Min: cardioMinutesInWindow(state.days || {}, today, 7),
-      weeklyTargetMin: profile.cardioTargetPerWeek || 150,
-      restingHrBpm: hr?.latest ?? null,
-      restingHrDeltaVsMonth: hr?.delta ?? null,
-    },
+    training: (() => {
+      const rot = R.training?.rotation
+      const audit = R.training?.audit
+      return {
+        sessionsPerWeekTarget: profile.gymTargetPerWeek || 3,
+        // The primary adherence read: rolling PPL rotation, not a weekly count.
+        rotation: rot ? {
+          nextDayType: rot.next,
+          completedRotationsLast28d: rot.completedRotations28,
+          daysSinceEachType: rot.daysSince, // {push, pull, legs}
+          distributionLast14d: rot.dist14,
+          distributionLast28d: rot.dist28,
+          overdueType: rot.overdueType,
+          longestExposureGapType: rot.longestGapType,
+          longestExposureGapDays: rot.longestGapDays,
+          imbalanced: rot.imbalanced,
+          note: R.training?.rotationCoach ? `${R.training.rotationCoach.headline} ${R.training.rotationCoach.detail}` : undefined,
+        } : null,
+        // Weekly effective sets per muscle (1.0 primary / 0.5 secondary).
+        weeklyEffectiveSetsByMuscle: audit?.hasData
+          ? Object.fromEntries(audit.rows.map((r) => [r.key, { sets: r.sets, range: [r.low, r.high], status: r.status }]))
+          : null,
+        underTrainedMuscles: audit?.under?.map((r) => r.label) || [],
+        muscleNote: R.training?.auditCoach ? `${R.training.auditCoach.headline} ${R.training.auditCoach.detail}` : undefined,
+        bestLifts: lifts,
+        strengthGoals: goals,
+        recentSessions: recentSessions(state, 6),
+      }
+    })(),
+    cardio: (() => {
+      const ramp = cardioRamp(state, today)
+      return {
+        weeklyZone2Min: cardioMinutesInWindow(state.days || {}, today, 7),
+        weeklyTargetMin: profile.cardioTargetPerWeek || 150,
+        // Ramp-from-zero: the fair target for THIS week (a 150 goal isn't week-1's).
+        rampStep: ramp.label,
+        thisWeekTargetMin: ramp.atFull ? ramp.fullTarget : [ramp.targetLow, ramp.targetHigh],
+        restingHrBpm: hr?.latest ?? null,
+        restingHrDeltaVsMonth: hr?.delta ?? null,
+      }
+    })(),
     sleep: sleepSummary(state, today, profile),
     diet: (() => {
       const pr = proteinRange(state)

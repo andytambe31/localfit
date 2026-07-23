@@ -25,7 +25,7 @@ import JourneyView from './JourneyView'
 import YogaFlow from './YogaFlow'
 import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
-import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName } from './cardio'
+import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName, cardioRamp, rampTargetMin } from './cardio'
 import { journeysFor } from './journeys'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus } from './diet'
 import RecipeBuilder from './RecipeBuilder'
@@ -697,7 +697,8 @@ export default function App() {
       sub: yogaDidToday ? 'Session done — recovery banked' : trainCall.rest ? 'Rest day — the best day for a full flow' : `${yogaWeek} of ${yogaTarget} sessions this week` })
   }
   const cardioWeek = cardioMinutesInWindow(state.days || {}, today, 7)
-  const cardioTarget = profile.cardioTargetPerWeek || 150
+  // Ramp-aware: coming from zero, this week's fair target is the ramp step, not 150.
+  const cardioTarget = rampTargetMin(state, today)
   const cardioHit = cardioWeek >= cardioTarget
   if (cardioHit || trainCall.rest) {
     areas.push({ id: 'cardio', label: 'Cardio', done: cardioHit, attn: trainCall.rest && !cardioHit ? 'attention' : 'idle',
@@ -2605,6 +2606,74 @@ function StatsExport({ state, today, onClose }) {
   )
 }
 
+// Training adherence, the honest way: rolling PPL rotation (not a Monday count)
+// plus a weekly effective-set audit per muscle. Surfaces "Legs is next", the
+// distribution, and any lagging/over-loaded muscle — no new nav, lives in Review.
+function TrainingReview({ training }) {
+  const rot = training.rotation
+  const audit = training.audit
+  const rc = training.rotationCoach
+  const label = { push: 'Push', pull: 'Pull', legs: 'Legs' }
+  const barStatus = {
+    under: 'bg-[#f0dcc9]', low: 'bg-[#efe4cf]', ok: 'bg-[#cbd6b3]', high: 'bg-[#efe4cf]', excessive: 'bg-[#f0dcc9]',
+  }
+  return (
+    <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Your rotation</h2>
+        <span className="text-[12px] text-[#6b6857]">{rot.completedRotations28} full rotation{rot.completedRotations28 === 1 ? '' : 's'} · 28d</span>
+      </div>
+      {rc && (
+        <p className="mt-2 text-[14px] leading-snug text-[#23291f]"><span className="font-semibold">{rc.headline}</span> {rc.detail}</p>
+      )}
+      {/* Per-type distribution over 28 days */}
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {['push', 'pull', 'legs'].map((t) => {
+          const isNext = rot.next === t
+          const isOverdue = rot.overdueType === t
+          return (
+            <div key={t} className={`rounded-2xl border px-3 py-2.5 ${isNext ? 'border-[#3d4a32] bg-[#eef0e6]' : 'border-[#e6dfd0] bg-[#ffffff88]'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-semibold text-[#23291f]">{label[t]}</span>
+                {isNext && <span className="rounded-full bg-[#3d4a32] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#f4f1e8]">Next</span>}
+              </div>
+              <div className="mt-1 text-[11px] text-[#6b6857]">
+                {rot.dist28[t]}× · {rot.daysSince[t] == null ? 'not yet' : rot.daysSince[t] === 0 ? 'today' : `${rot.daysSince[t]}d ago`}
+              </div>
+              {isOverdue && <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#8a5a1e]">Overdue</div>}
+            </div>
+          )
+        })}
+      </div>
+      {/* Weekly effective-set audit per muscle */}
+      {audit?.hasData && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[13px] font-semibold uppercase tracking-wide text-[#6b6857]">Weekly sets by muscle</h3>
+            <span className="text-[11px] text-[#8a8474]">effective · 7d</span>
+          </div>
+          <div className="mt-2 flex flex-col gap-1.5">
+            {audit.rows.map((r) => {
+              const frac = Math.max(0.04, Math.min(1, r.sets / r.high))
+              const off = r.status === 'under' || r.status === 'low' || r.status === 'high' || r.status === 'excessive'
+              return (
+                <div key={r.key} className="flex items-center gap-2">
+                  <span className="w-[74px] shrink-0 text-[12px] text-[#33322c]">{r.label}</span>
+                  <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-[#ece6d8]">
+                    <div className={`h-full rounded-full ${barStatus[r.status] || 'bg-[#cbd6b3]'}`} style={{ width: `${frac * 100}%` }} />
+                  </div>
+                  <span className={`w-[52px] shrink-0 text-right text-[11px] tabular-nums ${off ? 'font-semibold text-[#8a5a1e]' : 'text-[#6b6857]'}`}>{r.sets} / {r.low}–{r.high}</span>
+                </div>
+              )
+            })}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-[#8a8474]">A working set counts 1.0 to its primary muscle, 0.5 to each secondary. Bars past the range read amber.</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function ReviewView({ state, today, onApply }) {
   const R = buildReview(state, today)
   const [applied, setApplied] = useState(false)
@@ -2804,6 +2873,9 @@ function ReviewView({ state, today, onApply }) {
           </div>
         </section>
       )}
+
+      {/* Training rotation + muscle-set audit */}
+      {R.training?.rotation?.total > 0 && <TrainingReview training={R.training} />}
 
       {/* Wins */}
       {R.wins.length > 0 && (
@@ -3349,8 +3421,12 @@ function coachTip(state, today, profile) {
       tips.push({ headline: `${pull.current} of ${pull.target} pull-ups.`, support: 'Add two sets of slow negatives when you train — reps climb fast, and it beats another isolation for your back.' })
   } catch { /* no goals yet */ }
   const cw = cardioMinutesInWindow(state.days || {}, today, 7)
-  if (cw < (profile.cardioTargetPerWeek || 150))
-    tips.push({ headline: 'Build the engine today.', support: 'Twenty to thirty easy minutes — a Zone-2 walk or ride. Cardio fitness is one of the strongest predictors of a long life, and it keeps the fat coming off.' })
+  if (cw < rampTargetMin(state, today)) {
+    // Ramp-from-zero: name this week's fair target, keep it steady-state, and never
+    // let it displace an overdue Push/Pull/Legs session.
+    const rampT = cardioRamp(state, today, { recoveryStrained: recoveryState(state, today, profile).level === 'reduce' })
+    tips.push({ headline: rampT.atFull ? 'Build the engine today.' : rampT.headline, support: rampT.guidance })
+  }
   tips.push({ headline: 'Protect tonight’s sleep.', support: `Lights out by ${clockGoal(profile.bedGoal)} — sleep is when the fat you're chasing actually burns and the muscle repairs. Miss it and hunger spikes tomorrow.` })
   tips.push({ headline: 'Eat the rainbow today.', support: 'A vegetable or fruit at every meal — the fibre keeps you full on fewer calories and does more for your health than any supplement.' })
   tips.push({ headline: 'Spread your protein.', support: 'Aim for ~30g at each meal instead of loading it all at dinner — even distribution is what actually holds muscle while you cut.' })
@@ -3537,6 +3613,7 @@ function SessionPreview({ session, estMin, onStart }) {
       </div>
       <p className="mt-1.5 text-[13px] leading-snug text-[#6b6857]">{lifts.join(' · ')}{extra ? ` · +${extra} more` : ''}</p>
       {focus && <p className="mt-0.5 text-[12px] text-[#9aa581]">Extra focus: {focus}</p>}
+      {session.reason && <p className="mt-1.5 border-t border-[#efe9db] pt-1.5 text-[12px] leading-snug text-[#8a8474]">{session.reason}</p>}
       <button onClick={onStart} className="mt-3 w-full rounded-full bg-[#3d4a32] px-6 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Start {session.label.toLowerCase()} session</button>
     </section>
   )
