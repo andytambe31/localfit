@@ -7,18 +7,30 @@
 // Product catalog. `when`: 'am' | 'pm' | 'both'. `kind`: 'daily' | 'active' | 'shave'.
 // Actives carry an `unlock` week and (when scheduled) a `days` weekday list (0=Sun..6=Sat).
 export const PRODUCTS = [
-  { id: 'cleanser', name: 'Cleanser', when: 'both', kind: 'daily' },
-  { id: 'moisturizer', name: 'Moisturizer', when: 'both', kind: 'daily' },
-  { id: 'spf', name: 'SPF', when: 'am', kind: 'daily' },
+  { id: 'cleanser', name: 'Gentle cleanser', when: 'both', kind: 'daily', suggest: 'Non-stripping — CeraVe Hydrating or Vanicream' },
+  { id: 'moisturizer', name: 'Moisturizer', when: 'both', kind: 'daily', why: 'buffers the actives, treats surface dehydration', suggest: 'Lightweight — CeraVe PM, Vanicream, or La Roche-Posay Double Repair' },
+  { id: 'spf', name: 'SPF 30-50', when: 'am', kind: 'daily', why: 'without it pigmentation lingers and the retinoid works less', suggest: 'Daily SPF 30-50, reapply if outdoors' },
   { id: 'guasha', name: 'Gua sha', when: 'pm', kind: 'daily' },
   { id: 'eyeserum', name: 'Caffeine eye serum', when: 'both', kind: 'daily', why: 'dark circles' },
-  { id: 'vitc', name: 'Vitamin C serum', when: 'am', kind: 'active', unlock: 2, why: 'antioxidant, brightening' },
-  { id: 'niacinamide', name: 'Niacinamide 10%', when: 'am', kind: 'active', unlock: 1, why: 'pigmentation, oil control' },
-  { id: 'bha', name: 'BHA 2% exfoliant', when: 'pm', kind: 'active', unlock: 2, days: [1, 4], cap: 2, why: 'texture, congestion around nose' },
-  { id: 'retinoid', name: 'Adapalene 0.1%', when: 'pm', kind: 'active', unlock: 3, days: [2, 5, 0], cap: 3, why: 'pigmentation + texture' },
+  { id: 'vitc', name: 'Vitamin C serum', when: 'am', kind: 'active', unlock: 2, optional: true, why: 'antioxidant, brightening (optional)' },
+  { id: 'niacinamide', name: 'Niacinamide 10%', when: 'am', kind: 'active', unlock: 1, optional: true, why: 'pigmentation, oil control (optional)' },
+  // Priority #1 for the nose: BHA runs 2-3 nights/week, on the nights adapalene doesn't.
+  { id: 'bha', name: 'BHA 2% (salicylic acid)', when: 'pm', kind: 'active', unlock: 2, days: [1, 4], cap: 2, why: 'the nose — sebaceous filaments and congestion; the single biggest win', suggest: "Paula's Choice 2% BHA, The Ordinary Salicylic Acid 2%, or CeraVe Acne Control" },
+  // Priority #2: adapalene, ramped up over weeks (see activeSchedule).
+  { id: 'retinoid', name: 'Adapalene 0.1% (Differin)', when: 'pm', kind: 'active', unlock: 3, days: [2, 5, 0], cap: 3, why: 'prevents clogged pores, smooths texture, fades scars and comedones', suggest: 'Adapalene 0.1% (Differin)' },
   { id: 'azelaic', name: 'Azelaic acid', when: 'pm', kind: 'active', unlock: 4, optional: true, why: 'pigmentation (optional)' },
   { id: 'facialoil', name: 'Facial oil', when: 'pm', kind: 'daily', optional: true, why: 'overnight barrier (optional)' },
   { id: 'shave', name: 'Shave', when: 'am', kind: 'shave' },
+]
+
+// The dermatologist's "what not to do" — surfaced in the products screen so the
+// cautions live next to the routine, not just in someone's memory.
+export const SKIN_CAUTIONS = [
+  "No pore strips — they don't clear sebaceous filaments and irritate the skin.",
+  "Don't squeeze the bumps under your eyes — they're likely milia; a dermatologist can remove them in minutes.",
+  'No physical scrubs on the nose — the BHA does the exfoliating, gently.',
+  'Skip harsh alcohol toners; they strip the barrier and push oil production up.',
+  "Don't layer BHA and adapalene the same night until your skin is fully adjusted (several weeks).",
 ]
 export const PRODUCT_BY_ID = Object.fromEntries(PRODUCTS.map((p) => [p.id, p]))
 
@@ -34,8 +46,8 @@ const STEP_COPY = {
   eyeserum: { title: 'Apply eye serum', instruction: 'Tap a small amount gently under each eye.' },
   moisturizer: { title: 'Moisturize', instruction: 'Smooth an even layer over your face and neck.' },
   spf: { title: 'Apply SPF', instruction: 'Two fingers of sunscreen, the last thing before you leave.' },
-  bha: { title: 'Exfoliate (BHA)', instruction: 'Apply to a dry face, focus on the nose, then wait a minute.' },
-  retinoid: { title: 'Apply retinoid', instruction: 'A pea-sized amount across the face, kept clear of the eyes.' },
+  bha: { title: 'Exfoliate (BHA)', instruction: 'Thin layer on a dry face — work it over the nose and T-zone. No scrubbing; let it sink in a minute.' },
+  retinoid: { title: 'Apply adapalene', instruction: 'A pea-sized amount across forehead, cheeks and chin. Keep it off the eyelids and the skin right under your eyes.' },
   azelaic: { title: 'Apply azelaic acid', instruction: 'A thin layer over pigmented areas.' },
   facialoil: { title: 'Seal with facial oil', instruction: 'A few drops pressed in over your moisturizer.' },
   guasha: { title: 'Gua sha', instruction: 'Glide upward and out along the jaw and cheeks, slow and light.' },
@@ -109,13 +121,63 @@ function activeDoneThisWeek(id, dateIso, state) {
   return n
 }
 
+// The first night adapalene was actually logged (its true ramp anchor), or null.
+function firstRetinoidNight(dateIso, state) {
+  const days = state.days || {}
+  const dates = Object.keys(days).sort()
+  for (const iso of dates) {
+    if (iso > dateIso) break
+    if (stepDone(days[iso], 'pm', 'retinoid')) return iso
+  }
+  return null
+}
+
+// Weeks the owner has been using adapalene, for the ramp. So the ramp begins when
+// adapalene actually starts (not the app's old start date): prefer an explicit
+// retinoidStart, else the first logged adapalene night, else — once it's in the
+// routine but not yet logged — week 0 (the 2×/week ramp-in). Negative = adapalene
+// isn't in the routine yet.
+function retinoidUseWeeks(dateIso, state) {
+  const sk = state.profile?.skincare || {}
+  const anchor = sk.retinoidStart || firstRetinoidNight(dateIso, state)
+  if (anchor) return Math.floor(daysBetween(anchor, dateIso) / 7)
+  // No anchor yet: if adapalene is owned + unlocked, it's about to start → ramp-in.
+  const w = weeksSinceStart(dateIso, sk.startedDate)
+  const unlock = PRODUCT_BY_ID.retinoid.unlock || 3
+  return w >= unlock ? 0 : w - unlock
+}
+
+// The derm's plan as an EFFECTIVE weekly schedule per active on a given date.
+// Adapalene ramps: 2 nights/week for the first two weeks, then every other night
+// ("eventually nightly if tolerated" stays a manual step, not auto-forced). BHA
+// takes the alternating nights — 2×/week while adapalene is still ramping in, then
+// 3×/week once adapalene is every-other-night, so one active runs each night and
+// the two never land together. Returns { days:[weekday], cap:number }.
+export function activeSchedule(prodId, dateIso, state) {
+  if (prodId === 'retinoid') {
+    const rw = retinoidUseWeeks(dateIso, state)
+    if (rw < 0) return { days: [], cap: 0 }
+    if (rw < 2) return { days: [2, 5], cap: 2 }        // ramp-in: Tue / Fri
+    return { days: [0, 2, 4, 6], cap: 4 }              // every other night: Sun/Tue/Thu/Sat
+  }
+  if (prodId === 'bha') {
+    const retAvail = isAvailable(PRODUCT_BY_ID.retinoid, dateIso, state)
+    const rw = retinoidUseWeeks(dateIso, state)
+    if (retAvail && rw >= 2) return { days: [1, 3, 5], cap: 3 } // fill the gaps: Mon/Wed/Fri
+    return { days: [1, 4], cap: 2 }                             // gentle start: Mon / Thu
+  }
+  const p = PRODUCT_BY_ID[prodId]
+  return { days: p?.days || null, cap: p?.cap || 0 }
+}
+
 // The PM active scheduled for tonight (today is one of its weekdays), if any.
 function scheduledTonight(dateIso, state) {
   const wd = weekdayOf(dateIso)
   for (const p of PRODUCTS) {
-    if (p.kind !== 'active' || p.when !== 'pm' || !p.days) continue
+    if (p.kind !== 'active' || p.when !== 'pm') continue
     if (!isAvailable(p, dateIso, state)) continue
-    if (p.days.includes(wd)) return p
+    const sch = activeSchedule(p.id, dateIso, state)
+    if (sch.days && sch.days.includes(wd)) return p
   }
   return null
 }
@@ -125,14 +187,16 @@ function scheduledTonight(dateIso, state) {
 function carriedActive(dateIso, state, blockId) {
   const MAX_BACK = 7
   for (const p of PRODUCTS) {
-    if (p.kind !== 'active' || p.when !== 'pm' || !p.days) continue
+    if (p.kind !== 'active' || p.when !== 'pm') continue
     if (p.id === blockId) continue
     if (!isAvailable(p, dateIso, state)) continue
-    if (p.cap && activeDoneThisWeek(p.id, dateIso, state) >= p.cap) continue
+    const sch = activeSchedule(p.id, dateIso, state)
+    if (!sch.days || !sch.days.length) continue
+    if (sch.cap && activeDoneThisWeek(p.id, dateIso, state) >= sch.cap) continue
     // most recent scheduled prior day
     for (let i = 1; i <= MAX_BACK; i++) {
       const iso = shift(dateIso, -i)
-      if (!p.days.includes(weekdayOf(iso))) continue
+      if (!sch.days.includes(weekdayOf(iso))) continue
       // it was a scheduled night; was it done on or after that night?
       let doneSince = false
       for (let j = i; j >= 0; j--) {
@@ -148,8 +212,11 @@ function carriedActive(dateIso, state, blockId) {
 // Resolve which single active (if any) runs tonight, honoring caps + no-double rule.
 export function tonightActive(dateIso, state) {
   let sched = scheduledTonight(dateIso, state)
-  // Respect the weekly cap on the scheduled one; if capped, drop it.
-  if (sched && sched.cap && activeDoneThisWeek(sched.id, dateIso, state) >= sched.cap) sched = null
+  // Respect the (ramp-aware) weekly cap on the scheduled one; if capped, drop it.
+  if (sched) {
+    const cap = activeSchedule(sched.id, dateIso, state).cap
+    if (cap && activeDoneThisWeek(sched.id, dateIso, state) >= cap) sched = null
+  }
   const active = sched || carriedActive(dateIso, state, null) // no scheduled → allow one carry-over
   // Dynamic: when skin is flagged sensitive (feedback), ease off — skip tonight's
   // active if another active ran within the last 2 nights, so the barrier recovers.
