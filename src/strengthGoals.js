@@ -44,22 +44,49 @@ function liftSeries(state, exId, metric) {
   return out
 }
 
+// How a lift's load is measured, so a target is never compared against a
+// differently-counted current. 'totalExternalLoad' = everything on the bar
+// (barbell lifts); 'perHand' = one dumbbell's weight (the app's DB logging
+// convention — see train.DB_EXERCISES); 'bodyweight' = reps, no external load.
+export const LOAD_SEMANTICS_LABEL = {
+  totalExternalLoad: 'total bar load',
+  perHand: 'per hand',
+  combined: 'both hands combined',
+  bodyweight: 'bodyweight reps',
+}
+// The unit shown next to a number, disambiguated by semantics (65 "lb/hand" can
+// never be mistaken for 65 lb on a bar).
+export function goalUnitLabel(g) {
+  if (g.metric === 'reps') return 'reps'
+  if (g.loadSemantics === 'perHand') return 'lb/hand'
+  if (g.loadSemantics === 'combined') return 'lb (pair)'
+  return 'lb'
+}
+
 // The default goal set, seeded to what he told us + relative-strength standards.
 // Deadline shared with the body-fat deadline (end of year) unless overridden.
+// Every goal carries explicit loadSemantics so current and target are counted the
+// same way (the DB press is per-hand — matching how the session logs dumbbells).
 function defaultGoals(state) {
   const bw = bodyweightLb(state)
   const deadline = state.profile?.strengthDeadline || state.profile?.bodyFatDeadline || '2026-12-31'
   return [
     { id: 'pull_up', metric: 'reps', name: 'Pull-Ups', unit: 'reps', deadline,
-      target: 15, basis: 'your goal' },
+      loadSemantics: 'bodyweight', target: 15, basis: 'your goal' },
     { id: 'squat', metric: 'e1rm', name: 'Barbell Squat', unit: 'lb', deadline,
-      target: bw ? round5(bw * 1.25) : 185, basis: bw ? '1.25× bodyweight' : 'starter target' },
-    { id: 'incline_db_press', metric: 'e1rm', name: 'Incline DB Press', unit: 'lb', deadline, perDumbbell: true,
-      target: bw ? round5(bw * 0.4) : 55, basis: bw ? '0.4× bodyweight per dumbbell' : 'starter target' },
+      loadSemantics: 'totalExternalLoad',
+      target: bw ? round5(bw * 1.25) : 185, basis: bw ? '1.25× bodyweight (bar)' : 'starter target' },
+    { id: 'incline_db_press', metric: 'e1rm', name: 'Incline DB Press', unit: 'lb/hand', deadline, perDumbbell: true,
+      loadSemantics: 'perHand',
+      target: bw ? round5(bw * 0.4) : 55, basis: bw ? '0.4× bodyweight per hand' : 'starter target' },
   ]
 }
 
 function statusFor(g, state, today) {
+  // Custom/profile goals may omit semantics — infer a safe default so nothing is
+  // ever compared across mismatched units.
+  g = { ...g, loadSemantics: g.loadSemantics || (g.metric === 'reps' ? 'bodyweight' : 'totalExternalLoad') }
+  g = { ...g, unit: goalUnitLabel(g) }
   const series = liftSeries(state, g.id, g.metric)
   const best = series.reduce((m, p) => (m == null || p.value > m.value ? p : m), null) // all-time best + its date
   const current = best ? best.value : 0
@@ -92,7 +119,8 @@ function statusFor(g, state, today) {
       line = `Behind pace — ${remaining} ${g.unit} to go in ${daysLeft} days. ${g.metric === 'reps' ? 'Add pull-up volume each week' : 'Push the load or reps a little harder'} to close it.`
     }
   }
-  return { ...g, current, best, pct, remaining, daysLeft, achieved, onPace, projected, line }
+  return { ...g, current, best, pct, remaining, daysLeft, achieved, onPace, projected, line,
+    loadSemantics: g.loadSemantics, loadSemanticsLabel: LOAD_SEMANTICS_LABEL[g.loadSemantics] || null }
 }
 
 export function strengthGoalsFor(state, today) {

@@ -17,6 +17,7 @@
  * -------------------------------------------------------------------------- */
 import { trainingPhase } from './periodize'
 import { gymMakeup, stepsHit } from './makeup'
+import { nextType as rotationNext, rotationState, PPL_LABEL } from './rotation'
 
 // ---- libraries --------------------------------------------------------------
 
@@ -255,16 +256,10 @@ function sessionsThisWeek(hist, todayIso) {
   return hist.filter((h) => weekKey(h.date) === wk).length
 }
 
-const ROTATION = ['push', 'pull', 'legs']
 // Day-types offered as manual swaps: the rotation three plus Upper/Lower, so you
 // can run a 5-day split on demand. Auto-rotation stays push/pull/legs; Upper and
 // Lower are opt-in (chosen via the swap), never force-scheduled.
 const SWAP_TYPES = ['push', 'pull', 'legs', 'upper', 'lower']
-function rotateAfter(day) {
-  const i = ROTATION.indexOf(day)
-  return i === -1 ? 'push' : ROTATION[(i + 1) % ROTATION.length]
-}
-
 // Days since a given day-type was last trained (Infinity if never). Drives the
 // recovery guard on swaps — a day-type is "recovered" if it wasn't hit yesterday.
 function daysSinceDayType(hist, dayType, todayIso) {
@@ -309,11 +304,18 @@ export function decideDayType(state, todayIso) {
       reason: `${DAY_PLAN[owed].label} is owed — you swapped it out, and those muscles are recovered now.` }
   }
 
-  const next = lastTyped ? rotateAfter(lastTyped.day) : 'push'
+  // Rolling PPL rotation: least-recently-trained day is next, so a neglected Legs
+  // day jumps a strict cycle instead of waiting its turn. No Monday reset.
+  const next = lastTyped ? rotationNext(hist, todayIso) : 'push'
   const plan = DAY_PLAN[next]
+  const rs = rotationState(hist, todayIso, { targetPerWeek: target })
   let reason
   if (!lastTyped) {
     reason = `First session on record — we open the rotation with ${plan.label}.`
+  } else if (rs.overdueType === next && rs.daysSince[next] != null) {
+    reason = `${plan.label} is the longest out of the three — ${rs.daysSince[next]} days — so it jumps the rotation and comes up today. Even the split before piling volume elsewhere.`
+  } else if (rs.imbalanced && rs.underTrained.includes(next)) {
+    reason = `Your split is running heavy on ${rs.overTrained.map((t) => PPL_LABEL[t]).join('/')} lately — ${plan.label} is behind, so it's the call today.`
   } else {
     const ago = sinceLast === 1 ? 'yesterday' : sinceLast === Infinity ? 'a while ago' : `${sinceLast} days ago`
     reason = `Last lift was ${DAY_PLAN[lastTyped.day].label.toLowerCase()} ${ago} — those muscles are recovering, so today is ${plan.label}.`
@@ -470,7 +472,7 @@ export function buildSession(state, todayIso, opts = {}) {
   const hist = liftingHistory(state, todayIso)
   if (!opts.dayType && decision.rest) {
     const lastTyped = [...hist].reverse().find((h) => h.day)
-    dayType = lastTyped ? rotateAfter(lastTyped.day) : 'push'
+    dayType = lastTyped ? rotationNext(hist, todayIso) : 'push'
   }
   const swapped = !!opts.dayType && opts.dayType !== decision.dayType
   const plan = DAY_PLAN[dayType]
