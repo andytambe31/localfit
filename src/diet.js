@@ -324,6 +324,76 @@ export function intakeAverages(state, todayIso, days = 14) {
   return { avgProtein: n ? Math.round(pSum / n) : null, avgCalories: n ? Math.round(kSum / n) : null, daysLogged: n }
 }
 
+// --- per-meal protein distribution ------------------------------------------
+// Muscle protein synthesis responds best to ~0.4g/kg (≈30–45g) spread across the
+// day, not one big dinner hit. This reads the per-meal split (foods carry a `meal`
+// tag from when they were logged) and flags a lopsided day so the fix is "spread
+// it", not "eat more". Returns per-meal grams, the ideal per-meal target, and a
+// lopsided flag + note (only once enough main meals are in to judge fairly).
+export function mealProteinDistribution(day, range) {
+  const log = day?.food || []
+  const byMeal = { breakfast: 0, lunch: 0, dinner: 0, snack: 0 }
+  for (const e of log) { const m = MEAL_ORDER.includes(e.meal) ? e.meal : 'snack'; byMeal[m] += e.protein || 0 }
+  const r0 = (n) => Math.round(n)
+  const total = byMeal.breakfast + byMeal.lunch + byMeal.dinner + byMeal.snack
+  const preferred = range?.preferred || PROTEIN_TARGET_DEFAULT
+  const perMealTarget = Math.round(preferred / 4 / 5) * 5 // ~4 feedings, rounded to 5g
+  const mains = ['breakfast', 'lunch', 'dinner']
+  const mainsLogged = mains.filter((m) => byMeal[m] > 0)
+  const biggest = Object.entries(byMeal).sort((a, b) => b[1] - a[1])[0]
+  // Lopsided: meaningful total, ≥55% in one meal, and at least two main meals eaten
+  // (so it's a real distribution problem, not just "only had one meal so far").
+  const lopsided = total >= 60 && (biggest[1] / total) >= 0.55 && mainsLogged.length >= 2
+  const lightMains = mains.filter((m) => byMeal[m] > 0 && byMeal[m] < perMealTarget * 0.6)
+  let note = null
+  if (lopsided) {
+    note = `Protein's bunched into ${MEAL_LABEL[biggest[0]].toLowerCase()} (${r0(biggest[1])}g of ${r0(total)}g). Spread it — aim ~${perMealTarget}g at each meal; even distribution holds more muscle than one big hit.`
+  } else if (lightMains.length && total >= 40) {
+    note = `${lightMains.map((m) => MEAL_LABEL[m]).join(' and ')} ran light on protein. Aim ~${perMealTarget}g a meal to keep synthesis topped up.`
+  }
+  return {
+    byMeal: { breakfast: r0(byMeal.breakfast), lunch: r0(byMeal.lunch), dinner: r0(byMeal.dinner), snack: r0(byMeal.snack) },
+    total: r0(total), perMealTarget, biggestMeal: biggest[0], lopsided, lightMains, note,
+  }
+}
+
+// Up to `n` DISTINCT real-food combos from the pantry that close a protein gap,
+// each within the remaining calorie room — concrete "grab this" actions, not a
+// generic "eat more protein". The first is the most protein-per-calorie; the rest
+// deliberately avoid repeating the first pick's lead item so there's real choice.
+export function proteinGapCombos(state, dateIso, loc, targetG = PROTEIN_TARGET_DEFAULT, n = 2) {
+  const day = state.days?.[dateIso] || {}
+  const totals = dayTotals(day)
+  const gap = targetG - totals.protein
+  if (gap <= 0) return []
+  const ct = calorieTarget(state)
+  const kcalLeft = ct ? ct.ceiling - totals.kcal : Infinity
+  const lean = pantryFor(effectivePantry(state), loc)
+    .filter((it) => it.protein >= 8 && (it.protein / Math.max(1, it.kcal)) >= 0.06) // real protein, lean
+    .sort((a, b) => (b.protein / Math.max(1, b.kcal)) - (a.protein / Math.max(1, a.kcal)))
+  if (!lean.length) return []
+  const combos = []
+  const excluded = new Set() // items already spent on a prior combo → real variety
+  for (const lead of lean) {
+    if (combos.length >= n) break
+    if (excluded.has(lead.id)) continue
+    const pool = [lead, ...lean.filter((x) => x.id !== lead.id && !excluded.has(x.id))]
+    const pick = []
+    let p = 0, k = 0
+    for (const it of pool) {
+      if (pick.length >= 3 || p >= gap) break
+      if (ct && k + it.kcal > kcalLeft && pick.length) continue
+      pick.push(it); p += it.protein; k += it.kcal
+    }
+    if (!pick.length) continue
+    pick.forEach((it) => excluded.add(it.id))
+    combos.push({ items: pick, names: pick.map((it) => it.name).join(' + '),
+      addProtein: Math.round(p), addKcal: Math.round(k),
+      fitsCeiling: !ct || k <= kcalLeft })
+  }
+  return combos
+}
+
 // --- recommendation: protein-first, fit the remaining calorie room ----------
 export function recommend(state, dateIso, loc, proteinTarget = PROTEIN_TARGET_DEFAULT) {
   const day = state.days?.[dateIso] || {}
@@ -482,6 +552,10 @@ export function dayCritique(state, dateIso, proteinTarget = PROTEIN_TARGET_DEFAU
   if (log.some((e) => e.id === 'diet_coke' || e.id === 'coke_zero')) {
     points.push(`Diet soda's calorie-free, but make water the default — it's not helping the goal.`)
   }
+
+  // Protein distribution: bunched into one meal → spread it, don't eat more.
+  const dist = mealProteinDistribution(state.days?.[dateIso] || {}, proteinRange(state))
+  if (dist.note && dist.lopsided) { points.push(dist.note); worsen('neutral') }
 
   return { tone, headline, points }
 }

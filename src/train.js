@@ -18,6 +18,7 @@
 import { trainingPhase } from './periodize'
 import { gymMakeup, stepsHit } from './makeup'
 import { nextType as rotationNext, rotationState, PPL_LABEL } from './rotation'
+import { recoveryState } from './sleep'
 
 // ---- libraries --------------------------------------------------------------
 
@@ -456,6 +457,30 @@ export function prefillSets(state, exId, todayIso, target, phase) {
   })
 }
 
+// ---- recovery auto-regulation ----------------------------------------------
+
+// When sleep has been genuinely poor (recoveryState 'reduce'), the session eases
+// off instead of demanding a PR: hold last time's top set rather than chasing +1
+// rep / +load. Training hard through a recovery hole stalls progress or gets you
+// hurt. First-time lifts and deload weeks pass through untouched.
+function easeTarget(state, exId, todayIso, target) {
+  if (target.first || target.deload) return target
+  const meta = EXERCISES[exId]
+  const last = lastPerformed(state, exId, todayIso)
+  if (!last || !last.length) {
+    return { ...target, hold: true, note: 'Recovery is down — keep this easy and clean, leave 2–3 reps in reserve. Hold, don\'t push.' }
+  }
+  const top = last.reduce((a, b) => (((b.weight || 0) > (a.weight || 0)) || ((b.weight || 0) === (a.weight || 0) && (b.reps || 0) > (a.reps || 0)) ? b : a))
+  const w = top.weight || target.weight
+  const reps = Math.max(meta.repLow, top.reps || meta.repLow)
+  const loadNote = meta.bodyweight ? (top.weight ? ` +${top.weight} lb` : '') : `${w ? ` at ${w} lb` : ''}`
+  return { ...target, weight: w, reps, hold: true,
+    note: `Recovery's down after some poor sleep — repeat last time (${reps} reps${loadNote}) cleanly instead of chasing a PR. Protect the session; the progression waits for a rested week.` }
+}
+
+// The eased effort/RIR intent for a strained week — more in reserve, no grinding.
+const EASE_EFFORT = { rirTarget: '2–3', short: 'Recover', line: 'Recovery is down after some short or broken nights — leave 2–3 reps in reserve, hold your weights, and don\'t grind a single rep. Auto-regulating like this is how you keep progressing instead of digging a deeper hole.' }
+
 // ---- session assembly -------------------------------------------------------
 
 // Build the full authoritative session for the day. Returns either a rest
@@ -479,6 +504,12 @@ export function buildSession(state, todayIso, opts = {}) {
   const emphasis = pickEmphasis(state, todayIso, dayType)
   const phase = trainingPhase(state, todayIso) // this week's strategic intent
 
+  // Recovery auto-regulation: multiple poor/short nights → ease off (hold instead
+  // of PR, trim an accessory set, raise the reps-in-reserve). Never on a deload
+  // week (already light). A single off night does NOT trigger this.
+  const recovery = state.profile ? recoveryState(state, todayIso, state.profile) : { level: 'ok' }
+  const easeOff = recovery.level === 'reduce' && !phase.deload
+
   // Core lifts, plus emphasis isolation appended (deduped, capped).
   const ids = [...plan.core]
   for (const exId of plan.emphasisPool[emphasis] || []) {
@@ -487,8 +518,9 @@ export function buildSession(state, todayIso, opts = {}) {
 
   const exercises = ids.map((id) => {
     const meta = EXERCISES[id]
-    const target = targetFor(state, id, todayIso, phase)
-    return {
+    let target = targetFor(state, id, todayIso, phase)
+    if (easeOff) target = easeTarget(state, id, todayIso, target)
+    const ex = {
       id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db, bodyweight: !!meta.bodyweight,
       // rep range shown reflects the phase (heavy week => low reps)
       repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
@@ -499,12 +531,17 @@ export function buildSession(state, todayIso, opts = {}) {
       // repeat/nudge rather than re-enter; the target note carries the progression.
       sets: prefillSets(state, id, todayIso, target, phase),
     }
+    // Ease-off: trim ONE set from accessory isolation work (min 2) — cut volume
+    // where it costs least, keep the compounds intact.
+    if (easeOff && meta.role === 'isolation' && ex.sets.length > 2) ex.sets.pop()
+    return ex
   })
 
   // Make-up for owed (skipped) sessions: harder next lift — add a set to each
-  // core lift to win back the missed stimulus. Not on a deload week (recovery).
+  // core lift to win back the missed stimulus. Not on a deload week (recovery), and
+  // not while auto-regulating a recovery hole (don't pile on when you're fried).
   const makeup = gymMakeup(state, todayIso)
-  if (makeup.debt > 0 && makeup.extraSets > 0 && !phase.deload) {
+  if (makeup.debt > 0 && makeup.extraSets > 0 && !phase.deload && !easeOff) {
     for (const ex of exercises) {
       if (!plan.core.includes(ex.id) || !ex.sets?.length) continue
       const last = ex.sets[ex.sets.length - 1]
@@ -518,7 +555,8 @@ export function buildSession(state, todayIso, opts = {}) {
   // heavy lift so the squat/deadlift keeps a fresh, strong brace.
   const coreExercises = pickCore(hist.length).map((id) => {
     const meta = EXERCISES[id]
-    const target = targetFor(state, id, todayIso, phase)
+    let target = targetFor(state, id, todayIso, phase)
+    if (easeOff) target = easeTarget(state, id, todayIso, target)
     return {
       id, name: meta.name, muscle: meta.muscle, role: meta.role, db: !!meta.db, bodyweight: !!meta.bodyweight,
       repLow: target.repLow ?? meta.repLow, repHigh: target.repHigh ?? meta.repHigh, inc: meta.inc,
@@ -539,13 +577,16 @@ export function buildSession(state, todayIso, opts = {}) {
     label: plan.label,
     // periodization stamp — persisted on the session, drives the off-ledger skip
     phase: phase.key, phaseLabel: phase.label, phaseShort: phase.short, phaseLine: phase.line,
-    deload: phase.deload, heavy: phase.heavy, effort: weekEffort(phase),
+    deload: phase.deload, heavy: phase.heavy, effort: easeOff ? EASE_EFFORT : weekEffort(phase),
+    // Recovery auto-regulation stamp — drives the eased targets + the gate copy.
+    recovery: easeOff ? { eased: true, poorNights: recovery.poorNights, avg: recovery.avg } : null,
     weekNumber: phase.weekNumber, totalWeeks: phase.totalWeeks, blockNumber: phase.blockNumber,
     swapped, swappedFrom: swapped ? decision.dayType : null,
     reason: (swapped
       ? `Swapped to ${plan.label} for today — ${DAY_PLAN[decision.dayType].label} is owed and waiting for you next time.`
       : (decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason))
-      + (makeup.debt > 0 && !phase.deload ? ` Making up ${makeup.debt} skipped session${makeup.debt > 1 ? 's' : ''}: one extra set on the main lifts.` : ''),
+      + (makeup.debt > 0 && !phase.deload && !easeOff ? ` Making up ${makeup.debt} skipped session${makeup.debt > 1 ? 's' : ''}: one extra set on the main lifts.` : '')
+      + (easeOff ? ` Sleep's been thin (${recovery.poorNights >= 2 ? `${recovery.poorNights} rough nights` : 'short nights'}), so today auto-regulates: hold your weights, trim a little accessory volume, and leave more in the tank. Protect the progress instead of grinding.` : ''),
     emphasisReason: emphasis ? `Extra focus on ${labelFor(emphasis)} — it's lagging and fits ${plan.label.toLowerCase()} day.` : null,
     warmup: WARMUPS[dayType],
     exercises,

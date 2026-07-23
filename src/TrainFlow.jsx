@@ -90,6 +90,12 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
             </div>
           )}
           <p className="mt-4 text-[16px] leading-relaxed text-[#cfccba]">{session.reason}</p>
+          {!rest && session.recovery?.eased && (
+            <div className="mt-4 rounded-2xl border border-[#5a4f2c] bg-[#322d1d] px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-[#e3d9b4]">Recovery mode</p>
+              <p className="mt-1 text-[14px] leading-relaxed text-[#e3d9b4]">Sleep's been thin, so today auto-regulates — hold your weights, one less accessory set, and stop each set 2–3 reps short. This protects your progress; you'll push again once you're rested.</p>
+            </div>
+          )}
           {!rest && session.emphasisReason && (
             <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{session.emphasisReason}</p>
           )}
@@ -248,6 +254,12 @@ function ExerciseCard({ ex, effort, onPrev, onNext, onSet, onToggle, onRIR }) {
   const t = ex.target || {}
   const guide = coachingFor(ex.id)
   const [showGuide, setShowGuide] = useState(true)
+  // Low-load guard: a weight well under the target is usually a mislog (15 for 150),
+  // and a bad number poisons next session's progression target. Ask once per set;
+  // "Deliberate" keeps it (deload / injury / back-off), "Clear" wipes the field.
+  const [lowOk, setLowOk] = useState({}) // setIdx → acknowledged
+  const isLowLoad = (set, i) => !t.first && !ex.bodyweight && (t.weight || 0) > 0 &&
+    set.weight != null && set.weight > 0 && set.weight < t.weight * 0.6 && !lowOk[i]
   // Reinforcement: did a completed set meet/beat the target (weight & reps)?
   const beaten = !t.first && ex.sets.some((s) => s.done && s.reps && s.reps >= (t.reps || 0) && (s.weight || 0) >= (t.weight || 0))
   const RIR = [0, 1, 2, 3, '4+']
@@ -295,14 +307,23 @@ function ExerciseCard({ ex, effort, onPrev, onNext, onSet, onToggle, onRIR }) {
 
       <div className="mt-4 space-y-2">
         {ex.sets.map((set, i) => (
-          <div key={i} className={`flex items-center gap-2.5 rounded-2xl border px-3 py-2.5 ${set.done ? 'border-[#5b6a44] bg-[#2c3522]' : 'border-[#3a4230] bg-[#272d20]'}`}>
-            <span className="w-10 shrink-0 text-[12px] uppercase tracking-wider text-[#8c9472]">Set {i + 1}</span>
-            <SetInput value={set.weight} placeholder={t.weight != null ? String(t.weight) : 'lb'} unit="lb" onChange={(v) => onSet(i, 'weight', v)} />
-            <SetInput value={set.reps} placeholder={t.reps != null ? String(t.reps) : 'reps'} unit="reps" onChange={(v) => onSet(i, 'reps', v)} />
-            <button onClick={() => onToggle(i)} aria-label="Mark set done"
-              className={`ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-full border ${set.done ? 'border-[#7d8a5f] bg-[#3d4a32]' : 'border-[#4a5238]'}`}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={set.done ? '#f4f1e8' : '#6f7857'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-            </button>
+          <div key={i}>
+            <div className={`flex items-center gap-2.5 rounded-2xl border px-3 py-2.5 ${set.done ? 'border-[#5b6a44] bg-[#2c3522]' : 'border-[#3a4230] bg-[#272d20]'}`}>
+              <span className="w-10 shrink-0 text-[12px] uppercase tracking-wider text-[#8c9472]">Set {i + 1}</span>
+              <SetInput value={set.weight} placeholder={t.weight != null ? String(t.weight) : 'lb'} unit="lb" onChange={(v) => onSet(i, 'weight', v)} />
+              <SetInput value={set.reps} placeholder={t.reps != null ? String(t.reps) : 'reps'} unit="reps" onChange={(v) => onSet(i, 'reps', v)} />
+              <button onClick={() => onToggle(i)} aria-label="Mark set done"
+                className={`ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-full border ${set.done ? 'border-[#7d8a5f] bg-[#3d4a32]' : 'border-[#4a5238]'}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={set.done ? '#f4f1e8' : '#6f7857'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              </button>
+            </div>
+            {isLowLoad(set, i) && (
+              <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#5a4f2c] bg-[#322d1d] px-3 py-2">
+                <span className="min-w-0 flex-1 text-[12px] leading-snug text-[#e3d9b4]">{set.weight} lb is well under your usual {t.weight} — deliberate, or a mislog?</span>
+                <button onClick={() => setLowOk((m) => ({ ...m, [i]: true }))} className="shrink-0 rounded-full bg-[#3d4a32] px-3 py-1 text-[11px] font-semibold text-[#f4f1e8]">Deliberate</button>
+                <button onClick={() => onSet(i, 'weight', null)} className="shrink-0 rounded-full border border-[#5a4f2c] px-3 py-1 text-[11px] font-semibold text-[#e3d9b4]">Clear</button>
+              </div>
+            )}
           </div>
         ))}
       </div>

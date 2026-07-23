@@ -27,7 +27,7 @@ import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName, cardioRamp, rampTargetMin } from './cardio'
 import { journeysFor } from './journeys'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
@@ -3457,22 +3457,44 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
   // Protein coached as a range: urgent below the floor, a gentle "one more
   // serving" between floor and preferred, quiet once the target band is hit.
   // Paced to the time of day so mornings don't nag.
+  // A concrete "grab this" line from the real pantry, within today's calorie room.
+  const comboLine = (targetG) => {
+    if (!state) return null
+    const loc = defaultLocation(today)
+    const combos = proteinGapCombos(state, today, loc, targetG, 2)
+    if (!combos.length) return null
+    const c = combos[0]
+    const alt = combos[1] && combos[1].names !== c.names ? ` Or ${combos[1].names} (+${combos[1].addProtein}g).` : ''
+    return `${c.names} → +${c.addProtein}g${c.addKcal ? `, ~${c.addKcal} cal` : ''}.${alt}`
+  }
   const proteinNudge = () => {
     if (!dt.count) return null
     const frac = Math.max(0, Math.min(1, (hour - 8) / 13))
     const g = Math.round(dt.protein)
     const floorByNow = pRange.floor * frac
     const gap = Math.round(pRange.preferred - dt.protein)
+    // Distribution flag: if protein's already bunched into one meal, spreading is
+    // the fix — surface it once there's enough logged to judge fairly.
+    const dist = mealProteinDistribution(day, pRange)
     if (dt.protein < floorByNow - 20) {
+      const combo = comboLine(pRange.preferred)
       return { eyebrow, headline: `Protein's low — ${g}g, floor is ${pRange.floor}.`,
         support: over
           ? `Keep it lean — a scoop of whey or egg whites (~25g, ~120 cal) without piling on calories. Protein's the priority on a cut.`
-          : `You're ${gap > 0 ? `~${gap}g` : 'a bit'} short. A Greek yogurt + whey, or a chicken serving, closes it — protein protects muscle while you lose fat.`,
+          : combo
+            ? `You're ${gap > 0 ? `~${gap}g` : 'a bit'} short. ${combo} Protein protects muscle while you lose fat.`
+            : `You're ${gap > 0 ? `~${gap}g` : 'a bit'} short. A Greek yogurt + whey, or a chicken serving, closes it — protein protects muscle while you lose fat.`,
         action: { target: 'diet' } }
     }
+    if (dist.lopsided && hour >= 15) {
+      return { eyebrow, headline: `Spread your protein out.`, support: dist.note, action: { target: 'diet' } }
+    }
     if (dt.protein < pRange.preferred * Math.min(1, frac + 0.15) && hour >= 15) {
+      const combo = comboLine(pRange.preferred)
       return { eyebrow, headline: `Protein's on track — ${g}g. One more serving.`,
-        support: `You're past the floor. One lean feeding gets you into the ${pRange.preferred}–${pRange.stretch}g target band that holds muscle best.`,
+        support: combo
+          ? `You're past the floor. ${combo} That lands you in the ${pRange.preferred}–${pRange.stretch}g band that holds muscle best.`
+          : `You're past the floor. One lean feeding gets you into the ${pRange.preferred}–${pRange.stretch}g target band that holds muscle best.`,
         action: { target: 'diet' } }
     }
     return null
