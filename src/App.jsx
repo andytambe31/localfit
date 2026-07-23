@@ -29,7 +29,7 @@ import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTy
 import { journeysFor } from './journeys'
 import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution } from './diet'
 import RecipeBuilder from './RecipeBuilder'
-import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID } from './skincare'
+import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID, SKIN_CAUTIONS } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
 import { API_BASE } from './config'
 
@@ -2025,6 +2025,7 @@ function ProductsModal({ profile, onClose, onSave }) {
         <div className="min-w-0">
           <p className="text-[14px] font-semibold text-[#23211c]">{p.name}</p>
           {p.why && <p className="text-[12px] text-[#8a8474]">{p.why}</p>}
+          {p.suggest && <p className="mt-0.5 text-[12px] text-[#6b7355]">Try: {p.suggest}</p>}
         </div>
         <span className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium ${on ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#d8d1c2] bg-white text-[#4a463c]'}`}>
           {on ? 'Owned' : 'Add'}
@@ -2053,6 +2054,15 @@ function ProductsModal({ profile, onClose, onSave }) {
         <div className="divide-y divide-[#ece6da]">
           {shopping.length ? shopping.map((p) => <Row key={p.id} p={p} />) : <p className="py-3 text-[13px] text-[#8a8474]">You own everything on the catalog.</p>}
         </div>
+
+        <p className="mt-5 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">What not to do</p>
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {SKIN_CAUTIONS.map((c, i) => (
+            <li key={i} className="flex gap-2 text-[12px] leading-snug text-[#6b6857]">
+              <span className="mt-[2px] text-[#b0552a]">·</span><span>{c}</span>
+            </li>
+          ))}
+        </ul>
 
         <div className="mt-5 flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
@@ -3404,8 +3414,8 @@ function expectedWater(hour, target) {
 }
 // Friendly name for tonight's active, for the coach's support line.
 function activeName(id) {
-  if (id === 'retinoid') return 'Retinoid tonight'
-  if (id === 'bha') return 'Exfoliate tonight'
+  if (id === 'retinoid') return 'Adapalene tonight'
+  if (id === 'bha') return 'BHA (salicylic acid) tonight'
   if (id === 'azelaic') return 'Azelaic acid tonight'
   return null
 }
