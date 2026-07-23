@@ -13,6 +13,7 @@ import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { strengthGoalsFor } from './strengthGoals'
 import { allPhotos, putPhoto, deletePhoto, compressImage, POSES } from './photos'
+import { buildStatsExport, STATS_PROMPT } from './statsExport'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
@@ -2538,9 +2539,55 @@ function fmtRange(low, high, step) {
   return a === b ? fmt(a) : `${fmt(a)}–${fmt(b)}`
 }
 
+// Full-screen viewer for the stats JSON: copy it (with or without the coaching
+// prompt), share it, or read it. Everything's local; copying is the whole point.
+function StatsExport({ state, today, onClose }) {
+  const json = useMemo(() => JSON.stringify(buildStatsExport(state, today, new Date().toISOString()), null, 2), [state, today])
+  const [copied, setCopied] = useState(null)
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+  const copy = async (text, which) => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
+      else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove() }
+      setCopied(which); setTimeout(() => setCopied(null), 1600)
+    } catch { setCopied('err'); setTimeout(() => setCopied(null), 1600) }
+  }
+  const share = async () => {
+    try { if (navigator.share) await navigator.share({ text: `${STATS_PROMPT}\n\n${json}` }) } catch { /* cancelled */ }
+  }
+  const btn = 'flex-1 rounded-full px-4 py-3 text-[13px] font-semibold active:scale-[0.99]'
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col px-5 pt-6">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Stats for AI</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">A clean snapshot of your numbers. Copy it into ChatGPT or Claude and ask what to change — the "Copy with prompt" button includes a coaching question so you can paste and go.</p>
+
+        <div className="mt-4 flex gap-2">
+          <button onClick={() => copy(`${STATS_PROMPT}\n\n${json}`, 'prompt')} className={`${btn} bg-[#3d4a32] text-[#f4f1e8]`}>{copied === 'prompt' ? 'Copied!' : 'Copy with prompt'}</button>
+          <button onClick={() => copy(json, 'json')} className={`${btn} border border-[#cdd4bb] bg-[#fbf9f3] text-[#3d4a32]`}>{copied === 'json' ? 'Copied!' : 'Copy JSON'}</button>
+          {typeof navigator !== 'undefined' && navigator.share && (
+            <button onClick={share} className={`${btn} max-w-[80px] border border-[#cdd4bb] bg-[#fbf9f3] text-[#3d4a32]`}>Share</button>
+          )}
+        </div>
+        {copied === 'err' && <p className="mt-2 text-[12px] text-[#8a2e2e]">Couldn't copy — select the text below and copy manually.</p>}
+
+        <pre className="mt-4 mb-6 min-h-0 flex-1 overflow-auto whitespace-pre rounded-2xl border border-[#e0d9c9] bg-[#23291f] p-4 text-[11px] leading-relaxed text-[#dfe6cf]">{json}</pre>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function ReviewView({ state, today, onApply }) {
   const R = buildReview(state, today)
   const [applied, setApplied] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const tone = {
     excellent: { chip: 'bg-[#dfe6cf] text-[#3d4a32]', word: 'Excellent' },
     good: { chip: 'bg-[#dfe6cf] text-[#3d4a32]', word: 'On track' },
@@ -2567,6 +2614,8 @@ function ReviewView({ state, today, onApply }) {
         <span className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wider ${tone.chip}`}>{tone.word}</span>
       </div>
 
+      {exportOpen && <StatsExport state={state} today={today} onClose={() => setExportOpen(false)} />}
+
       {/* Top-line standing — the coach's one-sentence verdict */}
       <section className="mt-3 rounded-[28px] bg-[#23291f] px-6 py-7 shadow-[0_18px_40px_-24px_rgba(35,41,31,0.7)]">
         <h1 className="font-display text-[26px] font-semibold leading-[1.16] text-[#f4f1e8]">{R.verdictWord}</h1>
@@ -2575,6 +2624,21 @@ function ReviewView({ state, today, onApply }) {
           <p className="mt-4 text-[12px] uppercase tracking-[0.16em] text-[#9aa581]">{R.daysTracked} days in{R.overall != null ? ` · overall ${R.overall}/10` : ''}</p>
         )}
       </section>
+
+      {/* Hand your numbers to an outside AI coach for a second opinion */}
+      <button onClick={() => setExportOpen(true)}
+        className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-5 py-4 text-left transition active:scale-[0.99] hover:bg-[#e8ecdd]">
+        <span className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#3d4a32]">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z" /><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block font-display text-[16px] font-semibold text-[#23291f]">Export stats for AI</span>
+            <span className="block text-[12px] text-[#6b7355]">Copy your numbers as JSON to ask any LLM what to change.</span>
+          </span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+      </button>
 
       {/* Body fat — the primary goal, led first */}
       <section className="mt-4 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5">
