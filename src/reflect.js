@@ -11,6 +11,7 @@
  * for training/steps, feeds straight into the make-up bookkeeping (owed = a
  * deferral you make up; forgiven = genuine recovery). Pure, no React, no I/O.
  * -------------------------------------------------------------------------- */
+import { sanitizeJson } from './diet'
 
 export const REFLECT_DOMAINS = {
   train: { label: 'training', thing: (planned) => (planned ? `my ${String(planned).toLowerCase()} session` : 'my workout') },
@@ -37,11 +38,12 @@ Field rules:
 Now ask me, or let me tell you what happened.`
 }
 
-// Tolerant JSON extraction shared with the food importers: strips code fences and
-// pulls the object out of any surrounding chat prose.
+// Tolerant JSON extraction shared with the food importers: strips code fences,
+// normalizes smart quotes / trailing commas, and pulls the object out of any
+// surrounding chat prose.
 function extractJson(text) {
   if (!text || !text.trim()) return null
-  let raw = text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim()
+  let raw = sanitizeJson(text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim())
   try { return JSON.parse(raw) } catch { /* fall through */ }
   const m = raw.match(/\{[\s\S]*\}/)
   if (m) { try { return JSON.parse(m[0]) } catch { /* still bad */ } }
