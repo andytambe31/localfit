@@ -694,9 +694,20 @@ Ready — tell me what I ate.`
 
 // Parse the LLM's JSON reply into log entries. Tolerant: strips ```json fences,
 // pulls the JSON out of surrounding prose, accepts {items:[...]} or a bare array.
+// LLM/iOS replies often carry typographic "smart" quotes, non-breaking spaces, or
+// a trailing comma — all of which make JSON.parse choke on otherwise-valid JSON.
+// Normalize them before parsing.
+export function sanitizeJson(s) {
+  return String(s)
+    .replace(/[“”„‟″«»]/g, '"') // curly / angle double quotes → "
+    .replace(/[‘’‚‛′]/g, "'")            // curly single quotes → '
+    .replace(/[   ]/g, ' ')                        // non-breaking spaces → space
+    .replace(/,\s*([}\]])/g, '$1')                                // trailing commas before } or ]
+}
+
 export function parseFoodImport(text) {
   if (!text || !text.trim()) return { ok: false, error: 'Paste the AI\'s reply first.' }
-  let raw = text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim()
+  let raw = sanitizeJson(text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim())
   let parsed = null
   try { parsed = JSON.parse(raw) } catch { /* fall through to extraction */ }
   if (parsed == null) {
