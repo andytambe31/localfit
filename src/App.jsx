@@ -27,7 +27,7 @@ import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName, cardioRamp, rampTargetMin } from './cardio'
 import { journeysFor } from './journeys'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport, SINGLE_FOOD_PROMPT, parseFoodItem } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID, SKIN_CAUTIONS } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
@@ -1977,8 +1977,29 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel, autoScan }) {
   const [foodLoc, setFoodLoc] = useState(defaultLoc || 'home')
   const [scanning, setScanning] = useState(!!autoScan) // opened straight into scan mode?
   const [scanStatus, setScanStatus] = useState(null) // 'loading' | 'ok' | 'sparse' | 'notfound' | 'error'
+  const [aiOpen, setAiOpen] = useState(false)   // "fill from AI" paste panel
+  const [aiText, setAiText] = useState('')
+  const [aiCopied, setAiCopied] = useState(false)
   const num = (v) => (v === '' ? undefined : Number(v))
   const set = (v, fn) => fn(v == null ? '' : String(v))
+  const aiParsed = useMemo(() => (aiText.trim() ? parseFoodItem(aiText) : null), [aiText])
+  const copyAiPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(SINGLE_FOOD_PROMPT)
+      else { const ta = document.createElement('textarea'); ta.value = SINGLE_FOOD_PROMPT; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove() }
+      setAiCopied(true); setTimeout(() => setAiCopied(false), 1600)
+    } catch { /* ignore */ }
+  }
+  // Pull the parsed macros into the form fields so you review + tweak before saving.
+  const applyAi = () => {
+    if (!aiParsed?.ok) return
+    const it = aiParsed.item
+    if (it.name) setName(it.name)
+    const pp = parsePortion(it.portion); if (pp.amount) setAmount(pp.amount); if (FOOD_UNITS.includes(pp.unit)) setUnit(pp.unit)
+    set(it.kcal, setKcal); set(it.protein, setProtein); set(it.carbs, setCarbs)
+    set(it.fat, setFat); set(it.fiber, setFiber); set(it.sugar, setSugar)
+    setAiOpen(false); setAiText('')
+  }
   // A scanned barcode → Open Food Facts → prefill the fields, then you review + Add.
   async function onScanned(code) {
     setScanning(false); setScanStatus('loading')
@@ -2010,6 +2031,29 @@ function AddFoodForm({ defaultLoc, onAdd, onBuild, onCancel, autoScan }) {
         </p>
       )}
       {scanning && <BarcodeScanner onDetected={onScanned} onClose={() => setScanning(false)} />}
+
+      {/* Fill from AI: send ChatGPT/Claude a photo or description, paste its JSON,
+          and the fields below pre-fill for you to review and Add. */}
+      <button onClick={() => setAiOpen((v) => !v)}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#cdd4bb] bg-[#eef0e6] px-3 py-2 text-[13px] font-semibold text-[#3d4a32] active:scale-[0.99]">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
+        Fill from AI (photo → macros)
+      </button>
+      {aiOpen && (
+        <div className="space-y-2 rounded-lg border border-[#e0d9c9] bg-white p-2.5">
+          <p className="text-[12px] leading-snug text-[#6b6857]">Copy the prompt, send ChatGPT/Claude a photo or description of the food, then paste its JSON reply here.</p>
+          <button onClick={copyAiPrompt} className="w-full rounded-lg bg-[#3d4a32] px-3 py-1.5 text-[12px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{aiCopied ? 'Copied!' : 'Copy the prompt'}</button>
+          <textarea value={aiText} onChange={(e) => setAiText(e.target.value)} rows={3} placeholder='Paste the JSON, e.g. {"name":"...","kcal":...}'
+            className="w-full resize-y rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-[12px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+          {aiParsed && !aiParsed.ok && <p className="text-[11px] text-[#b0552a]">{aiParsed.error}</p>}
+          {aiParsed?.ok && (
+            <button onClick={applyAi} className="w-full rounded-lg border border-[#cdd4bb] bg-[#eef0e6] px-3 py-1.5 text-[12px] font-semibold text-[#3d4a32]">
+              Use: {aiParsed.item.name || 'this food'} · {Math.round(aiParsed.item.protein)}g P, {Math.round(aiParsed.item.kcal)} cal
+            </button>
+          )}
+        </div>
+      )}
+
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Food name"
         className="w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#3d4a32]" />
       <div className="flex gap-2">
