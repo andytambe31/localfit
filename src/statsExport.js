@@ -11,6 +11,7 @@ import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
 import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation } from './diet'
+import { dueSummary } from './skincare'
 
 const shiftIso = (iso, delta) => {
   const [y, m, d] = iso.split('-').map(Number)
@@ -281,6 +282,55 @@ function recoveryBlock(state, today) {
   }
 }
 
+// Skincare routine adherence + the dermatologist's plan.
+function skincareBlock(state, today) {
+  const days = state.days || {}
+  let am = 0, pm = 0, n = 0
+  for (let i = 0; i < 14; i++) {
+    const d = days[shiftIso(today, -i)]
+    if (!d) continue
+    n++
+    if (d.routines?.skincareAM) am++
+    if (d.routines?.skincarePM) pm++
+  }
+  const due = dueSummary(today, state)
+  const owned = state.profile?.skincare?.ownedProducts || []
+  return {
+    daysTrackedLast14: n,
+    amRoutinesDoneLast14: am, pmRoutinesDoneLast14: pm,
+    amCompletionRatePct: n ? Math.round((am / 14) * 100) : null,
+    pmCompletionRatePct: n ? Math.round((pm / 14) * 100) : null,
+    tonightScheduledActive: due.tonightActive,
+    shaveDue: due.shaveDue, shaveOverdue: due.shaveOverdue,
+    ownedActives: owned.filter((id) => ['bha', 'retinoid', 'vitc', 'niacinamide', 'azelaic'].includes(id)),
+    routine: 'AM: gentle cleanser, moisturizer, SPF 30-50. PM: cleanser, one active (BHA or adapalene — alternating, never both the same night), moisturizer.',
+    plan: 'From a dermatologist assessment (sebaceous filaments on the nose, some closed comedones on cheeks/forehead, likely under-eye milia, combination-oily but surface-dehydrated skin): (1) 2% BHA 2-3 nights/wk for the nose — the biggest win; (2) adapalene 0.1% ramping 2x/wk for 2 weeks then every other night; (3) moisturize AM+PM; (4) daily SPF 30-50. Do not squeeze the under-eye milia; no pore strips or harsh scrubs.',
+  }
+}
+
+// Last-7-days rollup for a weekly review.
+function weeklyBlock(state, today) {
+  const R = buildReview(state, today)
+  const days = state.days || {}
+  let sessions = 0
+  for (let i = 0; i < 7; i++) { if (days[shiftIso(today, -i)]?.workout?.session?.status === 'done') sessions++ }
+  const intake7 = intakeAverages(state, today, 7)
+  const rot = R.training?.rotation
+  const pillars = {}
+  ;(R.pillars || []).forEach((p) => { pillars[p.key] = p.score })
+  return {
+    liftSessionsLast7d: sessions, sessionsPerWeekTarget: state.profile?.gymTargetPerWeek || 3,
+    rotationDistributionLast28d: rot?.dist28 || null, completedRotationsLast28d: rot?.completedRotations28 ?? null,
+    weeklyZone2CardioMin: cardioMinutesInWindow(days, today, 7),
+    avgProtein7d: intake7.avgProtein, avgCalories7d: intake7.avgCalories, daysFoodLoggedLast7: intake7.daysLogged,
+    sleepScore7d: sleepScore(state, today, state.profile),
+    pillarScores10: pillars, overallScore10: R.overall,
+    currentStreakDays: R.momentum.streak, strongDaysLast14: R.momentum.strong14,
+    bodyFatTrend: { now: R.bodyFat.now, lossRateKgPerWk: R.pacing.lossPerWk != null ? r2(R.pacing.lossPerWk) : null, lossRateVerdict: R.pacing.lossRateVerdict, deadlineVerdict: R.pacing.deadlineVerdict },
+    coachStanding: R.verdictWord, coachSummary: R.topline,
+  }
+}
+
 // The lenses, in priority order. `build` returns the scoped payload; `prompt` is
 // the tailored coaching question that ships above it. Keep prompts directive and
 // guarded (never advise cutting calories under a protein floor, etc.).
@@ -294,6 +344,11 @@ export const EXPORT_LENSES = [
       training: trainingBlock(state, today),
       recovery: recoveryBlock(state, today),
     }),
+  },
+  {
+    id: 'week', label: 'Review my week', blurb: 'The last 7 days — the pattern that held me back',
+    prompt: "You are my weekly performance coach. Below is a summary of my LAST 7 DAYS across training, nutrition, cardio, sleep, and consistency, plus my goals. Grade the week out of 10, name the SINGLE pattern that most held me back, and give me a specific plan for next week. Cite my numbers. Same guardrails: don't tell me to cut calories if my protein is under target.",
+    build: (state, today) => ({ goals: goalContext(state), week: weeklyBlock(state, today) }),
   },
   {
     id: 'diet', label: 'Judge my diet', blurb: "Today's food + protein spread + 14-day trend",
@@ -314,6 +369,11 @@ export const EXPORT_LENSES = [
     id: 'recovery', label: 'Check my recovery', blurb: 'Sleep, recovery state, resting HR, cardio',
     prompt: "You are a recovery and sleep coach. Below is my sleep (with its source and confidence — it is inferred from phone inactivity unless marked manual/mixed, so weight it honestly and never treat it as a clean 10/10), my recent recovery state, my weekly Zone-2 cardio, and my resting heart-rate trend. Assess whether my recovery currently supports my training load, and give me 2 concrete changes to improve sleep and recovery.",
     build: (state, today) => ({ goals: goalContext(state), recovery: recoveryBlock(state, today) }),
+  },
+  {
+    id: 'skin', label: 'Judge my skincare', blurb: 'Routine adherence vs the derm plan',
+    prompt: "You are an evidence-based, dermatology-minded skincare coach. Below is my routine adherence over the last two weeks, what's scheduled, and my current plan (built from a dermatologist's assessment). Assess my CONSISTENCY and whether I'm following the plan correctly, then give me the 2 highest-impact adjustments. Don't tell me to stack aggressive actives — my skin adjusts gradually, and BHA/adapalene must stay on alternating nights until fully tolerated.",
+    build: (state, today) => ({ skincare: skincareBlock(state, today) }),
   },
   {
     id: 'full', label: 'Full deep-dive', blurb: 'The complete snapshot — everything',

@@ -27,7 +27,7 @@ import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName, cardioRamp, rampTargetMin } from './cardio'
 import { journeysFor } from './journeys'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID, SKIN_CAUTIONS } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
@@ -433,6 +433,18 @@ export default function App() {
     })
     setPending(true); scheduleSync()
   }
+  // Append AI-parsed food entries (from the "log with AI" round-trip) to today.
+  function importFoods(entries) {
+    if (!entries?.length) return
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today].food = [...(next.days[today].food || []), ...entries]
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
   function removeFood(idx) {
     setState((prev) => {
       const next = clone(prev)
@@ -567,7 +579,7 @@ export default function App() {
   if (activeVac) {
     return (
       <VacationView state={state} today={today} profile={profile} day={day} vac={activeVac}
-        onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood}
+        onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onImportFood={importFoods}
         onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
         onWater={(d) => patch({ water: Math.max(0, (day.water || 0) + d) })}
         onKeystone={markKeystone} />
@@ -875,7 +887,7 @@ export default function App() {
             onSwapDay={(dt) => { setPendingSwap(dt); setTraining(true) }}
             onSkipMove={skipMove} onUndoSkipMove={undoSkipMove}
             onStartHair={(slot) => setHairFlow(slot)}
-            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
+            onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onImportFood={importFoods} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
             onWater={setWater}
             onWeight={saveWeight} />
         </div>
@@ -1034,7 +1046,7 @@ function MoveSkip({ kind, skip, onSkip, onUndo }) {
 // The away screen: warm permission, a banked trip budget that burns down, the
 // same search-first logger (NYC picks first), the one keystone habit, hydration,
 // and a frozen-streak assurance. Strict targets/scores/weigh-ins are suspended.
-function VacationView({ state, today, profile, day, vac, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onKeystone }) {
+function VacationView({ state, today, profile, day, vac, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onImportFood, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onKeystone }) {
   const b = vacationBudget(state, today, vac)
   const streak = currentStreak(state.days || {}, today, profile)
   const hairDone = day.routines?.haircarePM || day.routines?.haircareAM
@@ -1101,7 +1113,7 @@ function VacationView({ state, today, profile, day, vac, onLogFood, onRemoveFood
         <h2 className="font-display text-[18px] font-semibold text-[#23211c]">Log what you ate</h2>
         <p className="mb-3 mt-0.5 text-[12px] text-[#8a8474]">Tap a NYC pick or search. Calories are padded a little on purpose — restaurants under-count.</p>
         <DietCard state={state} dateIso={today} day={day} budget={b}
-          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} onToggleDone={onToggleDietDone} />
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onImport={onImportFood} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} onToggleDone={onToggleDietDone} />
       </section>
 
       <div className="mt-4 flex items-center gap-2 rounded-2xl bg-[#eef0e6] px-4 py-3 text-[13px] leading-snug text-[#3d4a32]">
@@ -1165,7 +1177,7 @@ function StepsToggle({ done, target, onDone }) {
   )
 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onImportFood, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -1202,7 +1214,7 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSte
 
       {focus === 'diet' && (
         <DietCard state={state} dateIso={dateIso} day={day}
-          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} onToggleDone={onToggleDietDone} />
+          onLog={onLogFood} onRemove={onRemoveFood} onAdd={onAddFood} onSaveCustom={onSaveCustom} onImport={onImportFood} onLoc={onSetLoc} onReset={onResetFood} onMove={onMoveFood} onToggleDone={onToggleDietDone} />
       )}
 
       {focus === 'movement' && (
@@ -1346,8 +1358,77 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
-function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onLoc, onReset, onMove, onToggleDone, budget }) {
+// Log a day of eating by describing it to an LLM (with photos), then pasting its
+// JSON reply back. The prompt carries your pantry + partial diary so the macros
+// are accurate and nothing double-counts; the reply is parsed to a preview you
+// confirm before it hits the log.
+function AiFoodModal({ state, today, onImport, onClose }) {
+  const prompt = useMemo(() => buildFoodLogPrompt(state, today), [state, today])
+  const [copied, setCopied] = useState(false)
+  const [paste, setPaste] = useState('')
+  const parsed = useMemo(() => (paste.trim() ? parseFoodImport(paste) : null), [paste])
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(prompt)
+      else { const ta = document.createElement('textarea'); ta.value = prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove() }
+      setCopied(true); setTimeout(() => setCopied(false), 1600)
+    } catch { /* ignore */ }
+  }
+  const totals = parsed?.ok ? parsed.items.reduce((a, it) => ({ p: a.p + it.protein, k: a.k + it.kcal }), { p: 0, k: 0 }) : null
+  const add = () => { if (parsed?.ok) { onImport(parsed.items); onClose() } }
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col overflow-y-auto px-5 pt-6 pb-8">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Log food with AI</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Copy the prompt, paste it into ChatGPT or Claude, then just describe what you ate — attach meal photos if you like. Paste its reply back here and I'll add it to today.</p>
+
+        {/* Step 1 — the prompt */}
+        <div className="mt-4 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b7355]">Step 1 · the prompt</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-[#33413a]">It already knows your pantry and what you've logged today, so the macros stay accurate and nothing gets counted twice.</p>
+          <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
+        </div>
+
+        {/* Step 2 — paste the reply */}
+        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+        <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the JSON the AI replies with — e.g. {"items":[ ... ]}'
+          className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+
+        {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
+
+        {parsed?.ok && (
+          <div className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+            <div className="flex items-baseline justify-between">
+              <p className="text-[13px] font-semibold text-[#23211c]">{parsed.items.length} item{parsed.items.length > 1 ? 's' : ''} ready</p>
+              <p className="text-[12px] text-[#6b6857]">+{Math.round(totals.p)}g protein · {Math.round(totals.k)} cal</p>
+            </div>
+            <ul className="mt-2 divide-y divide-[#ece6da]">
+              {parsed.items.map((it, i) => (
+                <li key={i} className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="min-w-0 text-[13px] text-[#33322c]"><span className="font-medium">{it.name}</span>{it.portion ? <span className="text-[#8a8474]"> · {it.portion}</span> : ''} <span className="text-[11px] uppercase tracking-wide text-[#a39c8d]">{it.meal}</span></span>
+                  <span className="shrink-0 text-[12px] tabular-nums text-[#6b6857]">{Math.round(it.protein)}g · {Math.round(it.kcal)} cal</span>
+                </li>
+              ))}
+            </ul>
+            <button onClick={add} className="mt-3 w-full rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Add {parsed.items.length} to today</button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, onImport, onLoc, onReset, onMove, onToggleDone, budget }) {
   const [adding, setAdding] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const [autoScan, setAutoScan] = useState(false) // open the barcode scanner on form mount
   const [builder, setBuilder] = useState(null) // { initial, editId } → ComponentBuilder
   const [qtyItem, setQtyItem] = useState(null) // long-pressed item → quantity editor
@@ -1505,14 +1586,21 @@ function DietCard({ state, dateIso, day, onLog, onRemove, onAdd, onSaveCustom, o
             onBuild={(seed) => { setAdding(false); setBuilder({ initial: { ...seed, components: [] }, editId: null }) }}
             onCancel={() => setAdding(false)} />
         : (
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <button onClick={() => { setAutoScan(false); setAdding(true) }} className="text-[13px] font-medium text-[#3d4a32]">+ Add food</button>
             <button onClick={() => { setAutoScan(true); setAdding(true) }} className="flex items-center gap-1.5 text-[13px] font-medium text-[#3d4a32]">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14M7 5v14M11 5v14M15 5v14M19 5v14M22 5v14" /></svg>
               Scan barcode
             </button>
+            {onImport && (
+              <button onClick={() => setAiOpen(true)} className="flex items-center gap-1.5 text-[13px] font-medium text-[#3d4a32]">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
+                Log with AI
+              </button>
+            )}
           </div>
         )}
+        {aiOpen && <AiFoodModal state={state} today={dateIso} onImport={onImport} onClose={() => setAiOpen(false)} />}
 
       {/* today's food → its own screen (keeps the dashboard light) */}
       {log.length > 0 && (

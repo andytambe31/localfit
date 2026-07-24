@@ -644,3 +644,86 @@ export function mealForTime(date) {
   if (h >= 17.5 && h < 19.5) return 'dinner'
   return 'snack'
 }
+
+/* ---------- AI food logging: prompt out, JSON back -------------------------
+ * Describing a day of eating by hand is the friction. This lets you hand the
+ * describing to an LLM (with photos), and hand the STRUCTURING back to the app.
+ * `buildFoodLogPrompt` produces a prompt that teaches the LLM the exact JSON the
+ * app ingests, seeds it with your pantry (so known foods get accurate macros) and
+ * today's partial diary (so it never double-counts). `parseFoodImport` reads the
+ * LLM's reply back into real log entries — tolerant of code fences and stray prose.
+ * -------------------------------------------------------------------------- */
+
+// The prompt you paste into ChatGPT/Claude, then describe your day to (with photos).
+export function buildFoodLogPrompt(state, today) {
+  const day = state.days?.[today] || {}
+  const logged = (day.food || []).map((e) => `${e.name}${e.portion ? ` (${e.portion})` : ''} — ${Math.round(e.protein || 0)}g protein, ${Math.round(e.kcal || 0)} kcal`)
+  const loggedBlock = logged.length ? logged.map((l) => `- ${l}`).join('\n') : '- (nothing logged yet today)'
+  // Compact pantry reference: real foods with real macros, so matches are exact.
+  const pantry = effectivePantry(state)
+    .filter((it) => !it.provisional && (it.kcal > 0 || it.protein > 0))
+    .map((it) => `- ${it.name} (${it.portion}): ${Math.round(it.kcal || 0)} kcal, ${_r1(it.protein)}g P, ${_r1(it.carbs)}g C, ${_r1(it.fat)}g F`)
+    .join('\n')
+  return `You are my nutrition-logging assistant. I'm going to tell you what I ate today, in plain language — I may also attach photos of meals or labels. Your job is to turn that into a structured food log my app can import.
+
+HOW THIS WORKS:
+1. Read my pantry and today's already-logged food below (for context and accurate macros).
+2. Wait for me to describe what I ate. Ask a brief clarifying question only if a portion is genuinely ambiguous.
+3. When I say I'm done, reply with ONLY the JSON — no prose, no markdown fences.
+
+OUTPUT — reply with EXACTLY this shape and nothing else:
+{"items":[{"name":"","portion":"","meal":"breakfast|lunch|dinner|snack","kcal":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0}]}
+
+RULES:
+- One entry per distinct food + portion. Combine an obvious single dish into one entry.
+- If a food matches my pantry, use those macros scaled to the portion I describe.
+- Estimate from standard nutrition data otherwise. Protein must stay HONEST — never inflate it.
+- For restaurant / takeout / eating-out food, pad CALORIES by ~15-20% (hidden oil, butter, bigger portions); keep protein realistic.
+- "meal" = your best guess from what I say or the time of day; if unsure, "snack".
+- All macro numbers are GRAMS; kcal is calories. Use 0 for fiber/sugar if genuinely unknown.
+- Do NOT include anything already logged below — only the NEW items I describe.
+
+ALREADY LOGGED TODAY (do not repeat these):
+${loggedBlock}
+
+MY PANTRY (use these exact macros when a food matches; scale to the portion I ate):
+${pantry}
+
+Ready — tell me what I ate.`
+}
+
+// Parse the LLM's JSON reply into log entries. Tolerant: strips ```json fences,
+// pulls the JSON out of surrounding prose, accepts {items:[...]} or a bare array.
+export function parseFoodImport(text) {
+  if (!text || !text.trim()) return { ok: false, error: 'Paste the AI\'s reply first.' }
+  let raw = text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim()
+  let parsed = null
+  try { parsed = JSON.parse(raw) } catch { /* fall through to extraction */ }
+  if (parsed == null) {
+    const m = raw.match(/\{[\s\S]*\}/) || raw.match(/\[[\s\S]*\]/)
+    if (m) { try { parsed = JSON.parse(m[0]) } catch { /* still bad */ } }
+  }
+  if (parsed == null) return { ok: false, error: "That doesn't look like valid JSON — copy the AI's full reply." }
+  const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : (Array.isArray(parsed.foods) ? parsed.foods : null))
+  if (!arr) return { ok: false, error: 'No "items" list found in that reply.' }
+  const now = Date.now()
+  const items = arr.map((it, i) => normalizeImportItem(it, now, i)).filter(Boolean)
+  if (!items.length) return { ok: false, error: 'Couldn\'t read any foods from that reply.' }
+  return { ok: true, items }
+}
+
+function normalizeImportItem(it, now, i) {
+  if (!it || typeof it !== 'object') return null
+  const name = String(it.name || it.food || it.item || '').trim()
+  if (!name) return null
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : 0 }
+  const meal = MEAL_ORDER.includes(it.meal) ? it.meal : 'snack'
+  return {
+    id: `${_slug(name) || 'food'}_ai_${(now + i).toString(36)}`,
+    name, portion: String(it.portion || it.serving || '1 serving').slice(0, 60), qty: 1,
+    kcal: Math.round(num(it.kcal ?? it.calories ?? it.cal)),
+    protein: num(it.protein ?? it.protein_g), carbs: num(it.carbs ?? it.carbohydrates), fat: num(it.fat),
+    fiber: num(it.fiber), sugar: num(it.sugar),
+    meal, ts: now + i, provisional: false, imported: true,
+  }
+}
