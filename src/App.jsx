@@ -16,6 +16,7 @@ import { allPhotos, putPhoto, deletePhoto, compressImage, POSES } from './photos
 import { EXPORT_LENSES } from './statsExport'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
+import { buildReflectionPrompt, parseReflection } from './reflect'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
 import { lookupBarcode, parsePortion } from './barcode'
 import { hairDue } from './hair'
@@ -275,6 +276,25 @@ export default function App() {
   function undoSkipMove(kind) {
     patch(kind === 'gym' ? { workout: { skip: null } } : { stepsSkip: null })
     setOverride('movement')
+  }
+  // An AI-captured reflection on why something didn't happen. Training/steps feed
+  // the make-up ledger via the same skip record (owed comes from the reflection);
+  // any other domain is stored as a freeform note on the day for pattern-mining.
+  function logReflection(reflection) {
+    if (!reflection) return
+    const rec = { reason: reflection.category, label: reflection.label, owed: !!reflection.owed, ts: Date.now(), detail: reflection.detail, adjustment: reflection.adjustment, source: 'ai' }
+    if (reflection.domain === 'train') { patch({ workout: { skip: rec } }); setOverride('movement') }
+    else if (reflection.domain === 'steps') { patch({ stepsSkip: rec }); setOverride('movement') }
+    else {
+      setState((prev) => {
+        const next = clone(prev)
+        next.days[today] = next.days[today] || defaultDay()
+        next.days[today].reflections = [...(next.days[today].reflections || []), { ...reflection, ts: Date.now(), source: 'ai' }]
+        next.days[today]._ts = Date.now()
+        saveLocal(next); return next
+      })
+      setPending(true); scheduleSync()
+    }
   }
   // Steps are binary: one tap confirms you hit your 10k (count not tracked).
   // Marking done clears any steps-skip for the day.
@@ -885,7 +905,7 @@ export default function App() {
             onStepsDone={setStepsDone}
             onStartTrain={() => setTraining(true)} train={trainCall}
             onSwapDay={(dt) => { setPendingSwap(dt); setTraining(true) }}
-            onSkipMove={skipMove} onUndoSkipMove={undoSkipMove}
+            onSkipMove={skipMove} onUndoSkipMove={undoSkipMove} onReflect={logReflection}
             onStartHair={(slot) => setHairFlow(slot)}
             onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onImportFood={importFoods} onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
             onWater={setWater}
@@ -1006,16 +1026,20 @@ function MoveMakeupCard({ acc }) {
 // Skip today's lift or walk with a reason. The reason decides whether a make-up
 // is owed (handled downstream); here it just records the skip or shows the
 // resulting state with an undo.
-function MoveSkip({ kind, skip, onSkip, onUndo }) {
+function MoveSkip({ kind, skip, planned, onSkip, onUndo, onReflect }) {
   const [picking, setPicking] = useState(false)
+  const [reflecting, setReflecting] = useState(false)
   const what = kind === 'gym' ? "today's lift" : "today's walk"
+  const domain = kind === 'gym' ? 'train' : 'steps'
   if (skip) {
     return (
       <div className="rounded-xl border border-[#e6dfd0] bg-[#f3efe6] px-3 py-2 text-[12px] leading-snug text-[#6f6a5d]">
         <span className="font-semibold text-[#4a463c]">{kind === 'gym' ? 'Lift' : 'Walk'} skipped</span> · {skip.label}. {skip.owed
           ? (kind === 'gym' ? 'Make-up queued — your next session runs harder.' : "Added to this week's step balance.")
           : 'No make-up owed — recovery counts.'}
-        <button onClick={() => onUndo(kind)} className="ml-1.5 font-medium text-[#7d8a5f] underline underline-offset-2 active:opacity-70">Undo</button>
+        {skip.detail && <span className="block mt-1 text-[#8a8474] italic">"{skip.detail}"</span>}
+        {skip.adjustment && <span className="block mt-0.5 text-[#7d8a5f]">Next time: {skip.adjustment}</span>}
+        <button onClick={() => onUndo(kind)} className="mt-0.5 font-medium text-[#7d8a5f] underline underline-offset-2 active:opacity-70">Undo</button>
       </div>
     )
   }
@@ -1037,8 +1061,75 @@ function MoveSkip({ kind, skip, onSkip, onUndo }) {
           </button>
         ))}
       </div>
-      <button onClick={() => setPicking(false)} className="mt-2 text-[12px] text-[#8a8474] active:opacity-70">Cancel</button>
+      {onReflect && (
+        <button onClick={() => setReflecting(true)} className="mt-2.5 flex items-center gap-1.5 text-[12px] font-semibold text-[#3d4a32] active:opacity-70">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
+          It's complicated — talk it through with AI →
+        </button>
+      )}
+      <button onClick={() => setPicking(false)} className="mt-2 block text-[12px] text-[#8a8474] active:opacity-70">Cancel</button>
+      {reflecting && (
+        <ReflectModal domain={domain} planned={planned}
+          onSave={(r) => { onReflect({ ...r, domain }); setReflecting(false); setPicking(false) }}
+          onClose={() => setReflecting(false)} />
+      )}
     </div>
+  )
+}
+
+// The AI reflection round-trip: copy a prompt, talk to an LLM about why something
+// slipped, paste the JSON back. Used for skips (train/steps) and any other miss.
+function ReflectModal({ domain, planned, onSave, onClose }) {
+  const prompt = useMemo(() => buildReflectionPrompt(domain, planned), [domain, planned])
+  const [copied, setCopied] = useState(false)
+  const [paste, setPaste] = useState('')
+  const parsed = useMemo(() => (paste.trim() ? parseReflection(paste, domain) : null), [paste, domain])
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(prompt)
+      else { const ta = document.createElement('textarea'); ta.value = prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove() }
+      setCopied(true); setTimeout(() => setCopied(false), 1600)
+    } catch { /* ignore */ }
+  }
+  const r = parsed?.ok ? parsed.reflection : null
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col overflow-y-auto px-5 pt-6 pb-8">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">What got in the way?</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Copy the prompt, talk it through with ChatGPT or Claude in plain language, then paste its reply back. Capturing the real reason is how we spot the pattern.</p>
+
+        <div className="mt-4 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b7355]">Step 1 · the prompt</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-[#33413a]">It'll ask about what happened and hand back a short structured note — including whether this is a make-up you owe or genuine recovery.</p>
+          <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
+        </div>
+
+        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+        <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the JSON the AI replies with — e.g. {"category":"ate-too-close", ...}'
+          className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+        {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
+
+        {r && (
+          <div className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="rounded-full bg-[#eef0e6] px-2.5 py-0.5 text-[11px] font-semibold text-[#3d4a32]">{r.label}</span>
+              <span className={`text-[11px] font-semibold uppercase tracking-wide ${r.owed ? 'text-[#8a5a1e]' : 'text-[#5b6745]'}`}>{r.owed ? 'Make-up owed' : 'Recovery — forgiven'}</span>
+            </div>
+            {r.detail && <p className="mt-2 text-[13px] leading-snug text-[#33322c]">"{r.detail}"</p>}
+            {r.adjustment && <p className="mt-2 text-[12.5px] leading-snug text-[#6b7355]"><span className="font-semibold">Next time:</span> {r.adjustment}</p>}
+            <button onClick={() => onSave(r)} className="mt-3 w-full rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Save this reason</button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -1177,7 +1268,7 @@ function StepsToggle({ done, target, onDone }) {
   )
 }
 
-function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onImportFood, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
+function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onStepsDone, onStartTrain, train, onSwapDay, onSkipMove, onUndoSkipMove, onReflect, onStartHair, onLogFood, onRemoveFood, onAddFood, onSaveCustom, onImportFood, onSetLoc, onResetFood, onMoveFood, onToggleDietDone, onWater, onWeight }) {
   const r = day.routines, w = day.workout, meals = day.meals || {}
   return (
     <section className="rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-5 shadow-[0_2px_10px_-6px_rgba(60,55,40,0.25)]">
@@ -1242,10 +1333,10 @@ function FocusCard({ focus, day, profile, hour, weightLog, state, dateIso, onSte
             </div>
           )}
           {onSkipMove && !train?.rest && (!train?.active && !train?.done || day.workout?.skip) && (
-            <MoveSkip kind="gym" skip={day.workout?.skip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />
+            <MoveSkip kind="gym" skip={day.workout?.skip} planned={train?.label} onSkip={onSkipMove} onUndo={onUndoSkipMove} onReflect={onReflect} />
           )}
           <StepsToggle done={stepsHit(day, profile.stepTarget)} target={profile.stepTarget} skipped={day.stepsSkip} onDone={onStepsDone} />
-          {onSkipMove && !stepsHit(day, profile.stepTarget) && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} />}
+          {onSkipMove && !stepsHit(day, profile.stepTarget) && <MoveSkip kind="steps" skip={day.stepsSkip} onSkip={onSkipMove} onUndo={onUndoSkipMove} onReflect={onReflect} />}
           <TrainingProgress state={state} />
         </div>
       )}

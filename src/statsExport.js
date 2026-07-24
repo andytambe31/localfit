@@ -12,6 +12,7 @@ import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
 import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation } from './diet'
 import { dueSummary } from './skincare'
+import { recentReflections } from './reflect'
 
 const shiftIso = (iso, delta) => {
   const [y, m, d] = iso.split('-').map(Number)
@@ -167,6 +168,8 @@ export function buildStatsExport(state, today, generatedAt) {
       })),
     },
     coachAssessment: { standing: R.verdictWord, summary: R.topline, wins: R.wins, gaps: R.gaps, plan: R.pacePlan },
+    // Captured reasons for recent misses — the "why", to explain the numbers above.
+    whatGotInTheWay: recentReflections(state, today, 14),
   }
 }
 
@@ -343,12 +346,14 @@ export const EXPORT_LENSES = [
       diet: todayDietBlock(state, today),
       training: trainingBlock(state, today),
       recovery: recoveryBlock(state, today),
+      // Why anything slipped recently — captured reasons, not just the misses.
+      whatGotInTheWay: recentReflections(state, today, 7),
     }),
   },
   {
     id: 'week', label: 'Review my week', blurb: 'The last 7 days — the pattern that held me back',
     prompt: "You are my weekly performance coach. Below is a summary of my LAST 7 DAYS across training, nutrition, cardio, sleep, and consistency, plus my goals. Grade the week out of 10, name the SINGLE pattern that most held me back, and give me a specific plan for next week. Cite my numbers. Same guardrails: don't tell me to cut calories if my protein is under target.",
-    build: (state, today) => ({ goals: goalContext(state), week: weeklyBlock(state, today) }),
+    build: (state, today) => ({ goals: goalContext(state), week: weeklyBlock(state, today), whatGotInTheWay: recentReflections(state, today, 7) }),
   },
   {
     id: 'diet', label: 'Judge my diet', blurb: "Today's food + protein spread + 14-day trend",
