@@ -13,7 +13,7 @@ import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { strengthGoalsFor } from './strengthGoals'
 import { allPhotos, putPhoto, deletePhoto, compressImage, POSES } from './photos'
-import { buildStatsExport, STATS_PROMPT } from './statsExport'
+import { EXPORT_LENSES } from './statsExport'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { activeVacation, upcomingVacation, returnWindow, vacationBudget, reassurance } from './vacation'
@@ -2579,8 +2579,13 @@ function fmtRange(low, high, step) {
 // Full-screen viewer for the stats JSON: copy it (with or without the coaching
 // prompt), share it, or read it. Everything's local; copying is the whole point.
 function StatsExport({ state, today, onClose }) {
-  const json = useMemo(() => JSON.stringify(buildStatsExport(state, today, new Date().toISOString()), null, 2), [state, today])
+  const [lensId, setLensId] = useState('day')
   const [copied, setCopied] = useState(null)
+  const lens = EXPORT_LENSES.find((l) => l.id === lensId) || EXPORT_LENSES[0]
+  const json = useMemo(() => {
+    try { return JSON.stringify(lens.build(state, today), null, 2) } catch (e) { return `// couldn't build this view: ${e.message}` }
+  }, [lens, state, today])
+  const withPrompt = `${lens.prompt}\n\nDATA:\n${json}`
   useEffect(() => {
     const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
@@ -2593,7 +2598,7 @@ function StatsExport({ state, today, onClose }) {
     } catch { setCopied('err'); setTimeout(() => setCopied(null), 1600) }
   }
   const share = async () => {
-    try { if (navigator.share) await navigator.share({ text: `${STATS_PROMPT}\n\n${json}` }) } catch { /* cancelled */ }
+    try { if (navigator.share) await navigator.share({ text: withPrompt }) } catch { /* cancelled */ }
   }
   const btn = 'flex-1 rounded-full px-4 py-3 text-[13px] font-semibold active:scale-[0.99]'
   return createPortal(
@@ -2602,14 +2607,31 @@ function StatsExport({ state, today, onClose }) {
         <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
         </button>
-        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Stats for AI</h1>
-        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">A clean snapshot of your numbers. Copy it into ChatGPT or Claude and ask what to change — the "Copy with prompt" button includes a coaching question so you can paste and go.</p>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Ask an AI to judge you</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Pick what you want judged. Each option copies a focused prompt plus just the right data — paste it into ChatGPT or Claude and go.</p>
 
-        <div className="mt-4 flex gap-2">
-          <button onClick={() => copy(`${STATS_PROMPT}\n\n${json}`, 'prompt')} className={`${btn} bg-[#3d4a32] text-[#f4f1e8]`}>{copied === 'prompt' ? 'Copied!' : 'Copy with prompt'}</button>
-          <button onClick={() => copy(json, 'json')} className={`${btn} border border-[#cdd4bb] bg-[#fbf9f3] text-[#3d4a32]`}>{copied === 'json' ? 'Copied!' : 'Copy JSON'}</button>
+        {/* Lens picker — one tap chooses what gets analysed */}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {EXPORT_LENSES.map((l) => (
+            <button key={l.id} onClick={() => setLensId(l.id)}
+              className={`rounded-2xl border px-3.5 py-2.5 text-left transition active:scale-[0.99] ${l.id === lensId ? 'border-[#3d4a32] bg-[#eef0e6]' : 'border-[#e0d9c9] bg-[#fbf9f3]'}`}>
+              <span className="block text-[13px] font-semibold text-[#23211c]">{l.label}</span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-[#8a8474]">{l.blurb}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* The exact question that ships above the data, so you know what you're asking */}
+        <div className="mt-3 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b7355]">The prompt</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-[#33413a]">{lens.prompt}</p>
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <button onClick={() => copy(withPrompt, 'prompt')} className={`${btn} bg-[#3d4a32] text-[#f4f1e8]`}>{copied === 'prompt' ? 'Copied!' : 'Copy prompt + data'}</button>
+          <button onClick={() => copy(json, 'json')} className={`${btn} max-w-[130px] border border-[#cdd4bb] bg-[#fbf9f3] text-[#3d4a32]`}>{copied === 'json' ? 'Copied!' : 'Data only'}</button>
           {typeof navigator !== 'undefined' && navigator.share && (
-            <button onClick={share} className={`${btn} max-w-[80px] border border-[#cdd4bb] bg-[#fbf9f3] text-[#3d4a32]`}>Share</button>
+            <button onClick={share} className={`${btn} max-w-[72px] border border-[#cdd4bb] bg-[#fbf9f3] text-[#3d4a32]`}>Share</button>
           )}
         </div>
         {copied === 'err' && <p className="mt-2 text-[12px] text-[#8a2e2e]">Couldn't copy — select the text below and copy manually.</p>}
@@ -2739,8 +2761,8 @@ function ReviewView({ state, today, onApply }) {
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z" /><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></svg>
           </span>
           <span className="min-w-0">
-            <span className="block font-display text-[16px] font-semibold text-[#23291f]">Export stats for AI</span>
-            <span className="block text-[12px] text-[#6b7355]">Copy your numbers as JSON to ask any LLM what to change.</span>
+            <span className="block font-display text-[16px] font-semibold text-[#23291f]">Ask an AI to judge you</span>
+            <span className="block text-[12px] text-[#6b7355]">Copy a focused prompt — diet, training, fat loss, recovery, or your whole day.</span>
           </span>
         </span>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>

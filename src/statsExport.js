@@ -9,8 +9,8 @@ import { buildReview } from './review'
 import { bestLifts, recentSessions } from './train'
 import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
-import { sleepScore, lastNightSleep, scoreNight } from './sleep'
-import { dayTotals, calorieTarget, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus } from './diet'
+import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
+import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation } from './diet'
 
 const shiftIso = (iso, delta) => {
   const [y, m, d] = iso.split('-').map(Number)
@@ -168,3 +168,156 @@ export function buildStatsExport(state, today, generatedAt) {
     coachAssessment: { standing: R.verdictWord, summary: R.topline, wins: R.wins, gaps: R.gaps, plan: R.pacePlan },
   }
 }
+
+/* ---------- purpose-specific export lenses -----------------------------------
+ * The full snapshot above is a deep audit. Often you just want to ask ONE
+ * question — "grade my diet today", "review my training" — and get a sharp answer
+ * instead of a wall. Each lens below carries a tailored prompt AND a scoped,
+ * today-aware payload, so you tap one, paste into an LLM, and go. Every payload
+ * reuses the same engines as the app, so the numbers match what's on screen.
+ * -------------------------------------------------------------------------- */
+
+const r0 = (n) => (n == null ? null : Math.round(n))
+
+// Shared goal/context block so every lens's LLM knows the targets to judge against.
+function goalContext(state) {
+  const p = state.profile || {}
+  const pr = proteinRange(state)
+  const ct = calorieTarget(state)
+  const wl = [...(state.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+  const bl = [...(state.bodyFatLog || [])].sort((a, b) => a.date.localeCompare(b.date))
+  return {
+    sex: p.sex || null, age: p.age || null, heightCm: p.height || null,
+    weightKg: wl.at(-1)?.kg ?? null, bodyFatPct: bl.at(-1)?.pct ?? null,
+    bodyFatTargetPct: p.bodyFatTarget || 12, deadline: p.bodyFatDeadline || null,
+    proteinFloorG: pr.floor, proteinPreferredG: pr.preferred, proteinStretchG: pr.stretch,
+    calorieCeiling: ct?.ceiling ?? null,
+  }
+}
+
+// TODAY's nutrition, meal distribution, and the 14-day baseline.
+function todayDietBlock(state, today) {
+  const day = state.days?.[today] || {}
+  const t = dayTotals(day)
+  const pr = proteinRange(state)
+  const dist = mealProteinDistribution(day, pr)
+  const intake = intakeAverages(state, today)
+  const crit = dayCritique(state, today, pr.preferred)
+  const loc = defaultLocation(today)
+  const rec = recommend(state, today, loc, pr.preferred)
+  return {
+    date: today,
+    itemsLogged: (day.food || []).length,
+    calories: t.kcal, proteinG: r0(t.protein), carbsG: r0(t.carbs), fatG: r0(t.fat), fiberG: r0(t.fiber), sugarG: r0(t.sugar),
+    proteinStatus: proteinStatus(t.protein, pr),
+    proteinByMeal: dist.byMeal, proteinLopsided: dist.lopsided, idealPerMealProteinG: dist.perMealTarget,
+    foods: (day.food || []).map((e) => ({ name: e.name, meal: e.meal || null, proteinG: r0(e.protein), kcal: e.kcal })),
+    last14dAvgProteinG: intake.avgProtein, last14dAvgCalories: intake.avgCalories, daysLogged14d: intake.daysLogged,
+    appCritique: crit.headline,
+    nextProteinSuggestion: rec.done ? null : rec.text,
+  }
+}
+
+// TODAY's training + the rolling rotation/muscle-volume read.
+function trainingBlock(state, today) {
+  const R = buildReview(state, today)
+  const day = state.days?.[today] || {}
+  const sess = day.workout?.session
+  const rot = R.training?.rotation
+  const audit = R.training?.audit
+  const goals = strengthGoalsFor(state, today).map((g) => ({
+    name: g.name, current: g.current, target: g.target, unit: g.unit, loadSemantics: g.loadSemantics,
+    onPace: g.achieved ? true : g.onPace,
+  }))
+  return {
+    todaySession: sess && sess.status === 'done'
+      ? { dayType: sess.dayType, label: sess.label,
+          workingSets: (sess.exercises || []).reduce((n, e) => n + (e.sets || []).filter((s) => s.reps > 0).length, 0),
+          exercises: (sess.exercises || []).map((e) => ({ name: e.name, sets: (e.sets || []).filter((s) => s.reps > 0).map((s) => ({ weight: s.weight, reps: s.reps })) })) }
+      : (sess?.status === 'active' ? { status: 'in progress' } : 'no lift logged today'),
+    sessionsPerWeekTarget: state.profile?.gymTargetPerWeek || 3,
+    rotation: rot ? {
+      nextDayType: rot.next, completedRotationsLast28d: rot.completedRotations28,
+      daysSinceEachType: rot.daysSince, distributionLast28d: rot.dist28,
+      overdueType: rot.overdueType, imbalanced: rot.imbalanced,
+      read: R.training.rotationCoach ? `${R.training.rotationCoach.headline} ${R.training.rotationCoach.detail}` : null,
+    } : null,
+    weeklyEffectiveSetsByMuscle: audit?.hasData
+      ? Object.fromEntries(audit.rows.map((r) => [r.key, { sets: r.sets, range: [r.low, r.high], status: r.status }])) : null,
+    underTrainedMuscles: audit?.under?.map((r) => r.label) || [],
+    recentSessions: recentSessions(state, 6),
+    strengthGoals: goals,
+  }
+}
+
+// Body-composition trend + the honest pace/deadline read.
+function physiqueBlock(state, today) {
+  const R = buildReview(state, today)
+  const bf = R.bodyFat, pace = R.pacing
+  return {
+    weightKg: bf.weightNow, startWeightKg: bf.weightStart, totalLostKg: bf.weightLost,
+    bodyFatPct: bf.now, startBodyFatPct: bf.start, bodyFatTargetPct: bf.target, bodyFatPointsLost: bf.pointsLost,
+    waistToHeightRatio: bf.waistToHeight,
+    lossRateKgPerWk: pace.lossPerWk != null ? r2(pace.lossPerWk) : null,
+    deadlineNeedsKgPerWk: pace.neededPerWk != null ? r2(pace.neededPerWk) : null,
+    lossRateVerdict: pace.lossRateVerdict, deadlineVerdict: pace.deadlineVerdict,
+    bodyFatMeasurementConfidence: pace.measurementConfidence, bodyFatReadingAgeDays: pace.bfStaleDays,
+    weeksToDeadline: bf.weeksLeft,
+    coachRead: pace.headline, coachPrescription: pace.prescription,
+  }
+}
+
+// Sleep + recovery + the low-intensity movement that supports it.
+function recoveryBlock(state, today) {
+  const profile = state.profile || {}
+  const rec = recoveryState(state, today, profile)
+  const hr = restingHrTrend(state, today)
+  return {
+    sleep: sleepSummary(state, today, profile),
+    recoveryState: { level: rec.level, poorNightsLast4: rec.poorNights, avgScoreLast4: rec.avg ?? null },
+    weeklyZone2CardioMin: cardioMinutesInWindow(state.days || {}, today, 7),
+    restingHrBpm: hr?.latest ?? null, restingHrDeltaVsMonth: hr?.delta ?? null,
+    note: 'Sleep is inferred from phone inactivity unless source is "manual"/"mixed" — weight low-confidence nights accordingly; never treat an inferred night as a clean 10/10.',
+  }
+}
+
+// The lenses, in priority order. `build` returns the scoped payload; `prompt` is
+// the tailored coaching question that ships above it. Keep prompts directive and
+// guarded (never advise cutting calories under a protein floor, etc.).
+export const EXPORT_LENSES = [
+  {
+    id: 'day', label: 'Grade my day', blurb: 'Today across diet, training & recovery',
+    prompt: "You are my elite, evidence-based physique and health coach. Below is everything I logged TODAY, plus my goals and recent baselines. Grade my day out of 10 on each of (1) diet, (2) training & movement, (3) recovery, then give me the SINGLE highest-impact change to make tomorrow. Be direct and cite my actual numbers. Do NOT tell me to eat less if my protein is under target or my calories are already low.",
+    build: (state, today) => ({
+      goals: goalContext(state),
+      diet: todayDietBlock(state, today),
+      training: trainingBlock(state, today),
+      recovery: recoveryBlock(state, today),
+    }),
+  },
+  {
+    id: 'diet', label: 'Judge my diet', blurb: "Today's food + protein spread + 14-day trend",
+    prompt: "You are an evidence-based physique-nutrition coach. Below is my nutrition TODAY (with the per-meal protein split), my 14-day averages, and my protein range + calorie ceiling. Tell me: did I hit protein without overshooting calories today? Is my protein well distributed across meals or bunched? What SPECIFICALLY should I eat differently tomorrow to keep losing fat while holding muscle? Never recommend lowering calories if my protein is under the floor, or if my calories are already under ~1600.",
+    build: (state, today) => ({ goals: goalContext(state), diet: todayDietBlock(state, today), calories: calorieBreakdown(state) }),
+  },
+  {
+    id: 'training', label: 'Review my training', blurb: 'Rotation balance, muscle volume, progression',
+    prompt: "You are an evidence-based strength & hypertrophy coach. Below is my training data: today's session (if any), my recent sessions, my Push/Pull/Legs rotation balance, my weekly EFFECTIVE sets per muscle, and my strength goals. Note that each strength goal states its load semantics (perHand = one dumbbell, totalExternalLoad = everything on the bar) — do not compare across them. Assess: is my rotation balanced, is any muscle under- or over-trained, and am I progressing? Give me the top 2 priorities for my next few sessions.",
+    build: (state, today) => ({ goals: goalContext(state), training: trainingBlock(state, today) }),
+  },
+  {
+    id: 'physique', label: 'Assess my fat loss', blurb: "Rate, deadline, and whether I'll hit target",
+    prompt: "You are an evidence-based fat-loss coach. Below is my body-composition trend, my current loss rate versus the rate my deadline needs, my measurement confidence, and my goal. Tell me honestly: is my current rate SUSTAINABLE, and am I on pace to hit my body-fat target by the deadline? Separate those two questions. If my body-fat reading is stale, say so and treat the projection as low-confidence. What, if anything, should I change — without crashing my calories?",
+    build: (state, today) => ({ goals: goalContext(state), physique: physiqueBlock(state, today) }),
+  },
+  {
+    id: 'recovery', label: 'Check my recovery', blurb: 'Sleep, recovery state, resting HR, cardio',
+    prompt: "You are a recovery and sleep coach. Below is my sleep (with its source and confidence — it is inferred from phone inactivity unless marked manual/mixed, so weight it honestly and never treat it as a clean 10/10), my recent recovery state, my weekly Zone-2 cardio, and my resting heart-rate trend. Assess whether my recovery currently supports my training load, and give me 2 concrete changes to improve sleep and recovery.",
+    build: (state, today) => ({ goals: goalContext(state), recovery: recoveryBlock(state, today) }),
+  },
+  {
+    id: 'full', label: 'Full deep-dive', blurb: 'The complete snapshot — everything',
+    prompt: STATS_PROMPT,
+    build: (state, today) => buildStatsExport(state, today, null),
+  },
+]
