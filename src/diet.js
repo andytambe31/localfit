@@ -704,12 +704,40 @@ export function parseFoodImport(text) {
     if (m) { try { parsed = JSON.parse(m[0]) } catch { /* still bad */ } }
   }
   if (parsed == null) return { ok: false, error: "That doesn't look like valid JSON — copy the AI's full reply." }
-  const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : (Array.isArray(parsed.foods) ? parsed.foods : null))
+  const arr = Array.isArray(parsed) ? parsed
+    : Array.isArray(parsed.items) ? parsed.items
+      : Array.isArray(parsed.foods) ? parsed.foods
+        // A bare single food object (no items wrapper) — the single-item flow.
+        : (parsed && typeof parsed === 'object' && (parsed.name || parsed.food || parsed.item)) ? [parsed] : null
   if (!arr) return { ok: false, error: 'No "items" list found in that reply.' }
   const now = Date.now()
   const items = arr.map((it, i) => normalizeImportItem(it, now, i)).filter(Boolean)
   if (!items.length) return { ok: false, error: 'Couldn\'t read any foods from that reply.' }
   return { ok: true, items }
+}
+
+// The prompt for estimating ONE food (a photo or a description) into fields the
+// Add-food form can pre-fill. Static — no diary/pantry context needed for a single
+// item, so it's a plain copyable constant.
+export const SINGLE_FOOD_PROMPT = `Estimate the nutrition for the food I describe or photograph. Reply with ONLY a JSON object — no prose, no markdown fences — in EXACTLY this shape:
+{"name":"","portion":"","kcal":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0}
+
+Rules:
+- name: a short food name.
+- portion: the amount you estimated for (e.g. "1 bowl", "150g", "2 slices").
+- All macro numbers are GRAMS; kcal is calories.
+- Keep protein HONEST — never inflate it. For restaurant / takeout food, pad the calories by ~15-20% (hidden oil, butter, bigger portions).
+- Use 0 for fiber/sugar if genuinely unknown.
+
+Now tell me (or show me) the food to estimate.`
+
+// Parse ONE food from an LLM reply into raw macro fields for the Add-food form
+// (name, portion string, and the six macro numbers). Reuses the tolerant parser.
+export function parseFoodItem(text) {
+  const r = parseFoodImport(text)
+  if (!r.ok) return r
+  const it = r.items[0]
+  return { ok: true, item: { name: it.name, portion: it.portion, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, fiber: it.fiber, sugar: it.sugar } }
 }
 
 function normalizeImportItem(it, now, i) {
