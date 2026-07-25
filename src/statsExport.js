@@ -9,7 +9,7 @@ import { buildReview } from './review'
 import { bestLifts, recentSessions, buildSession, gymStatus } from './train'
 import { stepsHit } from './makeup'
 import { strengthGoalsFor } from './strengthGoals'
-import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
+import { cardioMinutesInWindow, restingHrTrend, cardioRamp, stepAlternatives } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
 import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation, sanitizeJson, effectivePantry, pantryFor } from './diet'
 import { dueSummary } from './skincare'
@@ -414,6 +414,8 @@ function dayNarrativeBlock(state, today, now) {
     stillOpen: {
       training: trainedToday ? 'done' : skipped ? `skipped (${day.workout.skip.label})` : sess.dayType === 'rest' ? 'rest day — optional' : `${sess.label} day still to do`,
       steps10k: stepsHit(day, stepTarget) ? 'done' : 'not yet',
+      // Ways to meet the daily step goal other than a plain outdoor walk.
+      stepAlternatives: stepsHit(day, stepTarget) ? undefined : stepAlternatives(stepTarget),
       eveningSkincare: due.pmPending ? 'pending' : 'done or not due',
       protein: { haveG: p, targetG: pr.preferred, floorG: pr.floor, gapToTargetG: Math.max(0, pr.preferred - p), status: proteinStatus(t.protein, pr) },
       water: { have: day.water || 0, target: profile.waterTarget || 8 },
@@ -438,6 +440,8 @@ export function buildDayPlanPrompt(state, today, now) {
 First, talk me through a short, prioritised, realistic plan for the REST of the day — what to do next and in what order, and what to let go of. Be time-aware: no full workout late at night, and never tell me to cut calories if my protein is under target.
 
 For anything food-related, plan ONLY from "today.eating.availableFoods" — that's the small, fixed set I actually have at my location today (I'm at the office Tue/Wed/Thu and home the rest; see today.eating for where I am now). Don't suggest foods that aren't on that list. Name specific items and amounts to close my protein gap without blowing the calorie ceiling.
+
+If my 10k steps aren't in yet, remember they don't have to be a plain outdoor walk — you can suggest any option in "today.stillOpen.stepAlternatives" (e.g. an hour on the treadmill at an incline), whichever fits the time and weather I have left.
 
 Then, at the very end, output ONLY this JSON (no code fences, no commentary after it) so my app can turn it into a checklist:
 {"plan":[{"action":"","why":"","domain":"train|diet|steps|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
