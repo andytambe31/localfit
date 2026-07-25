@@ -39,6 +39,24 @@ export function zone2(age) {
 // RPE guide for the talk test (Zone 2 is a 3–4 / "comfortably hard but chatty").
 export const TALK_TEST = 'Zone 2 is a full-sentence pace: you can talk, but not sing. Nose-breathing should just about keep up. If you\'re gasping, ease off.'
 
+// Ways to meet the daily step goal that aren't "walk 10,000 steps outside" — for
+// the coach and the LLM to suggest when a plain walk isn't practical. Durations
+// are the ~10k-step baseline; `stepAlternatives` scales them to the actual target.
+// The incline options double as Zone-2 cardio.
+export const STEP_ALTERNATIVES = [
+  { id: 'incline_treadmill', label: 'Incline treadmill walk', baseMin: 45, zone2: true, detail: '3.0 mph at 8–10% incline — brisk but conversational. Also counts as Zone-2 cardio.' },
+  { id: 'flat_treadmill', label: 'Treadmill walk', baseMin: 60, detail: '3.0–3.2 mph at 4–5% incline.' },
+  { id: 'brisk_walk', label: 'Brisk outdoor walk', baseMin: 55, detail: '~3.5 mph — pump the arms, find some hills.' },
+  { id: 'elliptical', label: 'Elliptical', baseMin: 45, zone2: true, detail: 'Even, continuous stride at a steady effort.' },
+  { id: 'stairs', label: 'Stair climber', baseMin: 30, zone2: true, detail: 'Steady pace, stand tall, don\'t lean on the rails.' },
+  { id: 'bike', label: 'Easy bike', baseMin: 50, zone2: true, detail: 'Steady spin, moderate resistance — easy on the knees.' },
+]
+// The alternatives with durations scaled to the user's step target (rounded to 5 min).
+export function stepAlternatives(stepTarget = 10000) {
+  const scale = Math.max(0.5, Math.min(1.6, (stepTarget || 10000) / 10000))
+  return STEP_ALTERNATIVES.map((a) => ({ label: a.label, minutes: Math.max(15, Math.round((a.baseMin * scale) / 5) * 5), zone2: !!a.zone2, detail: a.detail }))
+}
+
 export const cardioMinutes = (day) => Number(day?.cardio?.minutes) || 0
 export const cardioDone = (day) => !!(day?.cardio?.done || cardioMinutes(day) > 0)
 
