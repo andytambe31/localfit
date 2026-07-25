@@ -33,7 +33,7 @@ function refreshTargets(session, state, dateIso) {
  *   onPersist(session)  — write the session to today (status active/done/abandoned)
  *   onClose()           — leave the takeover (pre-start, or after Finish)
  * --------------------------------------------------------------------------- */
-export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPersist, onSwap, swapTo, onClose }) {
+export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPersist, onSwap, swapTo, onClose, autoTailor }) {
   // Resume an in-flight session, else build a fresh plan for today.
   const existing = state.days?.[dateIso]?.workout?.session
   const resuming = existing?.status === 'active'
@@ -48,6 +48,9 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
   const [closing, setClosing] = useState(false)
   const [confirmFinish, setConfirmFinish] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+  // Handed off from the day plan (which just swapped the session) → open the
+  // tailoring modal straight away, once, at the gate.
+  useEffect(() => { if (autoTailor && !resuming) setAiOpen(true) }, [])
   // Sandbox: run a session (usually an AI-tailored one) to try it out WITHOUT it
   // ever persisting or counting. Resumed real sessions are never sandboxed.
   const [sandbox, setSandbox] = useState(false)

@@ -126,6 +126,7 @@ export default function App() {
   const [yogaOpen, setYogaOpen] = useState(false) // guided yoga/mobility takeover
   const [cardioOpen, setCardioOpen] = useState(false) // guided Zone-2 cardio takeover
   const [pendingSwap, setPendingSwap] = useState(null) // day-type to open the trainer pre-swapped to
+  const [autoTailor, setAutoTailor] = useState(false) // open TrainFlow straight into AI-tailoring (from the day plan)
   const [manageProducts, setManageProducts] = useState(false)
   const [manageSupps, setManageSupps] = useState(false)
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
@@ -896,7 +897,8 @@ export default function App() {
       {/* Live briefing → AI plan for the rest of the day. Shows the checklist once
           a plan is saved, else the CTA to build one. */}
       {day.plan?.items?.length
-        ? <DayPlanCard plan={day.plan} onToggle={togglePlanItem} onReplan={() => setDayPlanOpen(true)} onClear={clearDayPlan} />
+        ? <DayPlanCard plan={day.plan} onToggle={togglePlanItem} onReplan={() => setDayPlanOpen(true)} onClear={clearDayPlan}
+            onTailor={(['push', 'pull', 'legs'].includes(day.plan.trainingDayType) && !trainedToday) ? () => { setAutoTailor(true); setTraining(true) } : null} />
         : (
           <button onClick={() => setDayPlanOpen(true)}
             className="mt-2 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#f3e5c9]">
@@ -1005,8 +1007,8 @@ export default function App() {
       {training && (
         <TrainFlow
           dateIso={today} state={state} hour={hour} minute={minute}
-          onPersist={writeSession} onSwap={oweDay} swapTo={pendingSwap}
-          onClose={() => { setTraining(false); setPendingSwap(null) }} />
+          onPersist={writeSession} onSwap={oweDay} swapTo={pendingSwap} autoTailor={autoTailor}
+          onClose={() => { setTraining(false); setPendingSwap(null); setAutoTailor(false) }} />
       )}
       {hairFlow && (
         <HairFlow
@@ -1633,7 +1635,7 @@ function DayPlanModal({ state, today, onSave, onClose }) {
 }
 
 // The saved plan as a dashboard checklist — tick items off; re-plan or clear.
-function DayPlanCard({ plan, onToggle, onReplan, onClear }) {
+function DayPlanCard({ plan, onToggle, onReplan, onClear, onTailor }) {
   const items = plan.items || []
   const done = items.filter((i) => i.done).length
   const whenLabel = { now: 'Now', soon: 'Soon', evening: 'Evening', 'before-bed': 'Before bed' }
@@ -1649,6 +1651,12 @@ function DayPlanCard({ plan, onToggle, onReplan, onClear }) {
         <span className="text-[12px] font-medium text-[#8a5a1e]">{done}/{items.length}</span>
       </div>
       {plan.focus && <p className="mt-2 text-[12px] leading-snug text-[#8a5a1e]">{plan.focus}</p>}
+      {onTailor && (
+        <button onClick={onTailor} className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-full bg-[#3d4a32] px-4 py-2 text-[12px] font-semibold text-[#f4f1e8] active:scale-[0.99]">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1z" /></svg>
+          Tailor your {({ push: 'Push', pull: 'Pull', legs: 'Legs' }[plan.trainingDayType])} session with AI →
+        </button>
+      )}
       {(plan.trainingDayType || plan.movement) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {plan.trainingDayType && <span className="rounded-full bg-[#efe0c4] px-2.5 py-0.5 text-[11px] font-semibold text-[#5c3d13]">Session → {({ push: 'Push', pull: 'Pull', legs: 'Legs', rest: 'Rest' }[plan.trainingDayType])}</span>}
