@@ -6,7 +6,7 @@
  * trusts, so the numbers match what's on screen.
  * -------------------------------------------------------------------------- */
 import { buildReview } from './review'
-import { bestLifts, recentSessions, buildSession, gymStatus } from './train'
+import { bestLifts, recentSessions, buildSession, gymStatus, estimateSessionMinutes } from './train'
 import { stepsHit } from './makeup'
 import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend, cardioRamp, stepAlternatives } from './cardio'
@@ -413,6 +413,8 @@ function dayNarrativeBlock(state, today, now) {
     timeline: buildDayTimeline(state, today),
     stillOpen: {
       training: trainedToday ? 'done' : skipped ? `skipped (${day.workout.skip.label})` : sess.dayType === 'rest' ? 'rest day — optional' : `${sess.label} day still to do`,
+      // How long today's session runs, so the plan can back-time the gym arrival.
+      sessionEstMin: (!trainedToday && !skipped && sess.dayType !== 'rest') ? estimateSessionMinutes(sess) : null,
       steps10k: stepsHit(day, stepTarget) ? 'done' : 'not yet',
       // Ways to meet the daily step goal other than a plain outdoor walk.
       stepAlternatives: stepsHit(day, stepTarget) ? undefined : stepAlternatives(stepTarget),
@@ -456,12 +458,16 @@ MOVEMENT: my 10k steps don't have to be a plain walk — you can pick any option
 
 TRAINING: my app has today planned as a ${plannedLabel} day. You MAY change it if my energy/time/recovery warrants — e.g. swap to an easier day-type, or make it a rest day, or keep it. Say why.
 
+TIME: it's ${DOW[new Date(today + 'T00:00:00').getDay()]} and the gym closes at "today.gym.closesAt". Schedule the day with ACTUAL clock times, working BACKWARD from my hard constraints — gym close, my bedtime goal, and anything I flagged in priorities. If my session runs ~"today.stillOpen.sessionEstMin" minutes and the gym shuts at 7, tell me the arrival time and a hard stop (e.g. "be at the gym by 5:15, hard stop 5:00 to leave on time"). Put a real time on every task you can.
+
 Then output ONLY this JSON (no code fences, nothing after it) so my app can drive the day:
-{"trainingDayType":"push|pull|legs|rest|keep","movement":"","focus":"","plan":[{"action":"","why":"","domain":"train|diet|steps|walk|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
+{"trainingDayType":"push|pull|legs|rest|keep","movement":"","focus":"","plan":[{"action":"","why":"","at":"","durationMin":0,"domain":"train|diet|steps|walk|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
 - trainingDayType: what today's session should be. Use "keep" to leave the app's planned ${plannedLabel} day unchanged; "rest" for no lift; or a specific day-type to swap it.
 - movement: one short line for how I should get today's movement (e.g. "1 hour incline treadmill walk" or "10k steps outside", or "" if training covers it).
 - focus: one sentence — the theme of the plan and any change you made and why.
-- plan: 3 to 6 checklist items I can tick off, ordered by priority. action = short imperative; why = one reason tied to my numbers.
+- plan: 3 to 6 checklist items I can tick off, ordered by TIME (earliest first). action = short imperative; why = one reason tied to my numbers.
+- at: a real clock time or window for the task, e.g. "5:15 PM" or "5:15–6:45 PM" or "by 5:00 PM". Leave "" only if it genuinely has no time.
+- durationMin: minutes for a time-boxed task (e.g. 90 for the workout), else 0.
 
 MY DAY:
 ${JSON.stringify(payload, null, 2)}`
@@ -483,10 +489,13 @@ export function parseDayPlan(text) {
     if (!it || typeof it !== 'object') return null
     const action = String(it.action || it.task || it.text || '').trim()
     if (!action) return null
+    const dur = Number(it.durationMin)
     return {
       id: `plan_${i}_${action.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 24)}`,
       action, why: String(it.why || it.reason || '').trim(),
       domain: String(it.domain || 'other').trim(),
+      at: String(it.at || it.time || '').trim().slice(0, 32) || null,
+      durationMin: Number.isFinite(dur) && dur > 0 ? Math.round(dur) : null,
       when: WHEN.includes(it.when) ? it.when : null,
       done: false,
     }
