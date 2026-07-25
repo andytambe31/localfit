@@ -441,6 +441,7 @@ export function buildDayPlanPrompt(state, today, now, inputs) {
     inputs.sleptAt ? `- Went to bed last night at: ${inputs.sleptAt}` : null,
     inputs.feel ? `- Feeling right now: ${inputs.feel}` : null,
     inputs.trainingCapacity ? `- Time/energy for training today: ${inputs.trainingCapacity}` : null,
+    inputs.foodOptions ? `- Food options / plans today: ${inputs.foodOptions}` : null,
     inputs.priorities ? `- Priorities / constraints today: ${inputs.priorities}` : null,
   ].filter(Boolean).join('\n') : ''
 
@@ -449,7 +450,7 @@ export function buildDayPlanPrompt(state, today, now, inputs) {
 ${inputLines ? `HOW TODAY IS GOING (my answers just now):\n${inputLines}\n` : ''}
 First, talk me through a short, prioritised, realistic plan for the rest of the day. Be time-aware (no full workout late at night) and honest with my energy — if I'm beat or short on time, scale training down or move it; never tell me to cut calories if my protein is under target.
 
-FOOD: plan ONLY from "today.eating.availableFoods" — the fixed set I actually have where I am today (office Tue/Wed/Thu, home otherwise). Name specific items and amounts to close my protein gap under my calorie ceiling.
+FOOD: my usual foods are in "today.eating.availableFoods". If I named specific options for today above (what's in the fridge, the office food today, or a place I might go — e.g. Sweetgreen), plan from THOSE first, using the pantry to fill in. Name specific items and amounts to close my protein gap under my calorie ceiling; if I mention a treat or eating out, fit it into the budget honestly rather than forbidding it.
 
 MOVEMENT: my 10k steps don't have to be a plain walk — you can pick any option in "today.stillOpen.stepAlternatives" (e.g. an hour incline treadmill) if it fits better.
 
