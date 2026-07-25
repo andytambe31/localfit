@@ -1,5 +1,7 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildSession, estimateSessionMinutes, targetFor, prefillSets, swapOptions, coachingFor } from './train'
+import { buildSession, estimateSessionMinutes, targetFor, prefillSets, swapOptions, coachingFor, EXERCISES } from './train'
+import { buildWorkoutPrompt, parseWorkoutPlan, buildAiSession } from './workoutAI'
 
 // On resume, re-derive targets for exercises you haven't logged yet, so a session
 // built before a data change / fix picks up the right pre-filled weights. Exercises
@@ -45,14 +47,24 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
   const [stage, setStage] = useState(resuming ? 'session' : 'gate')
   const [closing, setClosing] = useState(false)
   const [confirmFinish, setConfirmFinish] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
+  // Sandbox: run a session (usually an AI-tailored one) to try it out WITHOUT it
+  // ever persisting or counting. Resumed real sessions are never sandboxed.
+  const [sandbox, setSandbox] = useState(false)
 
   // Mutate + persist in one shot so a crash never loses more than the last tap.
   // Persist runs alongside (not inside) the state updater to avoid cross-component
-  // updates during render.
+  // updates during render. A sandbox session lives only in local state — never saved.
   const commit = (mut) => {
     const next = mut(JSON.parse(JSON.stringify(session)))
     setSession(next)
-    onPersist?.(next)
+    if (!sandbox) onPersist?.(next)
+  }
+  // Apply an AI-tailored session to the gate; `sb` runs it as a throwaway sandbox.
+  const applyAiSession = (plan, sb) => {
+    setSession(buildAiSession(state, dateIso, plan))
+    setSandbox(!!sb)
+    setAiOpen(false)
   }
 
   const leave = (after) => { if (closing) return; setClosing(true); setTimeout(after, 240) }
@@ -96,6 +108,13 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
               <p className="mt-1 text-[14px] leading-relaxed text-[#e3d9b4]">Sleep's been thin, so today auto-regulates — hold your weights, one less accessory set, and stop each set 2–3 reps short. This protects your progress; you'll push again once you're rested.</p>
             </div>
           )}
+          {!rest && session.aiTailored && (
+            <div className="mt-4 rounded-2xl border border-[#4a5836] bg-[#2c3522] px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-[#9aa581]">AI-tailored{sandbox ? ' · sandbox' : ''}</p>
+              {session.aiFocus && <p className="mt-1 text-[14px] leading-relaxed text-[#dfe6cf]">{session.aiFocus}</p>}
+              {sandbox && <p className="mt-1 text-[12px] leading-relaxed text-[#9aa581]">A test run — nothing here is saved or counted.</p>}
+            </div>
+          )}
           {!rest && session.emphasisReason && (
             <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{session.emphasisReason}</p>
           )}
@@ -130,12 +149,18 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
             </>
           ) : (
             <>
+              <button onClick={() => setAiOpen(true)}
+                className="mb-2 flex w-full items-center justify-center gap-2 rounded-full border border-[#4a5836] bg-[#2c3522] px-6 py-2.5 text-[13px] font-semibold text-[#dfe6cf] active:scale-[0.99]">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
+                {session.aiTailored ? 'Re-tailor with AI' : 'Tailor this session with AI'}
+              </button>
               <button onClick={() => { commit((s) => { s.status = 'active'; s.startedTs = Date.now(); s.cursor = 0; return s }); setStage('session') }}
-                className="w-full rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8]">Start session</button>
+                className="w-full rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8]">{sandbox ? 'Start sandbox session' : 'Start session'}</button>
               <button onClick={() => leave(onClose)} className="mt-2 w-full rounded-full px-6 py-3 text-[14px] font-medium text-[#9aa581]">Not now</button>
             </>
           )}
         </div>
+        {aiOpen && <WorkoutAIModal state={state} dateIso={dateIso} dayType={session.dayType} onApply={applyAiSession} onClose={() => setAiOpen(false)} />}
       </Takeover>
     )
   }
@@ -149,11 +174,11 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
       <Takeover closing={closing}>
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center fade-in">
           <p className="text-[11px] uppercase tracking-[0.22em] text-[#9aa581]">{session.label} complete</p>
-          <h2 className="font-display mt-3 text-[30px] font-semibold leading-tight text-[#f4f1e8]">Logged. Well done.</h2>
+          <h2 className="font-display mt-3 text-[30px] font-semibold leading-tight text-[#f4f1e8]">{sandbox ? 'Sandbox done.' : 'Logged. Well done.'}</h2>
           <p className="mt-4 text-[15px] leading-relaxed text-[#cfccba]">
             {totalSets} working sets{mins != null ? ` · ${mins} min` : ''}.{beaten > 0 ? ` You beat last time on ${beaten} lift${beaten > 1 ? 's' : ''}.` : ''}
           </p>
-          <p className="mt-3 text-[13px] text-[#8c9472]">It's all saved — your numbers carry to next session.</p>
+          <p className="mt-3 text-[13px] text-[#8c9472]">{sandbox ? 'Sandbox run — nothing was saved or counted. Tailor again or start it for real when you\'re ready.' : "It's all saved — your numbers carry to next session."}</p>
         </div>
         <div className="shrink-0 px-6 pb-8">
           <button onClick={() => { commit((s) => { s.status = 'done'; s.completedTs = s.completedTs || Date.now(); return s }); leave(onClose) }}
@@ -213,6 +238,68 @@ export default function TrainFlow({ dateIso, state, hour = 0, minute = 0, onPers
           onCancel={() => setConfirmFinish(false)} />
       )}
     </Takeover>
+  )
+}
+
+// The workout-tailoring round-trip: hand an LLM the full training context, get a
+// session back, preview it, and run it for real or as a throwaway sandbox.
+function WorkoutAIModal({ state, dateIso, dayType, onApply, onClose }) {
+  const prompt = useMemo(() => buildWorkoutPrompt(state, dateIso, dayType) || '', [state, dateIso, dayType])
+  const [copied, setCopied] = useState(false)
+  const [paste, setPaste] = useState('')
+  const parsed = useMemo(() => (paste.trim() ? parseWorkoutPlan(paste) : null), [paste])
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(prompt)
+      else { const ta = document.createElement('textarea'); ta.value = prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove() }
+      setCopied(true); setTimeout(() => setCopied(false), 1600)
+    } catch { /* ignore */ }
+  }
+  const nameOf = (e) => EXERCISES[e.id]?.name || e.name || e.id
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex flex-col overflow-hidden overscroll-none bg-[#1a2016] sk-takeover-in">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col overflow-y-auto px-5 pt-6 pb-8">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#9aa581]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#f4f1e8]">Tailor this session with AI</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#9aa581]">Copy the prompt — it carries your last session of this type, your lagging muscles, best lifts, goals, and recovery. The AI builds today's session with the reps and weights pre-set; paste it back to run it.</p>
+
+        <div className="mt-4 rounded-2xl border border-[#3a4a2c] bg-[#232b1c] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9aa581]">Step 1 · the prompt</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-[#cfccba]">It knows what you did last time and what's under-trained, so it prioritises the right things and progresses your loads.</p>
+          <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
+        </div>
+
+        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7d8a5f]">Step 2 · paste the AI's reply</p>
+        <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the reply — it ends with {"exercises":[ ... ]}'
+          className="mt-2 w-full resize-y rounded-2xl border border-[#3a4230] bg-[#232b1c] px-3.5 py-3 text-[13px] text-[#f4f1e8] outline-none focus:border-[#7d8a5f]" />
+        {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#d98a6a]">{parsed.error}</p>}
+
+        {parsed?.ok && (
+          <div className="mt-3 rounded-2xl border border-[#3a4230] bg-[#232b1c] p-4">
+            {parsed.plan.focus && <p className="text-[13px] leading-snug text-[#dfe6cf]"><span className="font-semibold text-[#9aa581]">Focus · </span>{parsed.plan.focus}</p>}
+            <ol className="mt-2 flex flex-col gap-1.5">
+              {parsed.plan.exercises.map((e, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3 border-b border-[#2c3522] pb-1.5 last:border-0">
+                  <span className="min-w-0 text-[13px] text-[#f4f1e8]"><span className="text-[#7d8a5f]">{i + 1}.</span> {nameOf(e)}</span>
+                  <span className="shrink-0 text-[12px] tabular-nums text-[#9aa581]">{e.sets} × {e.targetReps || '—'}{e.targetWeight ? ` @ ${e.targetWeight}` : ''}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => onApply(parsed.plan, false)} className="flex-1 rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Use this session</button>
+              <button onClick={() => onApply(parsed.plan, true)} className="rounded-full border border-[#4a5836] bg-[#2c3522] px-4 py-3 text-[13px] font-semibold text-[#dfe6cf] active:scale-[0.99]">Try in sandbox</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
   )
 }
 
