@@ -1647,7 +1647,7 @@ function DayPlanModal({ state, today, onSave, onClose }) {
                     <li key={i} className="flex gap-2.5">
                       <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[10px] font-semibold text-[#f4f1e8]">{i + 1}</span>
                       <span className="min-w-0">
-                        <span className="text-[13px] font-medium text-[#23211c]">{it.action}{it.when && <span className="ml-1.5 rounded-full bg-[#eef0e6] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#6b7355]">{whenLabel[it.when]}</span>}</span>
+                        <span className="text-[13px] font-medium text-[#23211c]">{it.action}{(it.at || it.when) && <span className="ml-1.5 rounded-full bg-[#eef0e6] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#6b7355]">{it.at || whenLabel[it.when]}{it.at && it.durationMin ? ` · ${it.durationMin}m` : ''}</span>}</span>
                         {it.why && <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">{it.why}</span>}
                       </span>
                     </li>
@@ -1701,7 +1701,7 @@ function DayPlanCard({ plan, onToggle, onReplan, onClear, onTailor }) {
                 {it.done && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
               </span>
               <span className="min-w-0">
-                <span className={`text-[13px] font-medium ${it.done ? 'text-[#b09a7a] line-through' : 'text-[#5c3d13]'}`}>{it.action}{it.when && !it.done && <span className="ml-1.5 rounded-full bg-[#f0dcc0] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#8a5a1e]">{whenLabel[it.when]}</span>}</span>
+                <span className={`text-[13px] font-medium ${it.done ? 'text-[#b09a7a] line-through' : 'text-[#5c3d13]'}`}>{it.action}{(it.at || it.when) && !it.done && <span className="ml-1.5 rounded-full bg-[#f0dcc0] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#8a5a1e]">{it.at || whenLabel[it.when]}{it.at && it.durationMin ? ` · ${it.durationMin}m` : ''}</span>}</span>
                 {it.why && !it.done && <span className="mt-0.5 block text-[12px] leading-snug text-[#a07a3e]">{it.why}</span>}
               </span>
             </button>
