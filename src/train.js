@@ -276,6 +276,11 @@ const isRecovered = (hist, dayType, todayIso) => daysSinceDayType(hist, dayType,
 // weekly target => train; target met and freshly trained => rest.
 export function decideDayType(state, todayIso) {
   const profile = state.profile || {}
+  // An AI/user day-plan can override today's day-type outright (e.g. "make today a
+  // Pull day" or "rest today"). It wins over the rotation until the plan is cleared.
+  const planned = state.days?.[todayIso]?.plan?.trainingDayType
+  if (planned === 'rest') return { dayType: 'rest', rest: true, planned: true, reason: 'Rest today — that was your plan for the day.' }
+  if (planned && DAY_PLAN[planned]) return { dayType: planned, rest: false, planned: true, reason: `A ${DAY_PLAN[planned].label} session today — that was your plan for the day.` }
   const target = profile.gymTargetPerWeek || 3
   const hist = liftingHistory(state, todayIso) // exclude today; today is what we're deciding
   const last = hist[hist.length - 1]

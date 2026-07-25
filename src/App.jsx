@@ -298,10 +298,19 @@ export default function App() {
     patch(kind === 'gym' ? { workout: { skip: null } } : { stepsSkip: null })
     setOverride('movement')
   }
-  // Save an AI-generated plan for the rest of the day as a checkable list on today.
-  function saveDayPlan(items) {
-    if (!items?.length) return
-    patch({ plan: { items, ts: Date.now(), source: 'ai' } })
+  // Save an AI-generated plan for the rest of the day. Beyond the checklist, the
+  // plan can DRIVE the day: trainingDayType swaps today's session (read by
+  // decideDayType), and movement names how to get today's steps in.
+  function saveDayPlan(plan) {
+    if (!plan) return
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      next.days[today].plan = { items: plan.items || [], trainingDayType: plan.trainingDayType || null, movement: plan.movement || null, focus: plan.focus || null, ts: Date.now(), source: 'ai' }
+      next.days[today]._ts = Date.now()
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
   }
   function togglePlanItem(id) {
     setState((prev) => {
@@ -312,7 +321,14 @@ export default function App() {
     })
     setPending(true); scheduleSync()
   }
-  function clearDayPlan() { patch({ plan: null }) }
+  function clearDayPlan() {
+    setState((prev) => {
+      const next = clone(prev)
+      if (next.days[today]) { next.days[today].plan = null; next.days[today]._ts = Date.now() }
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
   // An AI-captured reflection on why something didn't happen. Training/steps feed
   // the make-up ledger via the same skip record (owed comes from the reflection);
   // any other domain is stored as a freeform note on the day for pattern-mining.
@@ -977,7 +993,7 @@ export default function App() {
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
 
-      {dayPlanOpen && <DayPlanModal state={state} today={today} onSave={(items) => { saveDayPlan(items); setDayPlanOpen(false) }} onClose={() => setDayPlanOpen(false)} />}
+      {dayPlanOpen && <DayPlanModal state={state} today={today} onSave={(plan) => { saveDayPlan(plan); setDayPlanOpen(false) }} onClose={() => setDayPlanOpen(false)} />}
 
       {flow && (
         <SkincareFlow
@@ -1509,12 +1525,23 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
-// The day-plan round-trip: hand an LLM the day-so-far narrative, get back a
-// prioritised plan, paste it, and save it as today's checklist.
+// The day-plan wizard: a couple of quick questions to enrich the prompt, then the
+// copy → paste round-trip. The reply doesn't just make a checklist — it can swap
+// today's session type and set how I get my movement in.
+const DP_QUESTIONS = [
+  { key: 'wokeAt', q: 'When did you wake up today?', opts: ['Before 6am', '6–8am', '8–10am', 'After 10am'] },
+  { key: 'sleptAt', q: 'When did you go to bed last night?', opts: ['Before 10pm', '10–11pm', '11pm–12', 'After 12am'] },
+  { key: 'feel', q: 'How do you feel right now?', opts: ['Fresh', 'Fine', 'Tired', 'Sore', 'Stressed'] },
+  { key: 'trainingCapacity', q: 'Time / energy for training today?', opts: ['Full session', 'Short session', 'Just a walk', 'Nothing today'] },
+]
 function DayPlanModal({ state, today, onSave, onClose }) {
-  const prompt = useMemo(() => buildDayPlanPrompt(state, today, new Date()), [state, today])
+  const [phase, setPhase] = useState('inputs') // 'inputs' → 'exchange'
+  const [answers, setAnswers] = useState({})
+  const [priorities, setPriorities] = useState('')
   const [copied, setCopied] = useState(false)
   const [paste, setPaste] = useState('')
+  const inputs = useMemo(() => ({ ...answers, priorities: priorities.trim() || undefined }), [answers, priorities])
+  const prompt = useMemo(() => buildDayPlanPrompt(state, today, new Date(), inputs), [state, today, inputs])
   const parsed = useMemo(() => (paste.trim() ? parseDayPlan(paste) : null), [paste])
   useEffect(() => {
     const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
@@ -1528,42 +1555,76 @@ function DayPlanModal({ state, today, onSave, onClose }) {
     } catch { /* ignore */ }
   }
   const whenLabel = { now: 'Now', soon: 'Soon', evening: 'Evening', 'before-bed': 'Before bed' }
+  const dtLabel = { push: 'Push', pull: 'Pull', legs: 'Legs', rest: 'Rest' }
   return createPortal(
     <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden overscroll-none bg-[#f1ede4] sk-takeover-in">
       <div className="mx-auto flex w-full max-w-xl flex-1 flex-col overflow-y-auto px-5 pt-6 pb-8">
-        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        <button onClick={() => (phase === 'exchange' ? setPhase('inputs') : onClose())} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>{phase === 'exchange' ? 'Edit answers' : 'Back'}
         </button>
         <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Plan the rest of my day</h1>
-        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Copy the prompt — it carries your whole day so far and what's still open. The AI talks you through a plan and ends with a checklist; paste that reply back and it lands on your dashboard.</p>
 
-        <div className="mt-4 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b7355]">Step 1 · the prompt</p>
-          <p className="mt-1 text-[12.5px] leading-snug text-[#33413a]">It knows the time, what you've done, what's open, and how long the gym's still open — so the plan is realistic.</p>
-          <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
-        </div>
-
-        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
-        <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the reply — it ends with {"plan":[ ... ]}'
-          className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
-        {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
-
-        {parsed?.ok && (
-          <div className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
-            <p className="text-[13px] font-semibold text-[#23211c]">{parsed.items.length}-step plan</p>
-            <ol className="mt-2 flex flex-col gap-2">
-              {parsed.items.map((it, i) => (
-                <li key={i} className="flex gap-2.5">
-                  <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[10px] font-semibold text-[#f4f1e8]">{i + 1}</span>
-                  <span className="min-w-0">
-                    <span className="text-[13px] font-medium text-[#23211c]">{it.action}{it.when && <span className="ml-1.5 rounded-full bg-[#eef0e6] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#6b7355]">{whenLabel[it.when]}</span>}</span>
-                    {it.why && <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">{it.why}</span>}
-                  </span>
-                </li>
+        {phase === 'inputs' ? (
+          <>
+            <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">A few quick taps so the AI's plan fits how today actually feels. All optional.</p>
+            <div className="mt-4 flex flex-col gap-4">
+              {DP_QUESTIONS.map((qq) => (
+                <div key={qq.key}>
+                  <p className="text-[13px] font-medium text-[#23211c]">{qq.q}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {qq.opts.map((o) => (
+                      <button key={o} onClick={() => setAnswers((a) => ({ ...a, [qq.key]: a[qq.key] === o ? undefined : o }))}
+                        className={`rounded-full border px-3 py-1.5 text-[12px] font-medium active:scale-95 ${answers[qq.key] === o ? 'border-[#3d4a32] bg-[#3d4a32] text-[#f4f1e8]' : 'border-[#d8d1c2] bg-white text-[#4a463c]'}`}>{o}</button>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </ol>
-            <button onClick={() => onSave(parsed.items)} className="mt-3 w-full rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Save as today's checklist</button>
-          </div>
+              <div>
+                <p className="text-[13px] font-medium text-[#23211c]">Anything else on your plate today?</p>
+                <input value={priorities} onChange={(e) => setPriorities(e.target.value)} placeholder="e.g. big meeting at 4, dinner out tonight…"
+                  className="mt-2 w-full rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+              </div>
+            </div>
+            <button onClick={() => setPhase('exchange')} className="mt-6 w-full rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Build my prompt →</button>
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">The prompt now carries your answers plus your whole day. The AI plans the rest of today — and can swap your session or movement to match. Paste its reply back to drive your day.</p>
+
+            <div className="mt-4 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b7355]">Step 1 · the prompt</p>
+              <button onClick={copyPrompt} className="mt-2 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
+            </div>
+
+            <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+            <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the reply — it ends with {"trainingDayType":…,"plan":[ … ]}'
+              className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+            {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
+
+            {parsed?.ok && (
+              <div className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+                {parsed.focus && <p className="text-[13px] leading-snug text-[#33322c]"><span className="font-semibold text-[#3d4a32]">Focus · </span>{parsed.focus}</p>}
+                {(parsed.trainingDayType || parsed.movement) && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {parsed.trainingDayType && <span className="rounded-full bg-[#dfe6cf] px-2.5 py-0.5 text-[11px] font-semibold text-[#3d4a32]">Session → {dtLabel[parsed.trainingDayType]}</span>}
+                    {parsed.movement && <span className="rounded-full bg-[#eef0e6] px-2.5 py-0.5 text-[11px] font-medium text-[#3d4a32]">Move: {parsed.movement}</span>}
+                  </div>
+                )}
+                <ol className="mt-2.5 flex flex-col gap-2">
+                  {parsed.items.map((it, i) => (
+                    <li key={i} className="flex gap-2.5">
+                      <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[10px] font-semibold text-[#f4f1e8]">{i + 1}</span>
+                      <span className="min-w-0">
+                        <span className="text-[13px] font-medium text-[#23211c]">{it.action}{it.when && <span className="ml-1.5 rounded-full bg-[#eef0e6] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#6b7355]">{whenLabel[it.when]}</span>}</span>
+                        {it.why && <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">{it.why}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <button onClick={() => onSave(parsed)} className="mt-3 w-full rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Save & drive my day</button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>,
@@ -1587,6 +1648,13 @@ function DayPlanCard({ plan, onToggle, onReplan, onClear }) {
         </div>
         <span className="text-[12px] font-medium text-[#8a5a1e]">{done}/{items.length}</span>
       </div>
+      {plan.focus && <p className="mt-2 text-[12px] leading-snug text-[#8a5a1e]">{plan.focus}</p>}
+      {(plan.trainingDayType || plan.movement) && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {plan.trainingDayType && <span className="rounded-full bg-[#efe0c4] px-2.5 py-0.5 text-[11px] font-semibold text-[#5c3d13]">Session → {({ push: 'Push', pull: 'Pull', legs: 'Legs', rest: 'Rest' }[plan.trainingDayType])}</span>}
+          {plan.movement && <span className="rounded-full bg-[#efe0c4] px-2.5 py-0.5 text-[11px] font-medium text-[#5c3d13]">Move: {plan.movement}</span>}
+        </div>
+      )}
       <ul className="mt-3 flex flex-col gap-1.5">
         {items.map((it) => (
           <li key={it.id}>

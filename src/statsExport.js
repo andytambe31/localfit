@@ -433,27 +433,41 @@ function dayNarrativeBlock(state, today, now) {
 // The day-plan round-trip (its own dashboard flow, not a judge lens). The prompt
 // carries the same day narrative, then asks the LLM to end with a JSON plan the
 // app turns into a checklist.
-export function buildDayPlanPrompt(state, today, now) {
+export function buildDayPlanPrompt(state, today, now, inputs) {
   const payload = { goals: goalContext(state), today: dayNarrativeBlock(state, today, now || new Date()) }
-  return `You are my in-the-moment coach. Below is my day so far as a timeline, what's still open, how much day and gym time is left, and my goals.
+  const plannedLabel = { push: 'Push', pull: 'Pull', legs: 'Legs' }[buildSession(state, today).dayType] || 'Rest'
+  const inputLines = inputs ? [
+    inputs.wokeAt ? `- Woke up today at: ${inputs.wokeAt}` : null,
+    inputs.sleptAt ? `- Went to bed last night at: ${inputs.sleptAt}` : null,
+    inputs.feel ? `- Feeling right now: ${inputs.feel}` : null,
+    inputs.trainingCapacity ? `- Time/energy for training today: ${inputs.trainingCapacity}` : null,
+    inputs.priorities ? `- Priorities / constraints today: ${inputs.priorities}` : null,
+  ].filter(Boolean).join('\n') : ''
 
-First, talk me through a short, prioritised, realistic plan for the REST of the day — what to do next and in what order, and what to let go of. Be time-aware: no full workout late at night, and never tell me to cut calories if my protein is under target.
+  return `You are my in-the-moment coach. Below is how I'm feeling and how my day looks, then my day so far as data. Plan the REST of my day and, where warranted, ADJUST what I'm supposed to do.
 
-For anything food-related, plan ONLY from "today.eating.availableFoods" — that's the small, fixed set I actually have at my location today (I'm at the office Tue/Wed/Thu and home the rest; see today.eating for where I am now). Don't suggest foods that aren't on that list. Name specific items and amounts to close my protein gap without blowing the calorie ceiling.
+${inputLines ? `HOW TODAY IS GOING (my answers just now):\n${inputLines}\n` : ''}
+First, talk me through a short, prioritised, realistic plan for the rest of the day. Be time-aware (no full workout late at night) and honest with my energy — if I'm beat or short on time, scale training down or move it; never tell me to cut calories if my protein is under target.
 
-If my 10k steps aren't in yet, remember they don't have to be a plain outdoor walk — you can suggest any option in "today.stillOpen.stepAlternatives" (e.g. an hour on the treadmill at an incline), whichever fits the time and weather I have left.
+FOOD: plan ONLY from "today.eating.availableFoods" — the fixed set I actually have where I am today (office Tue/Wed/Thu, home otherwise). Name specific items and amounts to close my protein gap under my calorie ceiling.
 
-Then, at the very end, output ONLY this JSON (no code fences, no commentary after it) so my app can turn it into a checklist:
-{"plan":[{"action":"","why":"","domain":"train|diet|steps|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
-- action: a short imperative I can tick off (e.g. "Do your Legs session now").
-- why: one short reason tied to my actual numbers.
-- 3 to 6 items, ordered by priority. Only include what genuinely helps given the time left.
+MOVEMENT: my 10k steps don't have to be a plain walk — you can pick any option in "today.stillOpen.stepAlternatives" (e.g. an hour incline treadmill) if it fits better.
+
+TRAINING: my app has today planned as a ${plannedLabel} day. You MAY change it if my energy/time/recovery warrants — e.g. swap to an easier day-type, or make it a rest day, or keep it. Say why.
+
+Then output ONLY this JSON (no code fences, nothing after it) so my app can drive the day:
+{"trainingDayType":"push|pull|legs|rest|keep","movement":"","focus":"","plan":[{"action":"","why":"","domain":"train|diet|steps|walk|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
+- trainingDayType: what today's session should be. Use "keep" to leave the app's planned ${plannedLabel} day unchanged; "rest" for no lift; or a specific day-type to swap it.
+- movement: one short line for how I should get today's movement (e.g. "1 hour incline treadmill walk" or "10k steps outside", or "" if training covers it).
+- focus: one sentence — the theme of the plan and any change you made and why.
+- plan: 3 to 6 checklist items I can tick off, ordered by priority. action = short imperative; why = one reason tied to my numbers.
 
 MY DAY:
 ${JSON.stringify(payload, null, 2)}`
 }
 
-// Parse the LLM's plan reply into checklist items.
+// Parse the LLM's plan reply into a directive-bearing plan: checklist items plus a
+// training day-type change and a movement line the app can act on.
 export function parseDayPlan(text) {
   if (!text || !text.trim()) return { ok: false, error: 'Paste the AI\'s reply first.' }
   const raw = sanitizeJson(text.trim())
@@ -477,7 +491,12 @@ export function parseDayPlan(text) {
     }
   }).filter(Boolean)
   if (!items.length) return { ok: false, error: 'Couldn\'t read any plan items from that reply.' }
-  return { ok: true, items }
+  // Directives the plan can drive the day with.
+  const dtRaw = String(parsed.trainingDayType || '').trim().toLowerCase()
+  const trainingDayType = ['push', 'pull', 'legs', 'rest'].includes(dtRaw) ? dtRaw : null // "keep"/absent → no change
+  const movement = String(parsed.movement || '').trim() || null
+  const focus = String(parsed.focus || '').trim() || null
+  return { ok: true, items, trainingDayType, movement, focus }
 }
 
 export const EXPORT_LENSES = [
