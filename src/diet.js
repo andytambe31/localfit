@@ -79,6 +79,11 @@ export const DEFAULT_PANTRY = [
   { id: 'chocolate_chip_cookie', name: 'Chocolate Chip Cookie', loc: 'office', category: 'dessert',  portion: '1 cookie', kcal: 230, protein: 3,   carbs: 31, fat: 11, fiber: 1, sugar: 17 },
   { id: 'jenis_ice_cream',       name: "Jeni's Ice Cream",      loc: 'home',   category: 'dessert',  portion: '1 scoop',  kcal: 250, protein: 4,   carbs: 28, fat: 14, fiber: 1, sugar: 24 },
   { id: 'dark_chocolate_toffee', name: 'Dark Chocolate Toffee', loc: 'both',   category: 'dessert',  portion: '3 pieces', kcal: 140, protein: 1.5, carbs: 15, fat: 9,  fiber: 1, sugar: 13 },
+  // The owner's usual house/office snacks + treats.
+  { id: 'popcorn',                 name: 'Popcorn',                    loc: 'home', category: 'snack',   group: 'Snacks', portion: '3 cups popped (~30g)', kcal: 130, protein: 2.5, carbs: 18, fat: 5,  fiber: 3.5, sugar: 0.5 },
+  { id: 'dairy_milk_roast_almond', name: 'Dairy Milk Roast Almond',    loc: 'both', category: 'dessert', portion: '4 squares (~25g)',    kcal: 135, protein: 2,   carbs: 14, fat: 8,  fiber: 0.6, sugar: 13, unhealthy: true, sugary: true },
+  { id: 'starbucks_cake_pop',      name: 'Starbucks Cake Pop',         loc: 'both', category: 'dessert', portion: '1 cake pop',          kcal: 140, protein: 1,   carbs: 21, fat: 6,  fiber: 0,   sugar: 16, unhealthy: true, sugary: true },
+  { id: 'starbucks_coffee_cake',   name: 'Starbucks Cinnamon Coffee Cake', loc: 'both', category: 'dessert', portion: '1 slice',        kcal: 380, protein: 5,   carbs: 54, fat: 16, fiber: 1,   sugar: 34, unhealthy: true, sugary: true },
   { id: 'diet_coke',             name: 'Diet Coke',             loc: 'both',   category: 'beverage', portion: '1 can',    kcal: 0,   protein: 0,   carbs: 0,  fat: 0,  fiber: 0, sugar: 0 },
   { id: 'coke_zero',             name: 'Coke Zero',             loc: 'both',   category: 'beverage', portion: '1 can',    kcal: 0,   protein: 0,   carbs: 0,  fat: 0,  fiber: 0, sugar: 0 },
   // Condiments & add-ins — small loggable extras and recipe ingredients.
