@@ -278,7 +278,10 @@ function WorkoutAIModal({ state, dateIso, dayType, onApply, onClose }) {
           <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
         </div>
 
-        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7d8a5f]">Step 2 · paste the AI's reply</p>
+        <div className="mt-5 flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7d8a5f]">Step 2 · paste the AI's reply</p>
+          {paste && <button onClick={() => setPaste('')} className="text-[12px] font-medium text-[#c9a978] active:opacity-70">Clear</button>}
+        </div>
         <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the reply — it ends with {"exercises":[ ... ]}'
           className="mt-2 w-full resize-y rounded-2xl border border-[#3a4230] bg-[#232b1c] px-3.5 py-3 text-[13px] text-[#f4f1e8] outline-none focus:border-[#7d8a5f]" />
         {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#d98a6a]">{parsed.error}</p>}

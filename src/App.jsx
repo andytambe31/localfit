@@ -1189,7 +1189,10 @@ function ReflectModal({ domain, planned, onSave, onClose }) {
           <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
         </div>
 
-        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+        <div className="mt-5 flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+          {paste && <button onClick={() => setPaste('')} className="text-[12px] font-medium text-[#8a5a1e] active:opacity-70">Clear</button>}
+        </div>
         <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the JSON the AI replies with — e.g. {"category":"ate-too-close", ...}'
           className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
         {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
@@ -1539,10 +1542,11 @@ const DP_QUESTIONS = [
 function DayPlanModal({ state, today, onSave, onClose }) {
   const [phase, setPhase] = useState('inputs') // 'inputs' → 'exchange'
   const [answers, setAnswers] = useState({})
+  const [foodOptions, setFoodOptions] = useState('')
   const [priorities, setPriorities] = useState('')
   const [copied, setCopied] = useState(false)
   const [paste, setPaste] = useState('')
-  const inputs = useMemo(() => ({ ...answers, priorities: priorities.trim() || undefined }), [answers, priorities])
+  const inputs = useMemo(() => ({ ...answers, foodOptions: foodOptions.trim() || undefined, priorities: priorities.trim() || undefined }), [answers, foodOptions, priorities])
   const prompt = useMemo(() => buildDayPlanPrompt(state, today, new Date(), inputs), [state, today, inputs])
   const parsed = useMemo(() => (paste.trim() ? parseDayPlan(paste) : null), [paste])
   useEffect(() => {
@@ -1582,6 +1586,12 @@ function DayPlanModal({ state, today, onSave, onClose }) {
                 </div>
               ))}
               <div>
+                <p className="text-[13px] font-medium text-[#23211c]">What are your food options today?</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-[#a39c8d]">What's around or planned — so the AI works with what you've actually got, on top of your usual pantry.</p>
+                <textarea value={foodOptions} onChange={(e) => setFoodOptions(e.target.value)} rows={2} placeholder="e.g. Oikos in the fridge, pizza at the office today, or I could hit Sweetgreen…"
+                  className="mt-2 w-full resize-y rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+              </div>
+              <div>
                 <p className="text-[13px] font-medium text-[#23211c]">Anything else on your plate today?</p>
                 <input value={priorities} onChange={(e) => setPriorities(e.target.value)} placeholder="e.g. big meeting at 4, dinner out tonight…"
                   className="mt-2 w-full rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
@@ -1598,7 +1608,10 @@ function DayPlanModal({ state, today, onSave, onClose }) {
               <button onClick={copyPrompt} className="mt-2 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
             </div>
 
-            <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+            <div className="mt-5 flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+              {paste && <button onClick={() => setPaste('')} className="text-[12px] font-medium text-[#8a5a1e] active:opacity-70">Clear</button>}
+            </div>
             <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the reply — it ends with {"trainingDayType":…,"plan":[ … ]}'
               className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
             {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
@@ -1725,7 +1738,10 @@ function AiFoodModal({ state, today, onImport, onClose }) {
         </div>
 
         {/* Step 2 — paste the reply */}
-        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+        <div className="mt-5 flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+          {paste && <button onClick={() => setPaste('')} className="text-[12px] font-medium text-[#8a5a1e] active:opacity-70">Clear</button>}
+        </div>
         <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the JSON the AI replies with — e.g. {"items":[ ... ]}'
           className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
 
