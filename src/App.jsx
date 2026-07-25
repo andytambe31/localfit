@@ -256,7 +256,9 @@ export default function App() {
     return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(heartbeat) }
   }, [])
 
-  function patch(p) {
+  // keepFocus: don't collapse the open focus card (for rapid repeat taps like
+  // water +/-, where snapping back to the dashboard after each tap is the bug).
+  function patch(p, keepFocus = false) {
     setState((prev) => {
       const next = clone(prev)
       next.days[today] = next.days[today] || defaultDay()
@@ -265,7 +267,7 @@ export default function App() {
       saveLocal(next)
       return next
     })
-    setOverride(null)
+    if (!keepFocus) setOverride(null)
     setPending(true)
     scheduleSync()
   }
@@ -637,7 +639,7 @@ export default function App() {
       <VacationView state={state} today={today} profile={profile} day={day} vac={activeVac}
         onLogFood={logFood} onRemoveFood={removeFood} onAddFood={addFood} onSaveCustom={saveCustomFood} onImportFood={importFoods}
         onSetLoc={setFoodLoc} onResetFood={resetFood} onMoveFood={moveFood} onToggleDietDone={() => patch({ dietClosed: !day.dietClosed })}
-        onWater={(d) => patch({ water: Math.max(0, (day.water || 0) + d) })}
+        onWater={(d) => { const n = Math.max(0, (day.water || 0) + d); patch({ water: n }, true); if (d > 0) logEvent('water', { count: n }) }}
         onKeystone={markKeystone} />
     )
   }
@@ -773,7 +775,7 @@ export default function App() {
       sub: cardioHit ? `${cardioWeek} min Zone 2 — target hit` : `${cardioWeek} of ${cardioTarget} min Zone 2 this week` })
   }
 
-  const setWater = (delta) => { const n = Math.max(0, (day.water || 0) + delta); patch({ water: n }); if (delta > 0) logEvent('water', { count: n }) }
+  const setWater = (delta) => { const n = Math.max(0, (day.water || 0) + delta); patch({ water: n }, true); if (delta > 0) logEvent('water', { count: n }) }
 
   // The coach hero's action button — same routing as tapping that Today row, so
   // the hero is self-sufficient (states the move AND does it) without the big
@@ -787,7 +789,7 @@ export default function App() {
   // A training day still to be done → show a small session preview card (which
   // carries its own Start button), so the hero CTA skips the movement case to
   // avoid two Start buttons.
-  const showSessionPreview = trainSession.dayType !== 'rest' && !trainCall.done && !trainCall.active
+  const showSessionPreview = trainSession.dayType !== 'rest' && !trainCall.done && !trainCall.active && !day.workout?.skip
   const heroCTA = coach.action?.target ? ({
     skin: `Start ${slotWord(skinSlot).toLowerCase()} skincare`,
     hair: 'Do your haircare',
@@ -3935,7 +3937,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
   if (phase === 'morning') {
     if (water < 1) return { eyebrow, headline: `Drink a glass of water. Now.`, support: `Hydrate before anything else — the easiest win of the day.`, action: { target: 'water' } }
     if (!r.skincareAM && skinDue.amPending) return skincareAM()
-    if (session0 && session0.dayType !== 'rest' && !trainedToday)
+    if (session0 && session0.dayType !== 'rest' && !trainedToday && !w?.skip)
       return { eyebrow, headline: `Today's a ${session0.label.toLowerCase()} day.`, support: `${session0.emphasisReason || `${session0.reason}`} Save it for this evening — get your steps and protein in first.`, action: { target: 'movement' } }
     const pn = proteinNudge(); if (pn) return pn
     const sleepTargetMin = (profile.sleepTargetHours || 7) * 60
