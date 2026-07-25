@@ -158,7 +158,10 @@ export default function App() {
   // NOTE: only components that DON'T lock body-scroll themselves belong here.
   // Self-locking takeovers (BodyFatFlow, CardioFlow, YogaFlow) manage their own
   // lock and must stay out, or the two effects fight and freeze the dashboard.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || dayPlanOpen || booting
+  // NB: dayPlanOpen is intentionally NOT here — DayPlanModal manages its own body
+  // scroll lock (like the food/reflect/stats modals). Adding it too double-locks
+  // and leaves the page frozen after close.
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
