@@ -11,7 +11,7 @@ import { stepsHit } from './makeup'
 import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
-import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation, sanitizeJson } from './diet'
+import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation, sanitizeJson, effectivePantry, pantryFor } from './diet'
 import { dueSummary } from './skincare'
 import { recentReflections } from './reflect'
 
@@ -197,6 +197,30 @@ function goalContext(state) {
     bodyFatTargetPct: p.bodyFatTarget || 12, deadline: p.bodyFatDeadline || null,
     proteinFloorG: pr.floor, proteinPreferredG: pr.preferred, proteinStretchG: pr.stretch,
     calorieCeiling: ct?.ceiling ?? null,
+  }
+}
+
+// What I can actually eat TODAY: my location (office Tue/Wed/Thu, home otherwise —
+// or a manual override) and the pantry available there. The sample space is small
+// and fixed, so a realistic plan has to draw from exactly this list — not "add
+// salmon" when there's none in the house.
+function eatingContextBlock(state, today) {
+  const day = state.days?.[today] || {}
+  const loc = day.foodLoc || defaultLocation(today)
+  const pr = proteinRange(state)
+  const ct = calorieTarget(state)
+  const t = dayTotals(day)
+  const foods = pantryFor(effectivePantry(state), loc)
+    .filter((it) => !it.provisional && !it.travel && ((it.kcal || 0) > 0 || (it.protein || 0) > 0))
+    .sort((a, b) => (b.protein || 0) - (a.protein || 0)) // protein-first — the useful end for hitting target
+    .slice(0, 60)
+    .map((it) => ({ name: it.name, portion: it.portion, proteinG: Math.round((it.protein || 0) * 10) / 10, kcal: Math.round(it.kcal || 0) }))
+  return {
+    locationToday: loc,
+    weeklyLocationPattern: 'Office on Tuesday/Wednesday/Thursday; home on Monday/Friday/Saturday/Sunday.',
+    proteinSoFarG: Math.round(t.protein), proteinFloorG: pr.floor, proteinPreferredG: pr.preferred,
+    caloriesSoFar: t.kcal, calorieCeiling: ct?.ceiling ?? null,
+    availableFoods: foods,
   }
 }
 
@@ -396,6 +420,7 @@ function dayNarrativeBlock(state, today, now) {
       calories: ct ? { eaten: t.kcal, ceiling: ct.ceiling, remaining: ct.ceiling - t.kcal } : null,
     },
     gym: { open: gym.open, closesAt: gym.closeLabel, minutesToClose: gym.open ? gym.minsToClose : 0 },
+    eating: eatingContextBlock(state, today),
   }
 }
 
@@ -411,6 +436,8 @@ export function buildDayPlanPrompt(state, today, now) {
   return `You are my in-the-moment coach. Below is my day so far as a timeline, what's still open, how much day and gym time is left, and my goals.
 
 First, talk me through a short, prioritised, realistic plan for the REST of the day — what to do next and in what order, and what to let go of. Be time-aware: no full workout late at night, and never tell me to cut calories if my protein is under target.
+
+For anything food-related, plan ONLY from "today.eating.availableFoods" — that's the small, fixed set I actually have at my location today (I'm at the office Tue/Wed/Thu and home the rest; see today.eating for where I am now). Don't suggest foods that aren't on that list. Name specific items and amounts to close my protein gap without blowing the calorie ceiling.
 
 Then, at the very end, output ONLY this JSON (no code fences, no commentary after it) so my app can turn it into a checklist:
 {"plan":[{"action":"","why":"","domain":"train|diet|steps|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
@@ -469,8 +496,8 @@ export const EXPORT_LENSES = [
   },
   {
     id: 'diet', label: 'Judge my diet', blurb: "Today's food + protein spread + 14-day trend",
-    prompt: "You are an evidence-based physique-nutrition coach. Below is my nutrition TODAY (with the per-meal protein split), my 14-day averages, and my protein range + calorie ceiling. Tell me: did I hit protein without overshooting calories today? Is my protein well distributed across meals or bunched? What SPECIFICALLY should I eat differently tomorrow to keep losing fat while holding muscle? Never recommend lowering calories if my protein is under the floor, or if my calories are already under ~1600.",
-    build: (state, today) => ({ goals: goalContext(state), diet: todayDietBlock(state, today), calories: calorieBreakdown(state) }),
+    prompt: "You are an evidence-based physique-nutrition coach. Below is my nutrition TODAY (with the per-meal protein split), my 14-day averages, my protein range + calorie ceiling, and — under \"eating\" — where I am today and the small fixed set of foods I actually have available (I'm at the office Tue/Wed/Thu, home otherwise). Tell me: did I hit protein without overshooting calories today? Is my protein well distributed or bunched? Then give me a specific plan drawing ONLY from eating.availableFoods — real items and amounts I can eat to hit protein while losing fat. Never recommend lowering calories if my protein is under the floor, or if my calories are already under ~1600.",
+    build: (state, today) => ({ goals: goalContext(state), diet: todayDietBlock(state, today), calories: calorieBreakdown(state), eating: eatingContextBlock(state, today) }),
   },
   {
     id: 'training', label: 'Review my training', blurb: 'Rotation balance, muscle volume, progression',
