@@ -971,6 +971,14 @@ export function decideEveningPriority(state, todayIso, hour, minute = 0) {
       support: `Your 10k isn't in yet. A short walk now closes the day and doubles as recovery from the session — mark it done once you hit it.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
   }
 
+  // Lift skipped today (a reason was logged) — training's settled for the day, so
+  // the lift stops being the ask. If steps are also in, the day's movement is done.
+  if (day.workout?.skip) {
+    if (!stepsShort) return { focus: 'done', headline: 'Lift skipped, steps in. Movement handled.', support: "You logged why the lift's off and your 10k is done — that's the day's movement closed. Food and sleep from here.", advisories: [protein].filter(Boolean) }
+    return { focus: 'walk', headline: `Lift's off today — a walk closes it out.`,
+      support: `You've noted why training's skipped, so the walk is the move now — it protects the deficit on a no-lift day. Mark it done once you hit your 10k.${offPlanWalk}`, advisories: [protein].filter(Boolean) }
+  }
+
   // Rest day — no lift owed, so the walk is the actual work.
   if (dec.rest) {
     if (!stepsShort) return { focus: 'done', headline: 'Rest day, handled.', support: 'No session owed and your steps are in. Let the week of training land.', advisories: [protein].filter(Boolean) }
