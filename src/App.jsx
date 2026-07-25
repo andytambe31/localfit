@@ -1547,6 +1547,17 @@ function DayPlanModal({ state, today, onSave, onClose }) {
   const [copied, setCopied] = useState(false)
   const [paste, setPaste] = useState('')
   const inputs = useMemo(() => ({ ...answers, foodOptions: foodOptions.trim() || undefined, priorities: priorities.trim() || undefined }), [answers, foodOptions, priorities])
+  // Quick food-option chips, tuned to where I am today so they pre-fill the common
+  // scenarios (office pizza / Sweetgreen vs. what's in the fridge at home).
+  const foodLoc = (state.days?.[today]?.foodLoc) || defaultLocation(today)
+  const FOOD_CHIPS = foodLoc === 'office'
+    ? ['Office pizza today', 'Sweetgreen run', 'Just the office Oikos', 'Office grilled chicken', 'Eating lunch out']
+    : ['Just what\'s in the fridge', 'Homemade chicken bowl', 'Greek yogurt + fruit', 'Ordering out tonight', 'Cooking chicken']
+  const addFoodChip = (txt) => setFoodOptions((cur) => {
+    const parts = cur.split(',').map((s) => s.trim()).filter(Boolean)
+    if (parts.some((p) => p.toLowerCase() === txt.toLowerCase())) return cur
+    return parts.length ? `${cur.replace(/[,\s]*$/, '')}, ${txt}` : txt
+  })
   const prompt = useMemo(() => buildDayPlanPrompt(state, today, new Date(), inputs), [state, today, inputs])
   const parsed = useMemo(() => (paste.trim() ? parseDayPlan(paste) : null), [paste])
   useEffect(() => {
@@ -1587,7 +1598,13 @@ function DayPlanModal({ state, today, onSave, onClose }) {
               ))}
               <div>
                 <p className="text-[13px] font-medium text-[#23211c]">What are your food options today?</p>
-                <p className="mt-0.5 text-[11px] leading-snug text-[#a39c8d]">What's around or planned — so the AI works with what you've actually got, on top of your usual pantry.</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-[#a39c8d]">Tap what fits, or type your own — so the AI works with what you've actually got, on top of your usual pantry.</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {FOOD_CHIPS.map((c) => (
+                    <button key={c} onClick={() => addFoodChip(c)}
+                      className="rounded-full border border-[#d8d1c2] bg-white px-2.5 py-1 text-[12px] font-medium text-[#4a463c] active:scale-95">+ {c}</button>
+                  ))}
+                </div>
                 <textarea value={foodOptions} onChange={(e) => setFoodOptions(e.target.value)} rows={2} placeholder="e.g. Oikos in the fridge, pizza at the office today, or I could hit Sweetgreen…"
                   className="mt-2 w-full resize-y rounded-xl border border-[#ddd5c5] bg-white px-3 py-2 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
               </div>
