@@ -137,6 +137,7 @@ export default function App() {
   const [photosOpen, setPhotosOpen] = useState(false) // progress photos + collage (IndexedDB-backed)
   const [bfOpen, setBfOpen] = useState(false) // body-fat estimator (lifted so the journey page can open it too)
   const [sleepOpen, setSleepOpen] = useState(false) // sleep correction (lifted for the journey page)
+  const [dayPlanOpen, setDayPlanOpen] = useState(false) // "plan the rest of my day" AI briefing
   const [booting, setBooting] = useState(true) // opening splash
   const [bootLeaving, setBootLeaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false) // a localStorage write hard-failed → warn, don't lose data silently
@@ -157,7 +158,7 @@ export default function App() {
   // NOTE: only components that DON'T lock body-scroll themselves belong here.
   // Self-locking takeovers (BodyFatFlow, CardioFlow, YogaFlow) manage their own
   // lock and must stay out, or the two effects fight and freeze the dashboard.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || dayPlanOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -265,6 +266,21 @@ export default function App() {
     setPending(true)
     scheduleSync()
   }
+  // Timestamp an action that carries no time of its own (water, steps, weight), so
+  // the day's narrative can show WHEN it happened. Append-only, keeps the last 60.
+  function logEvent(kind, meta) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      const evs = [...(next.days[today].events || []), { kind, at: Date.now(), ...(meta || {}) }]
+      next.days[today].events = evs.slice(-60)
+      next.days[today]._ts = Date.now()
+      saveLocal(next)
+      return next
+    })
+    setPending(true)
+    scheduleSync()
+  }
   // Skip today's lift or steps with a reason. Owed-ness (whether a make-up is
   // due) is derived from the reason inside skipRecord. Keep the movement card
   // pinned so the acknowledgment/make-up plan shows right where they tapped.
@@ -300,6 +316,7 @@ export default function App() {
   // Marking done clears any steps-skip for the day.
   function setStepsDone(done) {
     patch({ stepsDone: done, ...(done ? { stepsSkip: null } : {}) })
+    if (done) logEvent('steps')
     setOverride('movement')
   }
   function saveWeight(kg) {
@@ -317,6 +334,7 @@ export default function App() {
     })
     // Weight is logged from the always-on top card now, so don't reset the focus
     // override (that would close whatever card the user is currently in).
+    logEvent('weight', { kg })
     setPending(true)
     scheduleSync()
   }
@@ -737,7 +755,7 @@ export default function App() {
       sub: cardioHit ? `${cardioWeek} min Zone 2 — target hit` : `${cardioWeek} of ${cardioTarget} min Zone 2 this week` })
   }
 
-  const setWater = (delta) => patch({ water: Math.max(0, (day.water || 0) + delta) })
+  const setWater = (delta) => { const n = Math.max(0, (day.water || 0) + delta); patch({ water: n }); if (delta > 0) logEvent('water', { count: n }) }
 
   // The coach hero's action button — same routing as tapping that Today row, so
   // the hero is self-sufficient (states the move AND does it) without the big
@@ -839,6 +857,21 @@ export default function App() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
       </button>
 
+      {/* Live briefing: hand an LLM the day so far + what's open → what to do next */}
+      <button onClick={() => setDayPlanOpen(true)}
+        className="mt-2 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#f3e5c9]">
+        <span className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#8a5a1e]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block font-display text-[16px] font-semibold text-[#5c3d13]">Plan the rest of my day</span>
+            <span className="block text-[12px] text-[#8a5a1e]">Hand an AI your day so far — get what to do next.</span>
+          </span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b08a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+      </button>
+
       {ret && <ReturnCard state={state} ret={ret} />}
 
       {/* Weigh-ins stay hidden through the just-back window so you judge a settled
@@ -918,6 +951,8 @@ export default function App() {
       <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
+
+      {dayPlanOpen && <StatsExport state={state} today={today} initialLens="now" onClose={() => setDayPlanOpen(false)} />}
 
       {flow && (
         <SkincareFlow
@@ -2801,12 +2836,12 @@ function fmtRange(low, high, step) {
 
 // Full-screen viewer for the stats JSON: copy it (with or without the coaching
 // prompt), share it, or read it. Everything's local; copying is the whole point.
-function StatsExport({ state, today, onClose }) {
-  const [lensId, setLensId] = useState('day')
+function StatsExport({ state, today, onClose, initialLens }) {
+  const [lensId, setLensId] = useState(initialLens && EXPORT_LENSES.some((l) => l.id === initialLens) ? initialLens : 'day')
   const [copied, setCopied] = useState(null)
   const lens = EXPORT_LENSES.find((l) => l.id === lensId) || EXPORT_LENSES[0]
   const json = useMemo(() => {
-    try { return JSON.stringify(lens.build(state, today), null, 2) } catch (e) { return `// couldn't build this view: ${e.message}` }
+    try { return JSON.stringify(lens.build(state, today, new Date()), null, 2) } catch (e) { return `// couldn't build this view: ${e.message}` }
   }, [lens, state, today])
   const withPrompt = `${lens.prompt}\n\nDATA:\n${json}`
   useEffect(() => {

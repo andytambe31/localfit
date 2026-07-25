@@ -6,7 +6,8 @@
  * trusts, so the numbers match what's on screen.
  * -------------------------------------------------------------------------- */
 import { buildReview } from './review'
-import { bestLifts, recentSessions } from './train'
+import { bestLifts, recentSessions, buildSession, gymStatus } from './train'
+import { stepsHit } from './makeup'
 import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
@@ -334,10 +335,80 @@ function weeklyBlock(state, today) {
   }
 }
 
+// A 12-hour clock label from an epoch ms.
+function clockOf(ms) {
+  const d = new Date(ms)
+  let h = d.getHours(); const ap = h < 12 ? 'AM' : 'PM'; h = ((h + 11) % 12) + 1
+  return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`
+}
+const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+// A chronological timeline of everything logged today, drawn from each thing's own
+// timestamp (food, session, skincare, reflections) plus the event log (water/steps/
+// weight). Repeated water taps collapse to the latest count.
+function buildDayTimeline(state, today) {
+  const day = state.days?.[today] || {}
+  const ev = []
+  const push = (at, text) => { if (at) ev.push({ at, text }) }
+  for (const f of day.food || []) push(f.ts, `Ate ${f.name}${f.portion ? ` (${f.portion})` : ''} — ${Math.round(f.protein || 0)}g protein, ${Math.round(f.kcal || 0)} cal`)
+  const s = day.workout?.session
+  if (s?.startedTs) push(s.startedTs, `Started the ${s.label || s.dayType} session`)
+  if (s?.completedTs) push(s.completedTs, `Finished the ${s.label || s.dayType} session (${(s.exercises || []).reduce((n, e) => n + (e.sets || []).filter((x) => x.reps > 0).length, 0)} working sets)`)
+  if (day.workout?.skip?.ts) push(day.workout.skip.ts, `Skipped the lift — ${day.workout.skip.label}${day.workout.skip.detail ? ` ("${day.workout.skip.detail}")` : ''}`)
+  if (day.skincare?.am?.ts) push(day.skincare.am.ts, 'Did the morning skincare routine')
+  if (day.skincare?.pm?.ts) push(day.skincare.pm.ts, 'Did the evening skincare routine')
+  if (day.cardio?.ts) push(day.cardio.ts, `Logged ${day.cardio.minutes || ''} min Zone-2 cardio`)
+  for (const r of day.reflections || []) push(r.ts, `Reflected on why ${r.domain} slipped: ${r.detail || r.category}`)
+  const water = (day.events || []).filter((e) => e.kind === 'water')
+  if (water.length) { const last = water[water.length - 1]; push(last.at, `Water reached ${last.count} of ${state.profile?.waterTarget || 8} glasses`) }
+  for (const e of day.events || []) {
+    if (e.kind === 'steps') push(e.at, 'Marked 10k steps done')
+    else if (e.kind === 'weight') push(e.at, `Logged weight: ${e.kg} kg`)
+  }
+  return ev.sort((a, b) => a.at - b.at).map((x) => ({ time: clockOf(x.at), event: x.text }))
+}
+
+// The full "here's my day, what now?" briefing: the timeline, what's still open,
+// how much day is left (and whether the gym is), plus goals.
+function dayNarrativeBlock(state, today, now) {
+  const day = state.days?.[today] || {}
+  const profile = state.profile || {}
+  const t = dayTotals(day)
+  const pr = proteinRange(state)
+  const ct = calorieTarget(state)
+  const sess = buildSession(state, today)
+  const trainedToday = day.workout?.session?.status === 'done'
+  const skipped = !!day.workout?.skip
+  const due = dueSummary(today, state)
+  const stepTarget = profile.stepTarget || 10000
+  const gym = gymStatus(today, now.getHours(), now.getMinutes())
+  const p = Math.round(t.protein)
+  return {
+    now: clockOf(now.getTime()),
+    dayOfWeek: DOW[new Date(today + 'T00:00:00').getDay()],
+    timeline: buildDayTimeline(state, today),
+    stillOpen: {
+      training: trainedToday ? 'done' : skipped ? `skipped (${day.workout.skip.label})` : sess.dayType === 'rest' ? 'rest day — optional' : `${sess.label} day still to do`,
+      steps10k: stepsHit(day, stepTarget) ? 'done' : 'not yet',
+      eveningSkincare: due.pmPending ? 'pending' : 'done or not due',
+      protein: { haveG: p, targetG: pr.preferred, floorG: pr.floor, gapToTargetG: Math.max(0, pr.preferred - p), status: proteinStatus(t.protein, pr) },
+      water: { have: day.water || 0, target: profile.waterTarget || 8 },
+      calories: ct ? { eaten: t.kcal, ceiling: ct.ceiling, remaining: ct.ceiling - t.kcal } : null,
+    },
+    gym: { open: gym.open, closesAt: gym.closeLabel, minutesToClose: gym.open ? gym.minsToClose : 0 },
+  }
+}
+
 // The lenses, in priority order. `build` returns the scoped payload; `prompt` is
 // the tailored coaching question that ships above it. Keep prompts directive and
-// guarded (never advise cutting calories under a protein floor, etc.).
+// guarded (never advise cutting calories under a protein floor, etc.). Some builds
+// take an optional `now` (a Date) for time-of-day awareness.
 export const EXPORT_LENSES = [
+  {
+    id: 'now', label: 'Plan the rest of my day', blurb: 'My day so far → what to do next, by the clock',
+    prompt: "You are my in-the-moment coach. Below is my day so far as a timeline, what's still open, how much day (and gym time) is left, and my goals. Given the time RIGHT NOW, give me a short, prioritised, realistic plan for the rest of the day — what to do next and in what order, and what to let go of. Be specific and time-aware: don't prescribe a full workout late at night, and never tell me to cut calories if my protein is under target. A few concrete next actions beat a lecture.",
+    build: (state, today, now) => ({ goals: goalContext(state), today: dayNarrativeBlock(state, today, now || new Date()) }),
+  },
   {
     id: 'day', label: 'Grade my day', blurb: 'Today across diet, training & recovery',
     prompt: "You are my elite, evidence-based physique and health coach. Below is everything I logged TODAY, plus my goals and recent baselines. Grade my day out of 10 on each of (1) diet, (2) training & movement, (3) recovery, then give me the SINGLE highest-impact change to make tomorrow. Be direct and cite my actual numbers. Do NOT tell me to eat less if my protein is under target or my calories are already low.",
