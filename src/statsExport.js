@@ -11,7 +11,7 @@ import { stepsHit } from './makeup'
 import { strengthGoalsFor } from './strengthGoals'
 import { cardioMinutesInWindow, restingHrTrend, cardioRamp } from './cardio'
 import { sleepScore, lastNightSleep, scoreNight, recoveryState } from './sleep'
-import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation } from './diet'
+import { dayTotals, calorieTarget, calorieBreakdown, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, mealProteinDistribution, intakeAverages, dayCritique, recommend, defaultLocation, sanitizeJson } from './diet'
 import { dueSummary } from './skincare'
 import { recentReflections } from './reflect'
 
@@ -403,12 +403,53 @@ function dayNarrativeBlock(state, today, now) {
 // the tailored coaching question that ships above it. Keep prompts directive and
 // guarded (never advise cutting calories under a protein floor, etc.). Some builds
 // take an optional `now` (a Date) for time-of-day awareness.
+// The day-plan round-trip (its own dashboard flow, not a judge lens). The prompt
+// carries the same day narrative, then asks the LLM to end with a JSON plan the
+// app turns into a checklist.
+export function buildDayPlanPrompt(state, today, now) {
+  const payload = { goals: goalContext(state), today: dayNarrativeBlock(state, today, now || new Date()) }
+  return `You are my in-the-moment coach. Below is my day so far as a timeline, what's still open, how much day and gym time is left, and my goals.
+
+First, talk me through a short, prioritised, realistic plan for the REST of the day — what to do next and in what order, and what to let go of. Be time-aware: no full workout late at night, and never tell me to cut calories if my protein is under target.
+
+Then, at the very end, output ONLY this JSON (no code fences, no commentary after it) so my app can turn it into a checklist:
+{"plan":[{"action":"","why":"","domain":"train|diet|steps|skin|sleep|water|other","when":"now|soon|evening|before-bed"}]}
+- action: a short imperative I can tick off (e.g. "Do your Legs session now").
+- why: one short reason tied to my actual numbers.
+- 3 to 6 items, ordered by priority. Only include what genuinely helps given the time left.
+
+MY DAY:
+${JSON.stringify(payload, null, 2)}`
+}
+
+// Parse the LLM's plan reply into checklist items.
+export function parseDayPlan(text) {
+  if (!text || !text.trim()) return { ok: false, error: 'Paste the AI\'s reply first.' }
+  const raw = sanitizeJson(text.trim())
+  let parsed = null
+  const m = raw.match(/\{[\s\S]*\}/) || raw.match(/\[[\s\S]*\]/)
+  try { parsed = JSON.parse(raw) } catch { if (m) { try { parsed = JSON.parse(m[0]) } catch { /* bad */ } } }
+  if (parsed == null) return { ok: false, error: "That doesn't look like valid JSON — copy the AI's full reply." }
+  const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.plan) ? parsed.plan : (Array.isArray(parsed.items) ? parsed.items : null))
+  if (!arr) return { ok: false, error: 'No "plan" list found in that reply.' }
+  const WHEN = ['now', 'soon', 'evening', 'before-bed']
+  const items = arr.map((it, i) => {
+    if (!it || typeof it !== 'object') return null
+    const action = String(it.action || it.task || it.text || '').trim()
+    if (!action) return null
+    return {
+      id: `plan_${i}_${action.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 24)}`,
+      action, why: String(it.why || it.reason || '').trim(),
+      domain: String(it.domain || 'other').trim(),
+      when: WHEN.includes(it.when) ? it.when : null,
+      done: false,
+    }
+  }).filter(Boolean)
+  if (!items.length) return { ok: false, error: 'Couldn\'t read any plan items from that reply.' }
+  return { ok: true, items }
+}
+
 export const EXPORT_LENSES = [
-  {
-    id: 'now', label: 'Plan the rest of my day', blurb: 'My day so far → what to do next, by the clock',
-    prompt: "You are my in-the-moment coach. Below is my day so far as a timeline, what's still open, how much day (and gym time) is left, and my goals. Given the time RIGHT NOW, give me a short, prioritised, realistic plan for the rest of the day — what to do next and in what order, and what to let go of. Be specific and time-aware: don't prescribe a full workout late at night, and never tell me to cut calories if my protein is under target. A few concrete next actions beat a lecture.",
-    build: (state, today, now) => ({ goals: goalContext(state), today: dayNarrativeBlock(state, today, now || new Date()) }),
-  },
   {
     id: 'day', label: 'Grade my day', blurb: 'Today across diet, training & recovery',
     prompt: "You are my elite, evidence-based physique and health coach. Below is everything I logged TODAY, plus my goals and recent baselines. Grade my day out of 10 on each of (1) diet, (2) training & movement, (3) recovery, then give me the SINGLE highest-impact change to make tomorrow. Be direct and cite my actual numbers. Do NOT tell me to eat less if my protein is under target or my calories are already low.",

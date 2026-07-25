@@ -13,7 +13,7 @@ import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { strengthGoalsFor } from './strengthGoals'
 import { allPhotos, putPhoto, deletePhoto, compressImage, POSES } from './photos'
-import { EXPORT_LENSES } from './statsExport'
+import { EXPORT_LENSES, buildDayPlanPrompt, parseDayPlan } from './statsExport'
 import { buildWeightTimeline } from './timeline'
 import { SKIP_REASONS, skipRecord, movementAccount, stepsHit } from './makeup'
 import { buildReflectionPrompt, parseReflection } from './reflect'
@@ -293,6 +293,21 @@ export default function App() {
     patch(kind === 'gym' ? { workout: { skip: null } } : { stepsSkip: null })
     setOverride('movement')
   }
+  // Save an AI-generated plan for the rest of the day as a checkable list on today.
+  function saveDayPlan(items) {
+    if (!items?.length) return
+    patch({ plan: { items, ts: Date.now(), source: 'ai' } })
+  }
+  function togglePlanItem(id) {
+    setState((prev) => {
+      const next = clone(prev)
+      const pl = next.days[today]?.plan
+      if (pl?.items) { pl.items = pl.items.map((it) => (it.id === id ? { ...it, done: !it.done } : it)); next.days[today]._ts = Date.now() }
+      saveLocal(next); return next
+    })
+    setPending(true); scheduleSync()
+  }
+  function clearDayPlan() { patch({ plan: null }) }
   // An AI-captured reflection on why something didn't happen. Training/steps feed
   // the make-up ledger via the same skip record (owed comes from the reflection);
   // any other domain is stored as a freeform note on the day for pattern-mining.
@@ -857,20 +872,25 @@ export default function App() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
       </button>
 
-      {/* Live briefing: hand an LLM the day so far + what's open → what to do next */}
-      <button onClick={() => setDayPlanOpen(true)}
-        className="mt-2 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#f3e5c9]">
-        <span className="flex items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#8a5a1e]">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
-          </span>
-          <span className="min-w-0">
-            <span className="block font-display text-[16px] font-semibold text-[#5c3d13]">Plan the rest of my day</span>
-            <span className="block text-[12px] text-[#8a5a1e]">Hand an AI your day so far — get what to do next.</span>
-          </span>
-        </span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b08a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
-      </button>
+      {/* Live briefing → AI plan for the rest of the day. Shows the checklist once
+          a plan is saved, else the CTA to build one. */}
+      {day.plan?.items?.length
+        ? <DayPlanCard plan={day.plan} onToggle={togglePlanItem} onReplan={() => setDayPlanOpen(true)} onClear={clearDayPlan} />
+        : (
+          <button onClick={() => setDayPlanOpen(true)}
+            className="mt-2 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#f3e5c9]">
+            <span className="flex items-center gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#8a5a1e]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
+              </span>
+              <span className="min-w-0">
+                <span className="block font-display text-[16px] font-semibold text-[#5c3d13]">Plan the rest of my day</span>
+                <span className="block text-[12px] text-[#8a5a1e]">Hand an AI your day so far — get a checklist back.</span>
+              </span>
+            </span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b08a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+        )}
 
       {ret && <ReturnCard state={state} ret={ret} />}
 
@@ -952,7 +972,7 @@ export default function App() {
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
 
-      {dayPlanOpen && <StatsExport state={state} today={today} initialLens="now" onClose={() => setDayPlanOpen(false)} />}
+      {dayPlanOpen && <DayPlanModal state={state} today={today} onSave={(items) => { saveDayPlan(items); setDayPlanOpen(false) }} onClose={() => setDayPlanOpen(false)} />}
 
       {flow && (
         <SkincareFlow
@@ -1484,6 +1504,107 @@ function TrainStart({ train, onStart }) {
 
 // Protein-first pantry card: ring + location toggle + next-grab recommendation +
 // tap-to-log pantry + running log. Calorie line appears once weight is known.
+// The day-plan round-trip: hand an LLM the day-so-far narrative, get back a
+// prioritised plan, paste it, and save it as today's checklist.
+function DayPlanModal({ state, today, onSave, onClose }) {
+  const prompt = useMemo(() => buildDayPlanPrompt(state, today, new Date()), [state, today])
+  const [copied, setCopied] = useState(false)
+  const [paste, setPaste] = useState('')
+  const parsed = useMemo(() => (paste.trim() ? parseDayPlan(paste) : null), [paste])
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(prompt)
+      else { const ta = document.createElement('textarea'); ta.value = prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove() }
+      setCopied(true); setTimeout(() => setCopied(false), 1600)
+    } catch { /* ignore */ }
+  }
+  const whenLabel = { now: 'Now', soon: 'Soon', evening: 'Evening', 'before-bed': 'Before bed' }
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden overscroll-none bg-[#f1ede4] sk-takeover-in">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col overflow-y-auto px-5 pt-6 pb-8">
+        <button onClick={onClose} className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-[#6f6a5d]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>Back
+        </button>
+        <h1 className="font-display text-[24px] font-semibold text-[#23211c]">Plan the rest of my day</h1>
+        <p className="mt-1 text-[13px] leading-snug text-[#8a8474]">Copy the prompt — it carries your whole day so far and what's still open. The AI talks you through a plan and ends with a checklist; paste that reply back and it lands on your dashboard.</p>
+
+        <div className="mt-4 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b7355]">Step 1 · the prompt</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-[#33413a]">It knows the time, what you've done, what's open, and how long the gym's still open — so the plan is realistic.</p>
+          <button onClick={copyPrompt} className="mt-2.5 w-full rounded-full bg-[#3d4a32] px-4 py-2.5 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.99]">{copied ? 'Copied!' : 'Copy the prompt'}</button>
+        </div>
+
+        <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Step 2 · paste the AI's reply</p>
+        <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the reply — it ends with {"plan":[ ... ]}'
+          className="mt-2 w-full resize-y rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 text-[13px] text-[#23211c] outline-none focus:border-[#3d4a32]" />
+        {parsed && !parsed.ok && <p className="mt-2 text-[12px] text-[#8a2e2e]">{parsed.error}</p>}
+
+        {parsed?.ok && (
+          <div className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+            <p className="text-[13px] font-semibold text-[#23211c]">{parsed.items.length}-step plan</p>
+            <ol className="mt-2 flex flex-col gap-2">
+              {parsed.items.map((it, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#3d4a32] text-[10px] font-semibold text-[#f4f1e8]">{i + 1}</span>
+                  <span className="min-w-0">
+                    <span className="text-[13px] font-medium text-[#23211c]">{it.action}{it.when && <span className="ml-1.5 rounded-full bg-[#eef0e6] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#6b7355]">{whenLabel[it.when]}</span>}</span>
+                    {it.why && <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">{it.why}</span>}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <button onClick={() => onSave(parsed.items)} className="mt-3 w-full rounded-full bg-[#3d4a32] px-4 py-3 text-[14px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Save as today's checklist</button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// The saved plan as a dashboard checklist — tick items off; re-plan or clear.
+function DayPlanCard({ plan, onToggle, onReplan, onClear }) {
+  const items = plan.items || []
+  const done = items.filter((i) => i.done).length
+  const whenLabel = { now: 'Now', soon: 'Soon', evening: 'Evening', 'before-bed': 'Before bed' }
+  return (
+    <section className="mt-2 rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#8a5a1e]">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1z" /></svg>
+          </span>
+          <h2 className="font-display text-[16px] font-semibold text-[#5c3d13]">Your plan for the rest of today</h2>
+        </div>
+        <span className="text-[12px] font-medium text-[#8a5a1e]">{done}/{items.length}</span>
+      </div>
+      <ul className="mt-3 flex flex-col gap-1.5">
+        {items.map((it) => (
+          <li key={it.id}>
+            <button onClick={() => onToggle(it.id)} className="flex w-full items-start gap-2.5 text-left active:opacity-80">
+              <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${it.done ? 'border-[#8a5a1e] bg-[#8a5a1e]' : 'border-[#c9a978] bg-[#fbf3e3]'}`}>
+                {it.done && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+              </span>
+              <span className="min-w-0">
+                <span className={`text-[13px] font-medium ${it.done ? 'text-[#b09a7a] line-through' : 'text-[#5c3d13]'}`}>{it.action}{it.when && !it.done && <span className="ml-1.5 rounded-full bg-[#f0dcc0] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#8a5a1e]">{whenLabel[it.when]}</span>}</span>
+                {it.why && !it.done && <span className="mt-0.5 block text-[12px] leading-snug text-[#a07a3e]">{it.why}</span>}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 flex items-center gap-4 border-t border-[#e7d4b6] pt-2.5">
+        <button onClick={onReplan} className="text-[12px] font-semibold text-[#8a5a1e] active:opacity-70">Re-plan</button>
+        <button onClick={onClear} className="text-[12px] font-medium text-[#b3946a] active:opacity-70">Clear</button>
+      </div>
+    </section>
+  )
+}
+
 // Log a day of eating by describing it to an LLM (with photos), then pasting its
 // JSON reply back. The prompt carries your pantry + partial diary so the macros
 // are accurate and nothing double-counts; the reply is parsed to a preview you
