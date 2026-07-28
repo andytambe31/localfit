@@ -4105,6 +4105,20 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
     const headline = hour >= 22 ? `It's ${t} — do your evening routine before bed.` : `Your evening skincare routine.`
     return { eyebrow, headline, support: an ? `${an}. After this, the priority is sleep.` : `Keep it gentle and let your skin repair. After this, sleep.`, action: { target: 'skin' } }
   }
+  // Supplements ride on a meal — so the morning stack only surfaces once you've
+  // actually eaten today, and magnesium surfaces at night. Low priority: it sits
+  // below protein/water/training so it never crowds the hero.
+  const suppNudge = () => {
+    if (!state) return null
+    const due = suppsDue(today, state)
+    if (hour >= 21 && due.pmPending)
+      return { eyebrow, headline: `Take magnesium before bed.`, support: `The last box to tick — it eases you into sleep and helps you recover overnight.`, action: null }
+    if (hour < 17 && dt.count && due.amPending) {
+      const left = due.amCount - due.amTaken
+      return { eyebrow, headline: `Take your morning stack with the meal.`, support: `You've eaten — supplements absorb best with food. ${left} left today.`, action: null }
+    }
+    return null
+  }
 
   if (phase === 'latenight')
     return { eyebrow, headline: `It's ${t}. Go to bed.`, support: `Nothing good for your goals happens past midnight. Sleep is when fat burns and muscle repairs.`, action: null }
@@ -4118,6 +4132,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
     const sleepTargetMin = (profile.sleepTargetHours || 7) * 60
     if (lastSleep && lastSleep.confident && lastSleep.minutes < sleepTargetMin)
       return { eyebrow, headline: `Good start. Keep moving.`, support: `Short night (${fmtDuration(lastSleep.minutes)}) — aim earlier tonight. Steps and water are going; keep at it.`, action: { target: 'movement' } }
+    { const sn = suppNudge(); if (sn) return sn }
     { const tip = coachTip(state, today, profile); return { eyebrow, headline: tip.headline, support: tip.support, action: null } }
   }
 
@@ -4126,6 +4141,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
     if (water < expectedWater(hour, wTarget)) return { eyebrow, headline: `You're at ${water} of ${wTarget} glasses. Drink up.`, support: `Behind on water for midday. Get a glass in before you forget.`, action: { target: 'water' } }
     if (tcall && (tcall.focus === 'train' || tcall.focus === 'both')) return move(tcall)
     if (!stepsIn) return { eyebrow, headline: `Your 10k isn't in yet. Get on your feet.`, support: `Ten minutes of walking now beats cramming it after dark. Mark it done once you've hit it.`, action: { target: 'movement' } }
+    { const sn = suppNudge(); if (sn) return sn }
     { const tip = coachTip(state, today, profile); return { eyebrow, headline: tip.headline, support: tip.support, action: null } }
   }
 
@@ -4136,6 +4152,7 @@ function buildCoach({ hour, minute, day, profile, skinDue, lastSleep, state, tod
   if (over) return { eyebrow, headline: `You're over your calorie ceiling.`, support: `Stop eating for tonight — no treats, no "just one more". The deficit is the whole game.`, action: { target: 'diet' } }
   if (water < wTarget && hour < 22) return { eyebrow, headline: `Finish your water — ${water} of ${wTarget}.`, support: `Don't go to bed short on hydration. Knock out the rest now.`, action: { target: 'water' } }
   if (!r.skincarePM && skinDue.pmPending) return skincarePM()
+  { const sn = suppNudge(); if (sn) return sn }
   if (hour >= 21) return { eyebrow, headline: `That's a full day. Be in bed soon.`, support: `Recovery is non-negotiable. Weigh in first thing tomorrow — we track the trend, not the noise.`, action: null }
   { const tip = coachTip(state, today, profile); return { eyebrow, headline: tip.headline, support: tip.support, action: null } }
 }
