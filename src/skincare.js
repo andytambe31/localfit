@@ -88,6 +88,24 @@ function mkStep(id, due, extra = {}) {
   return { id, title: c.title, instruction: c.instruction, kind: p?.kind || 'daily', due, ...extra }
 }
 
+// Trim: the small daily "finishers" (eye serum, facial oil, gua sha) used to each
+// get their own full-screen card, which made the routine feel like a long march.
+// They now fold onto the moisturize step as a single "and then…" finish, so the
+// flow keeps only the essential cards (cleanse, actives, moisturize, SPF).
+const FINISH_CLAUSE = {
+  eyeserum: 'tap eye serum under each eye',
+  facialoil: 'press in a few drops of facial oil',
+  guasha: 'gua sha upward along the jaw and cheeks',
+}
+const joinClauses = (a) => (a.length <= 1 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`)
+function moisturizeStep(finisherIds, avail) {
+  const finishers = finisherIds.filter((id) => avail(id))
+  if (!finishers.length) return mkStep('moisturizer', 'daily')
+  const base = STEP_COPY.moisturizer.instruction
+  const instruction = `${base} Then ${joinClauses(finishers.map((id) => FINISH_CLAUSE[id]))}.`
+  return { ...mkStep('moisturizer', 'daily'), title: 'Moisturize & finish', instruction, folds: finishers }
+}
+
 // ---- shave cadence: rolling every-2-days, anchored to last actual shave ----
 function lastShaveIso(dateIso, state, lookback = 30) {
   for (let i = 1; i <= lookback; i++) {
@@ -245,8 +263,8 @@ export function planForDay(dateIso, state) {
   }
   if (avail('vitc')) am.push(mkStep('vitc', 'active'))
   if (avail('niacinamide')) am.push(mkStep('niacinamide', 'active'))
-  if (avail('eyeserum')) am.push(mkStep('eyeserum', 'daily'))
-  if (avail('moisturizer')) am.push(mkStep('moisturizer', 'daily'))
+  if (avail('moisturizer')) am.push(moisturizeStep(['eyeserum'], avail))
+  else if (avail('eyeserum')) am.push(mkStep('eyeserum', 'daily'))
   if (avail('spf')) am.push(mkStep('spf', 'daily'))
 
   // PM
@@ -258,10 +276,12 @@ export function planForDay(dateIso, state) {
     const carried = !(sched && sched.id === active.id)
     pm.push(mkStep(active.id, 'active', carried ? { carried: true } : {}))
   }
-  if (avail('eyeserum')) pm.push(mkStep('eyeserum', 'daily'))
-  if (avail('moisturizer')) pm.push(mkStep('moisturizer', 'daily'))
-  if (avail('facialoil')) pm.push(mkStep('facialoil', 'daily'))
-  if (avail('guasha')) pm.push(mkStep('guasha', 'daily'))
+  if (avail('moisturizer')) pm.push(moisturizeStep(['eyeserum', 'facialoil', 'guasha'], avail))
+  else {
+    if (avail('eyeserum')) pm.push(mkStep('eyeserum', 'daily'))
+    if (avail('facialoil')) pm.push(mkStep('facialoil', 'daily'))
+    if (avail('guasha')) pm.push(mkStep('guasha', 'daily'))
+  }
 
   return { am, pm }
 }

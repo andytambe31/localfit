@@ -8,7 +8,7 @@ import { todaysPlate } from './recipes'
 import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, PERISH_TIERS, PERISH_META, GROCERY_CATALOG } from './groceries'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
-import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue } from './supps'
+import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue, suppGroupsForDay } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
 import { strengthGoalsFor } from './strengthGoals'
@@ -421,10 +421,26 @@ export default function App() {
     patch({ skincare: { [slot]: log }, routines: { [routineKey]: true } })
     setFlow(null)
   }
-  // Supplements ride on the AM/PM routine but log to their own bucket so they
-  // never skew the skincare score.
-  function completeSupps(slot, log) {
-    patch({ supps: { [slot]: log } })
+  // Supplements are taken with a meal (own card, not the skincare flow) but still
+  // log to their own bucket (day.supps.{am,pm}) so they never skew the skincare
+  // score. Tapping a supp toggles it taken / not taken.
+  function toggleSupp(slot, id) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      const supps = { ...(next.days[today].supps || {}) }
+      const bucket = { ...(supps[slot] || {}) }
+      const steps = { ...(bucket.steps || {}) }
+      if (steps[id] === 'done') delete steps[id]
+      else steps[id] = 'done'
+      supps[slot] = { ...bucket, steps, ts: Date.now() }
+      next.days[today].supps = supps
+      next.days[today]._ts = Date.now()
+      saveLocal(next)
+      return next
+    })
+    setPending(true)
+    scheduleSync()
   }
   // Guided hair routine finished — log the steps; haircare stays true for scoring.
   function completeHairRoutine(slot, log) {
@@ -956,6 +972,10 @@ export default function App() {
         </div>
       </div>
 
+      {/* Supplements — taken with a meal, so they live here next to food, not in
+          the skincare flow. The card highlights the stack whose meal is due. */}
+      <SuppsCard state={state} today={today} onToggle={toggleSupp} onManage={() => setManageSupps(true)} />
+
       {/* Quick access to the tools that live off the home — one tap each */}
       <div className="mt-3 grid grid-cols-4 gap-2">
         {[
@@ -989,7 +1009,7 @@ export default function App() {
         </div>
       )}
 
-      <GoalsSection state={state} profile={profile} today={today} onOpenJourney={setJourneyView} onEstimate={() => setBfOpen(true)} onManageSupps={() => setManageSupps(true)} />
+      <GoalsSection state={state} profile={profile} today={today} onOpenJourney={setJourneyView} onEstimate={() => setBfOpen(true)} />
 
       <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
@@ -1000,7 +1020,7 @@ export default function App() {
       {flow && (
         <SkincareFlow
           slot={flow} dateIso={today} state={state}
-          onComplete={completeRoutine} onSupps={completeSupps}
+          onComplete={completeRoutine}
           onClose={() => setFlow(null)}
           onManage={() => { setFlow(null); setManageProducts(true) }} />
       )}
@@ -2573,6 +2593,52 @@ function ProductsModal({ profile, onClose, onSave, onSensitive }) {
 
 // Manage the daily supplement stack: toggle which are in the routine, add custom
 // ones, set each to morning/evening + with-food. Saves to profile.supps.
+// Standalone supplements card — grouped by the meal each supp rides on. Taken
+// with a meal, so the "with breakfast" stack lights up once you've eaten today and
+// magnesium lights up at night. Tap a row to mark it taken; tap again to undo.
+function SuppsCard({ state, today, onToggle, onManage }) {
+  const groups = suppGroupsForDay(today, state)
+  if (!groups.length) return null
+  const day = state.days?.[today] || {}
+  const ate = (day.food || []).length > 0
+  const hour = new Date().getHours()
+  const total = groups.reduce((n, g) => n + g.supps.length, 0)
+  const taken = groups.reduce((n, g) => n + g.supps.filter((s) => s.done).length, 0)
+  return (
+    <div className="mt-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-display text-[17px] font-semibold text-[#23211c]">Supplements</h3>
+        <span className="text-[12px] text-[#9a9482]">{total && taken === total ? 'All taken' : `${taken}/${total} today`}</span>
+      </div>
+      <div className="mt-2 space-y-2.5">
+        {groups.map((g) => {
+          const pending = g.supps.some((s) => !s.done)
+          const cueNow = pending && (g.meal === 'bedtime' ? hour >= 21 : ate)
+          return (
+            <div key={g.meal} className={`rounded-2xl border p-3 ${cueNow ? 'border-[#e7d4b6] bg-[#f7ecd6]' : 'border-[#ece5d7] bg-white/50'}`}>
+              <div className="flex items-center justify-between px-0.5">
+                <p className={`text-[11px] font-medium uppercase tracking-wider ${cueNow ? 'text-[#8a5a1e]' : 'text-[#a39c8d]'}`}>{g.label}</p>
+                {cueNow && <span className="rounded-full bg-[#8a5a1e] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#f7ecd6]">Take now</span>}
+              </div>
+              <div className="mt-1 divide-y divide-[#ece5d7]">
+                {g.supps.map((s) => (
+                  <button key={s.id} onClick={() => onToggle(g.slot, s.id)} className="flex w-full items-center gap-3 py-2 text-left active:opacity-70">
+                    <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${s.done ? 'border-[#3d4a32] bg-[#3d4a32]' : 'border-[#cfc7b5]'}`}>
+                      {s.done && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+                    </span>
+                    <span className={`min-w-0 flex-1 truncate text-[14px] ${s.done ? 'text-[#b09a7a] line-through' : 'text-[#23211c]'}`}>{s.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {onManage && <button onClick={onManage} className="mt-3 text-[12px] font-medium text-[#3d4a32] active:opacity-70">Manage supplements</button>}
+    </div>
+  )
+}
+
 function SuppsModal({ profile, onClose, onSave }) {
   const [enabled, setEnabled] = useState(() => new Set(profile.supps?.enabled || DEFAULT_SUPPS))
   const [custom, setCustom] = useState(() => [...(profile.supps?.custom || [])])
@@ -2600,7 +2666,7 @@ function SuppsModal({ profile, onClose, onSave }) {
         <div className="flex items-start justify-between">
           <div>
             <h3 className="font-display text-2xl font-semibold text-[#23211c]">Your supplements</h3>
-            <p className="mt-1 text-[13px] text-[#8a8474]">What's in your stack rides on your morning &amp; evening routine.</p>
+            <p className="mt-1 text-[13px] text-[#8a8474]">What's in your stack. Morning ones go with breakfast; evening ones before bed.</p>
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
         </div>
@@ -4539,12 +4605,11 @@ function journeyTools(key, h) {
   return []
 }
 
-function GoalsSection({ state, profile, today, onOpenJourney, onEstimate, onManageSupps }) {
+function GoalsSection({ state, profile, today, onOpenJourney, onEstimate }) {
   const log = state.bodyFatLog || []
   const latest = log[log.length - 1]
   const target = profile.bodyFatTarget || 12
   const journeys = journeysFor(state, today, profile)
-  const suppsLeft = (() => { const due = suppsDue(today, state); return (due.amCount - due.amTaken) + (due.pmCount - due.pmTaken) })()
 
   return (
     <section className="mt-6">
@@ -4557,10 +4622,9 @@ function GoalsSection({ state, profile, today, onOpenJourney, onEstimate, onMana
       <div className="mt-3 flex items-center justify-between gap-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-[#23211c]">Body fat {latest ? `${latest.pct}%` : '—'}<span className="font-normal text-[#8a8474]"> · {target}% goal</span></p>
-          <p className="text-[12px] text-[#8a8474]">{suppsLeft > 0 ? `${suppsLeft} supplement${suppsLeft > 1 ? 's' : ''} left today` : 'Supplements taken'}</p>
+          <p className="text-[12px] text-[#8a8474]">{latest ? 'Re-estimate to keep the trend honest' : 'Estimate your body fat to place the goal'}</p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {onManageSupps && <button onClick={onManageSupps} className="text-[12px] font-medium text-[#3d4a32] active:opacity-70">Supplements</button>}
           <button onClick={onEstimate} className="rounded-full bg-[#3d4a32] px-3.5 py-1.5 text-[12px] font-semibold text-[#f4f1e8] active:scale-95">
             {latest ? 'Re-estimate' : 'Estimate BF'}
           </button>
