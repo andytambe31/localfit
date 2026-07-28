@@ -59,6 +59,30 @@ export function suppPlanForDay(dateIso, state) {
   }
 }
 
+// Supplements are taken with a meal, not while doing skincare at the sink — so
+// they're grouped by the meal they ride on. The with-food morning stack goes with
+// breakfast; magnesium is a bedtime supplement. Display cue per meal:
+export const MEAL_CUE = { breakfast: 'With breakfast', bedtime: 'Before bed' }
+// Which meal a supplement rides on (explicit `meal`, else derived from the slot).
+export function suppMeal(s) { return s.meal || (s.slot === 'pm' ? 'bedtime' : 'breakfast') }
+const mealSlot = (meal) => (meal === 'bedtime' ? 'pm' : 'am')
+
+// The day's stack grouped by meal, each supp carrying whether it's been taken.
+// Backs the standalone Supplements card (log bucket stays day.supps.{am,pm}).
+export function suppGroupsForDay(dateIso, state) {
+  const day = state.days?.[dateIso] || {}
+  const list = enabledSupps(state)
+  return ['breakfast', 'bedtime'].map((meal) => {
+    const slot = mealSlot(meal)
+    const logged = day.supps?.[slot]?.steps || {}
+    return {
+      meal, slot, label: MEAL_CUE[meal],
+      supps: list.filter((s) => suppMeal(s) === meal)
+        .map((s) => ({ id: s.id, name: s.name, instruction: s.instruction, done: logged[s.id] === 'done' })),
+    }
+  }).filter((g) => g.supps.length)
+}
+
 // What's still pending today, for the tile/coach. Read from day.supps logs.
 export function suppsDue(dateIso, state) {
   const day = state.days?.[dateIso] || {}
