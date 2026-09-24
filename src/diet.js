@@ -8,6 +8,8 @@
  * stated portion. Calorie ceiling needs bodyweight — without it, runs protein-only.
  * -------------------------------------------------------------------------- */
 
+import { PHASE_DEFS, currentPhaseId } from './phase'
+
 export const PROTEIN_TARGET_DEFAULT = 150
 
 // --- pantry seed (the owner's real list) ------------------------------------
@@ -307,9 +309,55 @@ export function dayTotals(day) {
 export function proteinRange(state) {
   const wl = [...(state?.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
   const kg = wl.length ? wl[wl.length - 1].kg : null
+  // Phase can raise the per-kg protein multipliers (Phase 2 fuels heavier work).
+  const ppk = state?.profile?.proteinPerKg
+  if (kg && ppk) return { floor: Math.round(ppk.floor * kg), preferred: Math.round(ppk.preferred * kg), stretch: Math.round(ppk.stretch * kg) }
   if (kg) return { floor: Math.round(1.7 * kg), preferred: Math.round(1.9 * kg), stretch: Math.round(2.1 * kg) }
   const t = state?.profile?.proteinTarget || PROTEIN_TARGET_DEFAULT
   return { floor: Math.round(t * 0.8), preferred: Math.round(t * 0.9), stretch: t }
+}
+
+// The rigid daily meal plan for the current phase (Phase 2). Fixed slots at fixed
+// times, each carrying a share of the day's protein + calorie budget, a suggested
+// protein source drawn from what's stocked at today's location, and — once food is
+// logged — how much protein has actually landed in that meal's window. Returns null
+// when the phase has no meal template (Phase 1).
+export function phase2MealPlan(state, today) {
+  const def = PHASE_DEFS[currentPhaseId(state?.profile)]
+  if (!def?.meals) return null
+  const pr = proteinRange(state)
+  const ct = calorieTarget(state)
+  const dayProtein = pr.preferred
+  const dayKcal = ct?.ceiling || null
+
+  const loc = state?.days?.[today]?.foodLoc || defaultLocation(today)
+  const stocked = pantryFor(effectivePantry(state), loc)
+    .filter((f) => !f.provisional && !f.travel && (f.protein || 0) >= 8)
+    .sort((a, b) => (b.protein || 0) - (a.protein || 0))
+
+  // Protein actually logged per meal bucket today (diary entries carry a meal tag).
+  const log = state?.days?.[today]?.food || []
+  const loggedByMeal = {}
+  for (const e of log) {
+    const m = e.meal || mealForTime(new Date(e.ts))
+    loggedByMeal[m] = (loggedByMeal[m] || 0) + (e.protein || 0)
+  }
+  // Template slots map onto the diary's meal buckets (bedtime rides on 'snack').
+  const bucketFor = (slot) => (slot === 'bedtime' ? 'snack' : slot)
+
+  return def.meals.map((m, i) => {
+    const suggestion = stocked.length ? stocked[i % stocked.length] : null
+    const bucket = bucketFor(m.slot)
+    const logged = Math.round(loggedByMeal[bucket] || 0)
+    const proteinTarget = Math.round(dayProtein * m.proteinShare)
+    return {
+      slot: m.slot, time: m.time, label: m.label, note: m.note,
+      proteinTarget,
+      kcalTarget: dayKcal ? Math.round(dayKcal * m.kcalShare) : null,
+      suggestion: suggestion ? { name: suggestion.name, protein: suggestion.protein } : null,
+      logged, met: logged >= proteinTarget && proteinTarget > 0,
+    }
+  })
 }
 
 // Where today's protein sits vs the range.

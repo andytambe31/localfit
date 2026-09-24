@@ -8,6 +8,7 @@ import { todaysPlate } from './recipes'
 import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, PERISH_TIERS, PERISH_META, GROCERY_CATALOG } from './groceries'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
+import { currentPhaseId, currentPhase, phaseDef, startPhasePatch, nextPhaseId, phaseElapsed, PHASE_DEFS } from './phase'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue, suppGroupsForDay } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
@@ -28,7 +29,7 @@ import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName, cardioRamp, rampTargetMin } from './cardio'
 import { journeysFor } from './journeys'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport, SINGLE_FOOD_PROMPT, parseFoodItem } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport, SINGLE_FOOD_PROMPT, parseFoodItem, phase2MealPlan } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID, SKIN_CAUTIONS } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
@@ -397,6 +398,12 @@ export default function App() {
     })
     setPending(true)
     scheduleSync()
+  }
+  // Begin a program phase — stamps today as the phase start and copies the phase's
+  // deficit / training-days / protein dials onto the profile so the diet + training
+  // engines step up immediately.
+  function startPhase(id) {
+    updateProfile(startPhasePatch(id, today))
   }
   // Manual sleep correction — writes today's sleep object (override wins over inference).
   function saveSleep(sleep) { patch({ sleep: { ...sleep, source: 'manual' } }) }
@@ -880,6 +887,14 @@ export default function App() {
           </button>
         )}
       </section>
+
+      {/* Phase command center — the primary Phase 2 surface: what to hit today and
+          how the phase is tracking. Before Phase 2 it's the "start today" prompt. */}
+      <PhaseCenter state={state} profile={profile} today={today} hour={hour}
+        trainSession={trainSession} trainCall={trainCall} trainedToday={trainedToday}
+        onStartPhase={startPhase} onTrain={() => setTraining(true)} onArea={doArea} />
+
+      {currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />}
 
       {showSessionPreview && (
         <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
@@ -2593,6 +2608,191 @@ function ProductsModal({ profile, onClose, onSave, onSensitive }) {
 
 // Manage the daily supplement stack: toggle which are in the routine, add custom
 // ones, set each to morning/evening + with-food. Saves to profile.supps.
+// Phase command center — the Phase 2 primary surface. Before Phase 2 it's the
+// "starts today" prompt with what will change; on Phase 2 it's the day's hit list
+// (train / protein / calories / steps) plus how the phase is tracking (weeks in,
+// body-fat + bodyweight movement, sessions this week, est-1RM gained).
+function PhaseCenter({ state, profile, today, hour, trainSession, trainCall, trainedToday, onStartPhase, onTrain, onArea }) {
+  const phaseId = currentPhaseId(profile)
+  const next = nextPhaseId(profile)
+  const day = state.days?.[today] || {}
+
+  // --- Pre-Phase-2: the "start today" prompt ---
+  if (phaseId < 2 && next) {
+    const nd = phaseDef(next)
+    const rows = [
+      ['Deficit', `${nd.deficit} kcal`],
+      ['Protein', `${nd.proteinPerKg.preferred}×kg`],
+      ['Training', `${nd.gymTargetPerWeek} days · 5-way split`],
+      ['Intensity', `${nd.intensity.rirTarget} RIR · +set · finisher`],
+    ]
+    return (
+      <section className="mt-3 overflow-hidden rounded-[28px] border border-[#d8cdb8] bg-[#f7ecd6] px-6 pb-5 pt-5">
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#8a5a1e]">Phase {next} · starts today</p>
+        <h2 className="font-display mt-2 text-[22px] font-semibold text-[#5c3d13]">{nd.tag}</h2>
+        <p className="mt-2 text-[14px] leading-relaxed text-[#7a5320]">{nd.blurb}</p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {rows.map(([k, v]) => (
+            <div key={k} className="rounded-2xl border border-[#e4d3b3] bg-[#fbf3e2] px-3 py-2">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-[#a3894a]">{k}</p>
+              <p className="mt-0.5 text-[13px] font-semibold text-[#5c3d13]">{v}</p>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => onStartPhase(next)} className="mt-4 w-full rounded-full bg-[#8a5a1e] px-6 py-3 text-[15px] font-semibold text-[#f7ecd6] active:scale-[0.99]">Start Phase {next} today</button>
+      </section>
+    )
+  }
+
+  // --- On Phase 2+: the command center ---
+  const ph = currentPhase(profile)
+  const el = phaseElapsed(profile, today)
+  const dt = dayTotals(day)
+  const pr = proteinRange(state)
+  const ct = calorieTarget(state)
+  const stepTarget = profile.stepTarget || 10000
+  const stepsIn = stepsHit(day, stepTarget)
+  const resting = trainCall?.rest || trainSession?.dayType === 'rest'
+
+  const proteinDone = dt.protein >= pr.preferred
+  const calsOver = ct && dt.kcal > ct.ceiling
+  const targets = [
+    { key: 'train', label: resting ? 'Recover' : (trainSession?.label || 'Train'),
+      sub: resting ? 'Rest — walk & recover' : `${trainSession?.exercises?.length || ''} moves · ~${trainCall?.estMin || (trainSession ? estimateSessionMinutes(trainSession) : '')} min`,
+      done: trainedToday || resting, onTap: (resting || trainedToday) ? null : onTrain },
+    { key: 'protein', label: `Protein ${Math.round(dt.protein)}/${pr.preferred}g`,
+      sub: proteinDone ? 'Target hit' : `${Math.max(0, Math.round(pr.preferred - dt.protein))}g to go`,
+      done: proteinDone, onTap: () => onArea('diet') },
+    { key: 'cals', label: ct ? `${dt.kcal}/${ct.ceiling} cal` : 'Calories',
+      sub: !ct ? 'Log a weigh-in to set this' : calsOver ? 'Over — ease off tonight' : dt.count ? 'Under ceiling' : 'Nothing logged yet',
+      done: !!ct && dt.count > 0 && !calsOver, warn: calsOver, onTap: () => onArea('diet') },
+    { key: 'steps', label: `Steps ${Math.round(stepTarget / 1000)}k`,
+      sub: stepsIn ? 'Done' : 'Get on your feet', done: stepsIn, onTap: () => onArea('movement') },
+  ]
+
+  // Phase progress: movement since the phase began.
+  const started = profile.phase?.startedDate || today
+  const lastOf = (log) => (log && log.length ? [...log].sort((a, b) => a.date.localeCompare(b.date)) : [])
+  const baseOf = (arr) => arr.find((e) => e.date >= started) || arr[arr.length - 1] || null
+  const bf = lastOf(state.bodyFatLog); const bfNow = bf.at(-1); const bfBase = baseOf(bf)
+  const wl = lastOf(state.weightLog); const wNow = wl.at(-1); const wBase = baseOf(wl)
+  const bfDelta = bfNow && bfBase ? Math.round((bfNow.pct - bfBase.pct) * 10) / 10 : null
+  const wDelta = wNow && wBase ? Math.round((wNow.kg - wBase.kg) * 10) / 10 : null
+  const monday = mondayIsoLocal(today)
+  let sessWk = 0
+  for (const [d, v] of Object.entries(state.days || {})) { if (d >= monday && d <= today && v.workout?.did) sessWk++ }
+  const strengthGain = bestLifts(state).reduce((n, l) => n + Math.max(0, l.trend), 0)
+
+  const delta = (v, unit, goodDown) => {
+    if (v == null) return { txt: '—', cls: 'text-[#8a8474]' }
+    if (v === 0) return { txt: `±0${unit}`, cls: 'text-[#8a8474]' }
+    const good = goodDown ? v < 0 : v > 0
+    return { txt: `${v > 0 ? '+' : ''}${v}${unit}`, cls: good ? 'text-[#3d4a32]' : 'text-[#a8842a]' }
+  }
+  const bfD = delta(bfDelta, '%', true)
+  const wD = delta(wDelta, 'kg', true)
+  const tiles = [
+    { k: 'Week', v: `${el.weeks}`, sub: `of Phase ${phaseId}` },
+    { k: 'Body fat', v: bfNow ? `${bfNow.pct}%` : '—', sub: bfD.txt, subCls: bfD.cls },
+    { k: 'Weight', v: wNow ? `${wNow.kg}kg` : '—', sub: wD.txt, subCls: wD.cls },
+    { k: 'This week', v: `${sessWk}/${ph.gymTargetPerWeek}`, sub: sessWk >= ph.gymTargetPerWeek ? 'On target' : 'sessions', subCls: sessWk >= ph.gymTargetPerWeek ? 'text-[#3d4a32]' : 'text-[#8a8474]' },
+  ]
+
+  return (
+    <section className="mt-3 overflow-hidden rounded-[28px] border border-[#dcd5c4] bg-[#fbf9f3]">
+      <div className="flex items-center justify-between border-b border-[#ece5d7] bg-[#eef0e6] px-5 py-3">
+        <div>
+          <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-[#6b7355]">Phase {phaseId} · command center</p>
+          <p className="font-display text-[17px] font-semibold text-[#23291f]">{ph.tag}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[11px] uppercase tracking-wide text-[#9aa581]">Week</p>
+          <p className="font-display text-[20px] font-semibold leading-none text-[#3d4a32]">{el.weeks}</p>
+        </div>
+      </div>
+
+      <div className="px-5 py-4">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Today's targets</p>
+        <div className="mt-2 divide-y divide-[#ece5d7]">
+          {targets.map((t) => (
+            <button key={t.key} onClick={t.onTap || undefined} disabled={!t.onTap}
+              className={`flex w-full items-center gap-3 py-2.5 text-left ${t.onTap ? 'active:opacity-70' : ''}`}>
+              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${t.done ? 'border-[#3d4a32] bg-[#3d4a32]' : t.warn ? 'border-[#c58a2a] bg-[#f7ecd6]' : 'border-[#cfc7b5]'}`}>
+                {t.done && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+                {!t.done && t.warn && <span className="text-[13px] font-bold text-[#8a5a1e]">!</span>}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-medium text-[#23211c]">{t.label}</span>
+                <span className={`block text-[12px] ${t.warn ? 'text-[#a8842a]' : 'text-[#8a8474]'}`}>{t.sub}</span>
+              </span>
+              {t.onTap && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b7b0a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>}
+            </button>
+          ))}
+        </div>
+
+        <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Phase progress</p>
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          {tiles.map((tl) => (
+            <div key={tl.k} className="rounded-2xl border border-[#ece5d7] bg-white/50 px-2 py-2.5 text-center">
+              <p className="text-[9px] font-medium uppercase tracking-wide text-[#a39c8d]">{tl.k}</p>
+              <p className="mt-1 font-display text-[17px] font-semibold leading-none text-[#23291f] tabular-nums">{tl.v}</p>
+              <p className={`mt-1 text-[10px] tabular-nums ${tl.subCls || 'text-[#8a8474]'}`}>{tl.sub}</p>
+            </div>
+          ))}
+        </div>
+        {strengthGain > 0 && (
+          <p className="mt-3 rounded-2xl border border-[#dbe0cc] bg-[#eef0e6] px-3 py-2 text-[12px] font-medium text-[#3d4a32]">Strength: +{strengthGain} lb estimated 1RM across your main lifts since you started tracking. Heavy work is the priority — keep beating the log.</p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+// Monday (local) of the week containing an ISO date, as ISO — no UTC drift.
+function mondayIsoLocal(iso) {
+  const d = new Date(iso + 'T00:00:00')
+  const dow = (d.getDay() + 6) % 7
+  d.setDate(d.getDate() - dow)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+// Phase 2 rigid daily meal plan — fixed slots at fixed times, each with a protein +
+// calorie target, a suggested protein source from what's stocked at today's
+// location, and how much protein has actually landed in that meal so far. The plan
+// you follow; logging still happens in the food view.
+function MealPlanCard({ state, today, onOpenFood }) {
+  const plan = phase2MealPlan(state, today)
+  if (!plan?.length) return null
+  const totalP = plan.reduce((n, m) => n + m.proteinTarget, 0)
+  return (
+    <div className="mt-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-baseline justify-between">
+        <h3 className="font-display text-[17px] font-semibold text-[#23211c]">Today's meal plan</h3>
+        <span className="text-[11px] uppercase tracking-[0.16em] text-[#9a9482]">{totalP}g protein · 5 meals</span>
+      </div>
+      <div className="mt-2 flex flex-col divide-y divide-[#ece5d7]">
+        {plan.map((m) => (
+          <div key={m.slot} className="flex items-start gap-3 py-2.5">
+            <span className="w-16 shrink-0 pt-0.5 text-[12px] font-medium tabular-nums text-[#9a9482]">{m.time}</span>
+            <span className={`mt-1 h-4 w-4 shrink-0 rounded-full border ${m.met ? 'border-[#3d4a32] bg-[#3d4a32]' : 'border-[#cfc7b5]'}`} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-[14px] font-medium text-[#23211c]">{m.label}</span>
+                <span className={`shrink-0 text-[12px] tabular-nums ${m.met ? 'text-[#3d4a32]' : 'text-[#8a8474]'}`}>{m.logged}/{m.proteinTarget}g P{m.kcalTarget ? ` · ~${m.kcalTarget}` : ''}</span>
+              </span>
+              <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">
+                {m.suggestion ? `${m.suggestion.name} (${Math.round(m.suggestion.protein)}g) — ${m.note}` : m.note}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <button onClick={onOpenFood} className="mt-3 text-[12px] font-medium text-[#3d4a32] active:opacity-70">Log a meal →</button>
+    </div>
+  )
+}
+
 // Standalone supplements card — grouped by the meal each supp rides on. Taken
 // with a meal, so the "with breakfast" stack lights up once you've eaten today and
 // magnesium lights up at night. Tap a row to mark it taken; tap again to undo.
