@@ -362,11 +362,13 @@ function ExerciseCard({ ex, effort, onPrev, onNext, onSet, onToggle, onRIR }) {
         <Tag>{ex.muscle}</Tag>
         {ex.focus && <span className="rounded-full bg-[#3d4a32] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#f4f1e8]">Core priority</span>}
         {ex.emphasized && <span className="rounded-full bg-[#4a5836] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#dfe6cf]">Lagging focus</span>}
+        {ex.finisher && <span className="rounded-full bg-[#6a4a1e] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#f7ecd6]">Finisher</span>}
         {beaten && <span className="rounded-full bg-[#3d6a32] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#e7f3df]">Beat last time</span>}
       </div>
       <h2 className="mt-2 font-display text-[28px] font-semibold leading-[1.12] text-[#f4f1e8]">{ex.name}</h2>
       <p className="mt-2 text-[14px] leading-relaxed text-[#9aa581]">{t.note}</p>
       {ex.cue && <p className="mt-3 rounded-xl border border-[#3a4230] bg-[#272d20] px-3 py-2 text-[13px] leading-snug text-[#cfccba]"><span className="font-semibold text-[#9aa581]">Cue · </span>{ex.cue}</p>}
+      {ex.finisher && ex.finisherNote && <p className="mt-2 rounded-xl border border-[#5a4526] bg-[#33291c] px-3 py-2 text-[13px] leading-snug text-[#e6d3b0]"><span className="font-semibold text-[#d3a860]">Finisher · </span>{ex.finisherNote}</p>}
 
       {/* This week's intent — how hard to push, from the periodization block */}
       {effort && (

@@ -18,6 +18,7 @@
 import { trainingPhase } from './periodize'
 import { gymMakeup, stepsHit } from './makeup'
 import { nextType as rotationNext, rotationState, PPL_LABEL } from './rotation'
+import { phaseSplit, phaseIntensity } from './phase'
 import { recoveryState } from './sleep'
 
 // ---- libraries --------------------------------------------------------------
@@ -310,11 +311,13 @@ export function decideDayType(state, todayIso) {
       reason: `${DAY_PLAN[owed].label} is owed — you swapped it out, and those muscles are recovered now.` }
   }
 
-  // Rolling PPL rotation: least-recently-trained day is next, so a neglected Legs
-  // day jumps a strict cycle instead of waiting its turn. No Monday reset.
-  const next = lastTyped ? rotationNext(hist, todayIso) : 'push'
+  // Rolling rotation over the phase's split — least-recently-trained day is next,
+  // so a neglected day jumps a strict cycle instead of waiting its turn. Phase 1
+  // runs Push/Pull/Legs; Phase 2 adds Upper/Lower for a five-type, four-day week.
+  const types = phaseSplit(profile)
+  const next = lastTyped ? rotationNext(hist, todayIso, types) : types[0]
   const plan = DAY_PLAN[next]
-  const rs = rotationState(hist, todayIso, { targetPerWeek: target })
+  const rs = rotationState(hist, todayIso, { targetPerWeek: target, types })
   let reason
   if (!lastTyped) {
     reason = `First session on record — we open the rotation with ${plan.label}.`
@@ -501,8 +504,9 @@ export function buildSession(state, todayIso, opts = {}) {
   let dayType = opts.dayType || decision.dayType
   const hist = liftingHistory(state, todayIso)
   if (!opts.dayType && decision.rest) {
+    const types = phaseSplit(state.profile)
     const lastTyped = [...hist].reverse().find((h) => h.day)
-    dayType = lastTyped ? rotationNext(hist, todayIso) : 'push'
+    dayType = lastTyped ? rotationNext(hist, todayIso, types) : types[0]
   }
   const swapped = !!opts.dayType && opts.dayType !== decision.dayType
   const plan = DAY_PLAN[dayType]
@@ -554,6 +558,37 @@ export function buildSession(state, todayIso, opts = {}) {
     }
   }
 
+  // Phase intensity step-up (Phase 2+): heavier weeks demand more. On non-deload,
+  // non-recovery weeks, add a set to each compound and mark the final isolation a
+  // finisher (last set to failure + a drop set). Phase 1 is a no-op (0 sets, no
+  // finisher). Deload/ease-off weeks are exempt — never pile on when recovering.
+  const intensity = phaseIntensity(state.profile)
+  if (!phase.deload && !easeOff) {
+    if (intensity.extraCompoundSets > 0) {
+      for (const ex of exercises) {
+        if (ex.role !== 'compound' || !ex.sets?.length) continue
+        const last = ex.sets[ex.sets.length - 1]
+        for (let k = 0; k < intensity.extraCompoundSets; k++) ex.sets.push({ ...last, done: false })
+      }
+    }
+    if (intensity.finisher) {
+      const fin = [...exercises].reverse().find((ex) => ex.role === 'isolation') || exercises[exercises.length - 1]
+      if (fin) {
+        fin.finisher = true
+        fin.finisherNote = 'Finisher — take the last set to failure, drop the weight ~20% and squeeze out as many clean reps as you can. This is where the extra growth is bought.'
+      }
+    }
+  }
+
+  // Effort intent: eased on a recovery hole, else the week's effort — tightened by
+  // the phase intensity on ordinary weeks (Phase 2 pushes closer to failure). Heavy
+  // and deload weeks keep their own prescribed effort.
+  let effort = easeOff ? EASE_EFFORT : weekEffort(phase)
+  if (!easeOff && !phase.deload && !phase.heavy && Number(intensity.rirTarget) <= 1) {
+    effort = { ...effort, rirTarget: intensity.rirTarget,
+      line: `${effort.line} Phase 2: push each working set to about ${intensity.rirTarget} in reserve — stop only when the next rep would break form.` }
+  }
+
   // Core priority block: abs are trained deliberately, not tacked on at the end.
   // One anterior + one rotation move, progressed like a main lift. Placed FIRST
   // on push/pull/upper; on leg/lower days it slots in right after the primary
@@ -582,7 +617,7 @@ export function buildSession(state, todayIso, opts = {}) {
     label: plan.label,
     // periodization stamp — persisted on the session, drives the off-ledger skip
     phase: phase.key, phaseLabel: phase.label, phaseShort: phase.short, phaseLine: phase.line,
-    deload: phase.deload, heavy: phase.heavy, effort: easeOff ? EASE_EFFORT : weekEffort(phase),
+    deload: phase.deload, heavy: phase.heavy, effort,
     // Recovery auto-regulation stamp — drives the eased targets + the gate copy.
     recovery: easeOff ? { eased: true, poorNights: recovery.poorNights, avg: recovery.avg } : null,
     weekNumber: phase.weekNumber, totalWeeks: phase.totalWeeks, blockNumber: phase.blockNumber,
