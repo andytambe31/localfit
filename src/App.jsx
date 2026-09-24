@@ -29,7 +29,7 @@ import { yogaScore, yogaDue, yogaSessionsInWindow, yogaDone } from './yoga'
 import CardioFlow from './CardioFlow'
 import { cardioScore, cardioMinutesInWindow, cardioDue, restingHrTrend, cardioTypeName, cardioRamp, rampTargetMin } from './cardio'
 import { journeysFor } from './journeys'
-import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport, SINGLE_FOOD_PROMPT, parseFoodItem } from './diet'
+import { LOCATIONS, defaultLocation, pantryFor, effectivePantry, calorieTarget, calorieBreakdown, calorieZone, dayTotals, entryFromItem, mealForTime, MEAL_ORDER, MEAL_LABEL, groupOf, GROUP_ORDER, dayCritique, isUnhealthy, applyMods, buildFromComponents, componentsFromItem, isSeedFood, FOOD_UNITS, FOOD_LOCS, FIBER_TARGET, SUGAR_LIMIT, dietScore as foodScore, PROTEIN_TARGET_DEFAULT, proteinRange, proteinStatus, proteinGapCombos, mealProteinDistribution, buildFoodLogPrompt, parseFoodImport, SINGLE_FOOD_PROMPT, parseFoodItem, phase2MealPlan } from './diet'
 import RecipeBuilder from './RecipeBuilder'
 import { PRODUCTS, DEFAULT_OWNED, dueSummary, PRODUCT_BY_ID, SKIN_CAUTIONS } from './skincare'
 import { inferSleep, lastNightSleep, sleepScore, scoreNight, recoveryState, sleepNeedsConfirm, fmtDuration, fmtClock } from './sleep'
@@ -893,6 +893,8 @@ export default function App() {
       <PhaseCenter state={state} profile={profile} today={today} hour={hour}
         trainSession={trainSession} trainCall={trainCall} trainedToday={trainedToday}
         onStartPhase={startPhase} onTrain={() => setTraining(true)} onArea={doArea} />
+
+      {currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />}
 
       {showSessionPreview && (
         <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
@@ -2753,6 +2755,42 @@ function mondayIsoLocal(iso) {
   d.setDate(d.getDate() - dow)
   const p = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+// Phase 2 rigid daily meal plan — fixed slots at fixed times, each with a protein +
+// calorie target, a suggested protein source from what's stocked at today's
+// location, and how much protein has actually landed in that meal so far. The plan
+// you follow; logging still happens in the food view.
+function MealPlanCard({ state, today, onOpenFood }) {
+  const plan = phase2MealPlan(state, today)
+  if (!plan?.length) return null
+  const totalP = plan.reduce((n, m) => n + m.proteinTarget, 0)
+  return (
+    <div className="mt-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-baseline justify-between">
+        <h3 className="font-display text-[17px] font-semibold text-[#23211c]">Today's meal plan</h3>
+        <span className="text-[11px] uppercase tracking-[0.16em] text-[#9a9482]">{totalP}g protein · 5 meals</span>
+      </div>
+      <div className="mt-2 flex flex-col divide-y divide-[#ece5d7]">
+        {plan.map((m) => (
+          <div key={m.slot} className="flex items-start gap-3 py-2.5">
+            <span className="w-16 shrink-0 pt-0.5 text-[12px] font-medium tabular-nums text-[#9a9482]">{m.time}</span>
+            <span className={`mt-1 h-4 w-4 shrink-0 rounded-full border ${m.met ? 'border-[#3d4a32] bg-[#3d4a32]' : 'border-[#cfc7b5]'}`} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-[14px] font-medium text-[#23211c]">{m.label}</span>
+                <span className={`shrink-0 text-[12px] tabular-nums ${m.met ? 'text-[#3d4a32]' : 'text-[#8a8474]'}`}>{m.logged}/{m.proteinTarget}g P{m.kcalTarget ? ` · ~${m.kcalTarget}` : ''}</span>
+              </span>
+              <span className="mt-0.5 block text-[12px] leading-snug text-[#8a8474]">
+                {m.suggestion ? `${m.suggestion.name} (${Math.round(m.suggestion.protein)}g) — ${m.note}` : m.note}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <button onClick={onOpenFood} className="mt-3 text-[12px] font-medium text-[#3d4a32] active:opacity-70">Log a meal →</button>
+    </div>
+  )
 }
 
 // Standalone supplements card — grouped by the meal each supp rides on. Taken
