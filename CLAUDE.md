@@ -88,6 +88,19 @@ Backend has CORS + `Access-Control-Allow-Private-Network: true` for the Pages or
 
 ## Features (all built)
 
+- **Program phases** (`src/phase.js`, pure): the top layer. Phase 1 = foundation
+  (500 deficit, 1.7/1.9/2.1 g/kg protein, 3-day PPL, 2 RIR). **Phase 2 "Strength &
+  Lean"** = the step up (300 deficit, 1.9/2.1/2.3 g/kg, 4-day Upper/Lower/Push/Pull/
+  Legs split, 1 RIR + a set on compounds + a finisher, and a rigid daily meal plan).
+  Starting a phase (`startPhasePatch`) WRITES the phase's dials onto the profile
+  (`profile.deficit`, `gymTargetPerWeek`, `proteinPerKg`, `phase:{id,startedDate,goal}`)
+  so the existing diet/training engines read them with almost no rewiring. Surfaced by
+  `PhaseCenter` (App.jsx) — a "starts today" prompt before Phase 2, then a command
+  center (today's train/protein/cal/steps hit list + weeks-in / bf + weight movement /
+  sessions this week / est-1RM gained). `MealPlanCard` renders the rigid plan
+  (`phase2MealPlan` in diet.js). Rotation is split-aware (`rotation.js` takes a `types`
+  arg; Phase 1 defaults to PPL). Intensity step-up lives in `buildSession` (train.js),
+  gated on Phase 2 and skipped on deload/recovery weeks.
 - **Coach** (`buildCoach`): time-phase aware (latenight<5 rest / morning<12 / midday<17 /
   evening<21 / night). Surfaces ONE next action. Skincare sequencing: training is
   EVENING-only, so mornings prompt skincare directly; evenings prompt PM skincare after
