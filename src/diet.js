@@ -307,6 +307,9 @@ export function dayTotals(day) {
 export function proteinRange(state) {
   const wl = [...(state?.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
   const kg = wl.length ? wl[wl.length - 1].kg : null
+  // Phase can raise the per-kg protein multipliers (Phase 2 fuels heavier work).
+  const ppk = state?.profile?.proteinPerKg
+  if (kg && ppk) return { floor: Math.round(ppk.floor * kg), preferred: Math.round(ppk.preferred * kg), stretch: Math.round(ppk.stretch * kg) }
   if (kg) return { floor: Math.round(1.7 * kg), preferred: Math.round(1.9 * kg), stretch: Math.round(2.1 * kg) }
   const t = state?.profile?.proteinTarget || PROTEIN_TARGET_DEFAULT
   return { floor: Math.round(t * 0.8), preferred: Math.round(t * 0.9), stretch: t }
