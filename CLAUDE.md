@@ -115,6 +115,20 @@ Backend has CORS + `Access-Control-Allow-Private-Network: true` for the Pages or
     meal-prep checklists (Sun/Wed), office/WFH daily routines, weekly-review additions
     (sessions/cardio-min/core/mobility/waist), 2-week photo cadence + front-flexed pose,
     configurable non-punitive habits.
+- **ChatGPT daily import** (`src/dailyImport.js`, pure; `ImportModal` in App.jsx): paste
+  a versioned JSON object (schema "1.0") describing a day → validate (size cap, safe
+  parse, prototype-pollution guard, range/date checks) → preview the diff (add/update/
+  skip/planned/unsupported) → merge into the EXISTING models (cardio/steps/water/weight/
+  sleep/nutrition→diary/skincare/haircare/supps/workout/notes). Smart merge is
+  idempotent + partial-day-safe; planned≠completed, estimates flagged; "Copy ChatGPT
+  instructions" generates the prompt from the schema; last import is undoable. Tests in
+  `test/dailyImport.test.mjs` (`npm test`, bundles via esbuild).
+- **Grooming** (skincare.js/hair.js): built around the owner's actual products with a
+  gradual introduction — skincare wk1-2 gentle (cleanse+cream+SPF), wk3+ niacinamide
+  serum ~3×/wk, wk5+ optional weekly resurfacing toner; optional weekly Tree Hut body
+  scrub. Haircare: flexible washing, Rogaine on its existing cadence (AM daily, PM
+  except weekend rests — unchanged), optional Moroccanoil/curl-cream (curl off by
+  default). Progress-photo poses add Face + Hairline. Skincare completion takes a note.
 - **Coach** (`buildCoach`): time-phase aware (latenight<5 rest / morning<12 / midday<17 /
   evening<21 / night). Surfaces ONE next action. Skincare sequencing: training is
   EVENING-only, so mornings prompt skincare directly; evenings prompt PM skincare after

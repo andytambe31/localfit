@@ -7,6 +7,7 @@ import RecipeFlow from './RecipeFlow'
 import { todaysPlate } from './recipes'
 import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, PERISH_TIERS, PERISH_META, GROCERY_CATALOG, GROCERY_BY_ID } from './groceries'
 import { prepForDay, STORAGE_NOTES } from './prep'
+import { parseImport, planImport, applyImport, buildImportPrompt, IMPORT_CATEGORIES } from './dailyImport'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { currentPhaseId, currentPhase, phaseDef, startPhasePatch, nextPhaseId, phaseElapsed, PHASE_DEFS } from './phase'
@@ -137,6 +138,8 @@ export default function App() {
   const [targetsOpen, setTargetsOpen] = useState(false) // editable daily macro/calorie targets
   const [scheduleOpen, setScheduleOpen] = useState(false) // editable weekly training schedule
   const [mealPlanOpen, setMealPlanOpen] = useState(false) // editable daily meal plan
+  const [importOpen, setImportOpen] = useState(false) // ChatGPT daily import
+  const lastImportRef = useRef(null) // most recent import, for undo
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
   const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
@@ -170,7 +173,7 @@ export default function App() {
   // NB: dayPlanOpen is intentionally NOT here — DayPlanModal manages its own body
   // scroll lock (like the food/reflect/stats modals). Adding it too double-locks
   // and leaves the page frozen after close.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || mealPlanOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || mealPlanOpen || importOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -580,6 +583,44 @@ export default function App() {
   function logPlannedMeal(meal, slot) {
     importFoods([mealEntry(meal, slot, Date.now())])
   }
+  // Apply a validated ChatGPT import payload to the relevant day. Snapshots the
+  // target day (+ its weigh-in) first so the import can be undone. Transactional:
+  // one setState, all ops applied or none.
+  function doImport(payload) {
+    let counts = null
+    setState((prev) => {
+      const next = clone(prev)
+      const date = payload.date
+      const prevDay = next.days[date] ? JSON.parse(JSON.stringify(next.days[date])) : null
+      const prevW = (next.weightLog || []).find((w) => w.date === date)
+      lastImportRef.current = { date, prevDay, prevW: prevW ? { ...prevW } : null, hadW: !!prevW }
+      const res = applyImport(next, payload)
+      counts = res.counts
+      saveLocal(next)
+      return next
+    })
+    setPending(true)
+    scheduleSync()
+    return counts
+  }
+  // Undo the most recent import — restore the snapshotted day + weigh-in exactly.
+  function undoImport() {
+    const u = lastImportRef.current
+    if (!u) return
+    setState((prev) => {
+      const next = clone(prev)
+      if (u.prevDay) next.days[u.date] = u.prevDay
+      else delete next.days[u.date]
+      next.weightLog = (next.weightLog || []).filter((w) => w.date !== u.date)
+      if (u.hadW && u.prevW) next.weightLog.push(u.prevW)
+      next.weightLog.sort((a, b) => a.date.localeCompare(b.date))
+      saveLocal(next)
+      return next
+    })
+    lastImportRef.current = null
+    setPending(true)
+    scheduleSync()
+  }
   // Toggle a meal-prep checklist item — persists to day.prep[key][itemId].
   function togglePrep(key, itemId) {
     setState((prev) => {
@@ -959,6 +1000,21 @@ export default function App() {
         <PrepCard prep={prepForDay(today)} done={day.prep?.[prepForDay(today).key] || {}} onToggle={togglePrep} onGroceries={() => setGroceriesOpen(true)} />
       )}
 
+      {/* ChatGPT daily import — a fast, low-friction way to log the day by pasting JSON. */}
+      <button onClick={() => setImportOpen(true)}
+        className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#d8cdb8] bg-[#f4f1ea] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#efe9dc]">
+        <span className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#3d4a32]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block font-display text-[16px] font-semibold text-[#23211c]">Import from ChatGPT</span>
+            <span className="block text-[12px] text-[#8a8474]">Paste your day — cardio, meals, routines, sleep…</span>
+          </span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b7b0a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
+      </button>
+
       {showSessionPreview && (
         <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
       )}
@@ -1141,6 +1197,10 @@ export default function App() {
       {mealPlanOpen && (
         <MealPlanModal profile={profile} today={today} onClose={() => setMealPlanOpen(false)}
           onSave={(mealPlan) => { updateProfile({ mealPlan }); setMealPlanOpen(false) }} />
+      )}
+      {importOpen && (
+        <ImportModal today={today} state={state} onClose={() => setImportOpen(false)}
+          onImport={doImport} onUndo={undoImport} />
       )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
@@ -2746,6 +2806,123 @@ function TargetsModal({ profile, onClose, onSave }) {
           <button onClick={reset} className="rounded-full px-3 py-2.5 text-[13px] font-medium text-[#8a8474]">Reset</button>
           <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
           <button onClick={save} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// ChatGPT daily import — paste JSON, validate, preview the diff, confirm. Reuses
+// the existing day/weight models via dailyImport.js; supports copying the ChatGPT
+// instructions (generated from the schema) and undoing the last import.
+function ImportModal({ today, state, onClose, onImport, onUndo }) {
+  const [text, setText] = useState('')
+  const [plan, setPlan] = useState(null) // { date, ops, unsupported, errors, payload } | { error: [...] }
+  const [done, setDone] = useState(null) // counts after import
+  const [copied, setCopied] = useState(false)
+  const [undone, setUndone] = useState(false)
+  const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'local' } })()
+
+  const validate = () => {
+    const parsed = parseImport(text, today)
+    if (!parsed.ok) { setPlan({ error: parsed.errors }); return }
+    setPlan({ ...planImport(state, parsed.payload), payload: parsed.payload })
+  }
+  const copyPrompt = async () => { try { await navigator.clipboard.writeText(buildImportPrompt(today, tz, state)); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { } }
+  const pasteClip = async () => { try { const t = await navigator.clipboard.readText(); if (t) { setText(t); setPlan(null) } } catch { } }
+  const runImport = () => { const counts = onImport(plan.payload); setDone(counts || { created: 0, updated: 0, skipped: 0 }) }
+
+  const grp = (a) => (plan?.ops || []).filter((o) => o.action === a)
+  const creates = grp('create'), updates = grp('update'), skips = grp('skip'), planned = grp('planned'), errs = grp('error')
+  const applyCount = creates.length + updates.length
+  const SECTION = [
+    { a: 'create', title: 'Will add', cls: 'text-[#3d4a32]', dot: 'bg-[#3d4a32]', ops: creates },
+    { a: 'update', title: 'Will update', cls: 'text-[#8a5a1e]', dot: 'bg-[#c58a2a]', ops: updates },
+    { a: 'skip', title: 'Already logged (skipped)', cls: 'text-[#8a8474]', dot: 'bg-[#cfc7b5]', ops: skips },
+    { a: 'planned', title: 'Planned — not logged', cls: 'text-[#8a8474]', dot: 'bg-[#cfc7b5]', ops: planned },
+    { a: 'error', title: 'Errors', cls: 'text-[#b5503f]', dot: 'bg-[#b5503f]', ops: errs },
+  ]
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
+      <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-[#f4f1ea]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-6 pt-6">
+          <div>
+            <h3 className="font-display text-2xl font-semibold text-[#23211c]">Import from ChatGPT</h3>
+            <p className="mt-1 text-[13px] text-[#8a8474]">Describe your day to ChatGPT, paste the JSON it returns.</p>
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-4">
+          {!done ? (
+            <>
+              <button onClick={copyPrompt} className="mb-3 w-full rounded-full border border-[#d8d1c2] bg-white py-2.5 text-[13px] font-semibold text-[#3d4a32] active:scale-95">{copied ? 'Instructions copied ✓' : 'Copy ChatGPT instructions'}</button>
+              <div className="relative">
+                <textarea value={text} onChange={(e) => { setText(e.target.value); setPlan(null) }} rows={6}
+                  placeholder={`Paste the JSON here…\n{"schemaVersion":"1.0","date":"${today}", …}`}
+                  className="w-full resize-none rounded-2xl border border-[#ddd5c5] bg-white px-3.5 py-3 font-mono text-[12px] leading-snug text-[#23211c] outline-none focus:border-[#3d4a32]" />
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={pasteClip} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2 text-[13px] font-medium text-[#4a463c] active:scale-95">Paste</button>
+                {text && <button onClick={() => { setText(''); setPlan(null) }} className="rounded-full px-3 py-2 text-[13px] font-medium text-[#8a8474]">Clear</button>}
+                <button onClick={validate} disabled={!text.trim()} className="flex-1 rounded-full bg-[#3d4a32] py-2 text-[13px] font-semibold text-[#f4f1e8] disabled:opacity-40 active:scale-95">Validate</button>
+              </div>
+
+              {plan?.error && (
+                <div className="mt-3 rounded-2xl border border-[#e6c4bc] bg-[#f7e9e6] p-3">
+                  {plan.error.map((e, i) => <p key={i} className="text-[13px] text-[#b5503f]">{e}</p>)}
+                </div>
+              )}
+
+              {plan && !plan.error && (
+                <div className="mt-3">
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-[#a39c8d]">Preview · {plan.date}</p>
+                  {SECTION.filter((s) => s.ops.length).map((s) => (
+                    <div key={s.a} className="mt-2">
+                      <p className={`text-[12px] font-semibold ${s.cls}`}>{s.title}</p>
+                      <div className="mt-1 space-y-1">
+                        {s.ops.map((o, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${s.dot}`} />
+                            <p className="text-[13px] text-[#33322c]"><span className="font-medium">{o.label}</span>{o.detail ? <span className="text-[#8a8474]"> — {o.detail}</span> : ''}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {plan.unsupported?.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-[12px] font-semibold text-[#b5503f]">Unsupported — reported, not imported</p>
+                      <p className="mt-1 text-[13px] text-[#8a8474]">{plan.unsupported.join(', ')}</p>
+                    </div>
+                  )}
+                  {!plan.ops.length && !plan.unsupported?.length && <p className="mt-2 text-[13px] text-[#8a8474]">Nothing to import — the JSON had no recognized categories.</p>}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="py-4 text-center">
+              <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-[#3d4a32]">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              </div>
+              <h4 className="font-display mt-3 text-[20px] font-semibold text-[#23211c]">Imported</h4>
+              <p className="mt-1 text-[14px] text-[#5c5542]">{done.created} added · {done.updated} updated · {done.skipped} skipped</p>
+              {!undone && <button onClick={() => { onUndo(); setUndone(true) }} className="mt-3 text-[13px] font-medium text-[#8a5a1e] underline">Undo this import</button>}
+              {undone && <p className="mt-3 text-[13px] text-[#8a8474]">Import undone.</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-[#e6dfd0] px-6 py-4">
+          {!done ? (
+            <button onClick={runImport} disabled={!plan || plan.error || applyCount === 0} className="w-full rounded-full bg-[#3d4a32] py-3 text-[15px] font-semibold text-[#f4f1e8] disabled:opacity-40 active:scale-[0.99]">
+              {plan && !plan.error ? `Import daily activity${applyCount ? ` (${applyCount})` : ''}` : 'Import daily activity'}
+            </button>
+          ) : (
+            <button onClick={onClose} className="w-full rounded-full bg-[#3d4a32] py-3 text-[15px] font-semibold text-[#f4f1e8] active:scale-[0.99]">Done</button>
+          )}
         </div>
       </div>
     </div>,
