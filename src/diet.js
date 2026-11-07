@@ -256,22 +256,45 @@ export function tdee(state) {
   return { value, formula, observed: obs ? obs.value : null, confidence, method, kg, bf }
 }
 
-// Daily calorie ceiling = blended TDEE − deficit. Auto-calibrates as data accrues.
-// Returns null when bodyweight is unknown (UI runs protein-only until then).
+// Daily calorie ceiling. The user's editable target (profile.targets.kcal) is
+// primary; the TDEE engine is advisory. Falls back to the auto TDEE−deficit ceiling
+// when no manual target is set. Returns null when neither is available.
 export function calorieTarget(state, opts = {}) {
+  const manual = state?.profile?.targets?.kcal
   const t = tdee(state)
+  if (manual != null) {
+    return {
+      ceiling: manual, manual: true,
+      tdee: t ? t.value : null, confidence: t ? t.confidence : null,
+      lbm: t && t.bf != null ? Math.round(t.kg * (1 - t.bf / 100) * 10) / 10 : null,
+      kg: t ? t.kg : null, bf: t ? t.bf : null,
+    }
+  }
   if (!t) return null
   const deficit = opts.deficit ?? state.profile?.deficit ?? 500
-  // The ceiling is coach-driven only: blended TDEE minus the (coach-tuned)
-  // deficit. Manual pinning was removed deliberately — the fat-loss pace is the
-  // coach's call, so there's no dial to crank down while chasing the scale.
   const ceiling = Math.round((t.value - deficit) / 10) * 10
   return {
-    ceiling,
+    ceiling, manual: false,
     tdee: t.value, confidence: t.confidence,
     lbm: t.bf != null ? Math.round(t.kg * (1 - t.bf / 100) * 10) / 10 : null, kg: t.kg, bf: t.bf,
   }
 }
+
+// Resolved editable daily macro targets (reads profile.targets, fills defaults).
+// Carbs are the remainder of the calorie budget after protein + fat. All values the
+// user owns via the Targets editor; nothing here is auto-adjusted.
+export function macroTargets(state) {
+  const t = state?.profile?.targets || {}
+  const kcal = t.kcal ?? 1950
+  const protein = t.protein ?? (state?.profile?.proteinTarget || PROTEIN_TARGET_DEFAULT)
+  const fat = t.fat ?? 60
+  const fatMin = t.fatMin ?? 55, fatMax = t.fatMax ?? 65
+  const fiberMin = t.fiberMin ?? 25, fiberMax = t.fiberMax ?? 35
+  const waterMl = t.waterMl ?? 2500
+  const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4))
+  return { kcal, protein, fat, fatMin, fatMax, fiberMin, fiberMax, waterMl, carbs }
+}
+
 
 // The full picture for display: maintenance, target, deficit, expected weekly loss.
 export function calorieBreakdown(state) {
