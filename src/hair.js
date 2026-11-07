@@ -1,42 +1,37 @@
 /* ---------- hair engine (pure) ----------------------------------------------
- * A committed, involved hair-care routine with AM/PM plans that vary by day —
- * mirrors the skincare engine so it can drive a story-style guided flow.
+ * A low-friction routine built around the products the owner actually owns:
+ * Rogaine 5% (minoxidil), Native shampoo + conditioner, Moroccanoil Treatment,
+ * and (optional, off by default) Moroccanoil Curl Defining Cream.
  *
- * Weekly rhythm:
- *   Minoxidil 5%   AM every day; PM every day EXCEPT oil night (Sat) + roller night (Sun)
- *   Shampoo        Ketoconazole 2% Tue/Fri · gentle Sun/Thu  (non-wash: Mon/Wed/Sat)
- *   Peptide serum  AM daily
- *   Scalp massage  AM + PM (timed)
- *   Supplement     AM daily
- *   Rosemary oil   Sat PM (massage, leave overnight → washed out Sun AM)
- *   Derma roller   Sun PM (1.0–1.5mm), then a copper-peptide serum, no minoxidil
+ * Principles honored:
+ *   - Minoxidil keeps its existing schedule — AM daily, PM every day except the
+ *     weekend rest nights (Sat/Sun). Dosage/frequency are NOT changed here.
+ *   - Washing is FLEXIBLE: shampoo + condition are optional "when needed" steps,
+ *     never forced daily.
+ *   - Styling products are optional. Moroccanoil Treatment goes on lengths/ends,
+ *     away from the scalp and minoxidil areas. Curl cream is optional and OFF by
+ *     default (profile.hair.curlCream).
+ *   - No ketoconazole shampoo, no scalp oils, no derma roller — not owned/confirmed.
+ * Step ids (minox_am / minox_pm / shampoo_gentle / condition) are preserved from
+ * the prior engine so historical completion logs carry over.
  * -------------------------------------------------------------------------- */
 
-// Products to buy for the full regimen (surfaced in the flow's empty state).
+// Owned hair products (surfaced in the flow's empty state / manage screen).
 export const HAIR_PRODUCTS = [
-  { id: 'minoxidil', name: 'Minoxidil 5% (Kirkland foam / Rogaine)', why: 'the proven regrowth driver — AM + PM' },
-  { id: 'peptide_serum', name: "The Ordinary Multi-Peptide Serum for Hair Density", why: 'peptides + caffeine for density, daily AM' },
-  { id: 'keto_shampoo', name: 'Ketoconazole 2% shampoo (Nizoral)', why: 'anti-DHT + scalp health, 2×/week' },
-  { id: 'gentle_shampoo', name: 'Gentle sulfate-free shampoo', why: 'clean without stripping, other wash days' },
-  { id: 'conditioner', name: 'Lightweight conditioner', why: 'mid-lengths to ends only' },
-  { id: 'rosemary_oil', name: 'Rosemary oil + jojoba carrier', why: 'evidence comparable to minoxidil for some — weekly' },
-  { id: 'derma_roller', name: 'Derma roller 1.0–1.5mm (titanium)', why: 'micro-needling boosts absorption + collagen, weekly' },
-  { id: 'copper_peptide', name: 'Copper-peptide / hyaluronic serum', why: 'soothe + feed the scalp right after rolling' },
-  { id: 'supplement', name: 'Hair supplement (Nutrafol / biotin + saw palmetto + collagen)', why: 'daily, with food' },
-  { id: 'silk_pillowcase', name: 'Silk pillowcase', why: 'less friction + breakage overnight' },
+  { id: 'minoxidil', name: 'Rogaine 5% (minoxidil)', why: 'the proven regrowth driver — on your existing schedule' },
+  { id: 'shampoo', name: 'Native Sandalwood & Shea Shampoo', why: 'wash the scalp and hair when it needs it' },
+  { id: 'conditioner', name: 'Native Full & Thick Conditioner', why: 'mid-lengths to ends after shampooing' },
+  { id: 'moroccanoil', name: 'Moroccanoil Treatment', why: 'a little on damp lengths and ends — smooths and softens' },
+  { id: 'curl_cream', name: 'Moroccanoil Curl Defining Cream', why: 'optional styling — off by default' },
 ]
 
 export const HAIR_DOW_LABEL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
+// Minoxidil's existing cadence: AM every day; PM every day except the weekend rest
+// nights. This preserves the prior schedule's frequency (it is editable, but not
+// changed here). Washing is intentionally NOT scheduled — it's flexible.
 function schedule(dow) {
-  const keto = dow === 2 || dow === 5          // Tue, Fri
-  const gentle = dow === 0 || dow === 4        // Sun, Thu
-  return {
-    keto, gentle, wash: keto || gentle,
-    oilNight: dow === 6,                        // Sat
-    rollerNight: dow === 0,                     // Sun
-    minoxPM: !(dow === 6 || dow === 0),         // skip on oil + roller nights
-  }
+  return { minoxPM: !(dow === 6 || dow === 0) } // skip Sat/Sun PM (weekend rest nights)
 }
 
 const step = (id, title, instruction, extra = {}) => ({ id, title, instruction, ...extra })
@@ -44,39 +39,35 @@ const step = (id, title, instruction, extra = {}) => ({ id, title, instruction, 
 export function hairPlanForDay(dateIso, state) {
   const dow = new Date(dateIso + 'T00:00:00').getDay()
   const s = schedule(dow)
+  const curlOn = state?.profile?.hair?.curlCream === true
 
   // ---- AM ----
   const am = []
-  if (s.wash) {
-    am.push(step(s.keto ? 'shampoo_keto' : 'shampoo_gentle',
-      s.keto ? 'Ketoconazole shampoo' : 'Gentle shampoo',
-      s.keto
-        ? 'Lather Nizoral 2% into the scalp and leave it 3–5 minutes before rinsing — that contact time is what lowers scalp DHT.'
-        : 'Gentle sulfate-free wash. Massage the scalp, rinse clean.',
-      s.keto ? { tag: 'Anti-DHT', hold: 240 } : {}))
-    am.push(step('condition', 'Condition', 'Mid-lengths to ends only — keep it off the scalp so roots stay light.'))
-    am.push(step('dry_scalp', 'Dry the scalp', 'Towel and air-dry until the scalp is fully dry — minoxidil only works on a dry scalp.', { tag: 'Before minoxidil' }))
+  // Washing is flexible — these are optional "when needed" steps, not daily musts.
+  am.push(step('shampoo_gentle', 'Shampoo (when needed)',
+    'Wash with the Native sandalwood shampoo only when your hair or scalp needs it — not necessarily every day.',
+    { tag: 'Optional', optional: true }))
+  am.push(step('condition', 'Condition (if you washed)',
+    'After shampooing, work the Native conditioner through the mid-lengths and ends. Keep it off the scalp so the roots stay light.',
+    { tag: 'Optional', optional: true }))
+  am.push(step('minox_am', 'Minoxidil (Rogaine 5%)',
+    'Apply Rogaine to the thinning crown and hairline on a dry scalp, per the label. Spread it evenly and wash your hands after. Let it dry before anything else goes near the scalp.',
+    { tag: 'Daily' }))
+  am.push(step('moroccanoil', 'Moroccanoil Treatment (optional)',
+    'Optional — a small amount smoothed through damp lengths and ends. Keep it off the scalp and away from where you applied minoxidil.',
+    { tag: 'Optional', optional: true }))
+  if (curlOn) {
+    am.push(step('curl_cream', 'Curl cream (optional styling)',
+      'Optional styling — a little Moroccanoil Curl Defining Cream through the lengths for the look you want. Nothing on the scalp.',
+      { tag: 'Optional', optional: true }))
   }
-  am.push(step('peptide_am', 'Peptide scalp serum', 'A few drops of the Multi-Peptide serum to the thinning areas; work it in with the fingertips.'))
-  am.push(step('minox_am', 'Minoxidil 5%', 'Half a cap of foam (or 1 mL solution) to the thinning crown + hairline, on the dry scalp. Spread evenly, wash your hands after.', { tag: 'Daily' }))
-  am.push(step('massage_am', 'Scalp massage', 'Three minutes of firm circular massage — drives blood flow and helps the minoxidil absorb.', { hold: 180 }))
-  // Hair supplement now lives in the consolidated supplements flow (supps.js),
-  // folded into the morning routine — so it isn't prompted twice.
 
   // ---- PM ----
   const pm = []
-  if (s.rollerNight) {
-    pm.push(step('roller_clean', 'Disinfect the roller', 'Soak the derma roller in 70% isopropyl alcohol for a couple of minutes.', { tag: 'Roller night' }))
-    pm.push(step('derma_roller', 'Derma roller', 'Clean, dry scalp. Roll 1.0–1.5 mm over the thinning areas — 6–8 passes each direction (vertical, horizontal, diagonal), light pressure.', { tag: 'Weekly' }))
-    pm.push(step('roller_after', 'Copper-peptide serum', 'Press a few drops of the copper-peptide / hyaluronic serum into the rolled areas to soothe and feed the scalp.'))
-    pm.push(step('roller_store', 'Disinfect & store', 'Re-soak the roller in alcohol and let it air-dry on its stand.'))
-    pm.push(step('no_minox_roller', 'No minoxidil tonight', 'Skip minoxidil for ~24h after rolling — freshly needled skin absorbs far more and irritates. Resume tomorrow.', { tag: 'Important' }))
-  } else if (s.oilNight) {
-    pm.push(step('rosemary', 'Rosemary oil treatment', 'Warm a few drops of rosemary oil with jojoba carrier between the palms. Massage into the scalp for five minutes and leave it in overnight.', { tag: 'Weekly', hold: 300 }))
-    pm.push(step('no_minox_oil', 'No minoxidil tonight', 'Leave the oil in overnight; wash it out with your gentle shampoo in the morning. Minoxidil resumes tomorrow.', { tag: 'Important' }))
-  } else if (s.minoxPM) {
-    pm.push(step('minox_pm', 'Minoxidil 5%', 'Second dose of the day — half a cap of foam (or 1 mL) to the thinning areas on a dry scalp.', { tag: 'Daily' }))
-    pm.push(step('massage_pm', 'Scalp massage', 'Two minutes of circular massage to finish — keeps the blood flowing while you sleep.', { hold: 120 }))
+  if (s.minoxPM) {
+    pm.push(step('minox_pm', 'Minoxidil (Rogaine 5%)',
+      'Second Rogaine dose of the day on a dry scalp, per the label. Spread evenly, wash your hands after.',
+      { tag: 'Daily' }))
   }
 
   return { am, pm }
