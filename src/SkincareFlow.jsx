@@ -15,6 +15,7 @@ export default function SkincareFlow({ slot, dateIso, state, onComplete, onClose
   const [marks, setMarks] = useState({}) // { [stepId]: 'done' | 'skipped' }
   const [anim, setAnim] = useState('in') // how the current card arrived: 'in'|'done'|'skip'|'back'
   const [closing, setClosing] = useState(null) // null | 'close' | 'finish'
+  const [note, setNote] = useState('') // optional end-of-routine note (irritation/dryness/pigmentation)
   const title = slot === 'am' ? 'Morning routine' : 'Evening routine'
   const total = steps.length
 
@@ -23,7 +24,7 @@ export default function SkincareFlow({ slot, dateIso, state, onComplete, onClose
   const requestFinish = () => {
     if (closing) return
     setClosing('finish')
-    setTimeout(() => onComplete(slot, { steps: marks, ts: Date.now() }), 240)
+    setTimeout(() => onComplete(slot, { steps: marks, ts: Date.now(), ...(note.trim() ? { note: note.trim() } : {}) }), 240)
   }
 
   const cardAnim = anim === 'skip' ? 'sk-skip' : anim === 'back' ? 'sk-back' : 'sk-advance'
@@ -78,6 +79,9 @@ export default function SkincareFlow({ slot, dateIso, state, onComplete, onClose
           </div>
         </div>
         <div className="shrink-0 px-6 pb-8">
+          <input value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="Note — irritation, dryness, pigmentation… (optional)"
+            className="mb-3 w-full rounded-xl border border-[#3a4230] bg-[#272d20] px-3.5 py-2.5 text-[14px] text-[#f4f1e8] placeholder:text-[#7d8569] outline-none focus:border-[#9aa581]" />
           <button onClick={requestFinish} className="w-full rounded-full bg-[#3d4a32] px-6 py-3.5 text-[15px] font-semibold text-[#f4f1e8]">Done</button>
         </div>
       </Takeover>

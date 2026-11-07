@@ -17,6 +17,8 @@ export const POSES = [
   { id: 'front', label: 'Front' },
   { id: 'side', label: 'Side' },
   { id: 'back', label: 'Back' },
+  { id: 'face', label: 'Face (skin)' },
+  { id: 'hairline', label: 'Hairline (hair)' },
 ]
 
 function openDB() {

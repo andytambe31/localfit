@@ -4,53 +4,55 @@
  * works offline and survives sync — no separate mutable "lastDone".
  */
 
-// Product catalog. `when`: 'am' | 'pm' | 'both'. `kind`: 'daily' | 'active' | 'shave'.
-// Actives carry an `unlock` week and (when scheduled) a `days` weekday list (0=Sun..6=Sat).
+// Product catalog — the owner's actual products. `when`: 'am'|'pm'|'both'.
+// `kind`: 'daily' (every routine) | 'active' (scheduled, ramped in) | 'alt'
+// (alternative, not a step) | 'shave'. Actives carry an `unlock` week (gradual
+// introduction) and a `days`/`cap` weekly schedule. Ids reuse the prior catalog
+// where the concept maps (cleanser/moisturizer/spf/niacinamide) so historical
+// completion logs carry straight over.
 export const PRODUCTS = [
-  { id: 'cleanser', name: 'Gentle cleanser', when: 'both', kind: 'daily', suggest: 'Non-stripping — CeraVe Hydrating or Vanicream' },
-  { id: 'moisturizer', name: 'Moisturizer', when: 'both', kind: 'daily', why: 'buffers the actives, treats surface dehydration', suggest: 'Lightweight — CeraVe PM, Vanicream, or La Roche-Posay Double Repair' },
-  { id: 'spf', name: 'SPF 30-50', when: 'am', kind: 'daily', why: 'without it pigmentation lingers and the retinoid works less', suggest: 'Daily SPF 30-50, reapply if outdoors' },
-  { id: 'guasha', name: 'Gua sha', when: 'pm', kind: 'daily' },
-  { id: 'eyeserum', name: 'Caffeine eye serum', when: 'both', kind: 'daily', why: 'dark circles' },
-  { id: 'vitc', name: 'Vitamin C serum', when: 'am', kind: 'active', unlock: 2, optional: true, why: 'antioxidant, brightening (optional)' },
-  { id: 'niacinamide', name: 'Niacinamide 10%', when: 'am', kind: 'active', unlock: 1, optional: true, why: 'pigmentation, oil control (optional)' },
-  // Priority #1 for the nose: BHA runs 2-3 nights/week, on the nights adapalene doesn't.
-  { id: 'bha', name: 'BHA 2% (salicylic acid)', when: 'pm', kind: 'active', unlock: 2, days: [1, 4], cap: 2, why: 'the nose — sebaceous filaments and congestion; the single biggest win', suggest: "Paula's Choice 2% BHA, The Ordinary Salicylic Acid 2%, or CeraVe Acne Control" },
-  // Priority #2: adapalene, ramped up over weeks (see activeSchedule).
-  { id: 'retinoid', name: 'Adapalene 0.1% (Differin)', when: 'pm', kind: 'active', unlock: 3, days: [2, 5, 0], cap: 3, why: 'prevents clogged pores, smooths texture, fades scars and comedones', suggest: 'Adapalene 0.1% (Differin)' },
-  { id: 'azelaic', name: 'Azelaic acid', when: 'pm', kind: 'active', unlock: 4, optional: true, why: 'pigmentation (optional)' },
-  { id: 'facialoil', name: 'Facial oil', when: 'pm', kind: 'daily', optional: true, why: 'overnight barrier (optional)' },
+  { id: 'cleanser', name: 'Cetaphil Oil-to-Foam Cleanser', when: 'both', kind: 'daily',
+    suggest: 'A water-only rinse is fine in the morning if your skin feels dry.' },
+  { id: 'cleanser_foam', name: 'Medicube Kojic Turmeric Cleansing Foam', when: 'both', kind: 'alt', optional: true,
+    why: 'an alternative cleanser — use it in place of the Cetaphil, never as a second wash' },
+  { id: 'niacinamide', name: 'Medicube Kojic Niacinamide Serum', when: 'am', kind: 'active', unlock: 2, days: [1, 3, 5], cap: 3, optional: true,
+    why: 'brightening and even tone — introduced gradually, about 3×/week once skin is settled' },
+  { id: 'moisturizer', name: 'Medicube Kojic Turmeric Capsule Cream', when: 'both', kind: 'daily',
+    why: 'moisturizes and buffers the actives', suggest: 'Pause it for a few days if it stings or you start to flake.' },
+  { id: 'spf', name: 'La Roche-Posay Tinted Mineral SPF 50', when: 'am', kind: 'daily',
+    why: 'the daily priority — sun is what keeps dark patches and uneven tone around',
+    suggest: 'Reapply every ~2 hours outdoors, and after sweating or swimming.' },
+  { id: 'toner', name: 'Medicube Kojic Turmeric Resurfacing Toner', when: 'pm', kind: 'active', unlock: 4, days: [3], cap: 1, optional: true,
+    why: 'an optional weekly treatment — read the label first, and skip it whenever skin is irritated' },
+  { id: 'body_scrub', name: 'Tree Hut Moroccan Rose Sugar Scrub', when: 'pm', kind: 'body', days: [0], optional: true,
+    why: 'optional weekly body exfoliation — never on irritated or psoriasis-affected skin' },
   { id: 'shave', name: 'Shave', when: 'am', kind: 'shave' },
 ]
 
-// The dermatologist's "what not to do" — surfaced in the products screen so the
-// cautions live next to the routine, not just in someone's memory.
+// Safety / "what not to do" — surfaced in the products screen. Deliberately makes
+// no medical claims about the darker forehead or under-eye appearance.
 export const SKIN_CAUTIONS = [
-  "No pore strips — they don't clear sebaceous filaments and irritate the skin.",
-  "Don't squeeze the bumps under your eyes — they're likely milia; a dermatologist can remove them in minutes.",
-  'No physical scrubs on the nose — the BHA does the exfoliating, gently.',
-  'Skip harsh alcohol toners; they strip the barrier and push oil production up.',
-  "Don't layer BHA and adapalene the same night until your skin is fully adjusted (several weeks).",
+  'Introduce one active at a time — never start every Medicube product at once.',
+  'If anything stings, burns, or flakes, pause that product for a few days and let the barrier settle.',
+  'Sunscreen every morning is the priority — uneven tone and dark patches set in fastest without it.',
+  'A darker forehead and under-eye shadows have many harmless causes. Treat gently, stay consistent, and judge it over weeks, not days.',
+  'Keep the resurfacing toner infrequent (about once a week) and check its directions before each use.',
+  'No harsh physical scrubbing on the face — let the products do the work.',
 ]
 export const PRODUCT_BY_ID = Object.fromEntries(PRODUCTS.map((p) => [p.id, p]))
 
-// Default ownership for a fresh profile.
-export const DEFAULT_OWNED = ['cleanser', 'moisturizer', 'spf', 'guasha', 'shave']
+// Default ownership for a fresh profile (the owner's products; the cleansing foam
+// is an alternative, never an extra step).
+export const DEFAULT_OWNED = ['cleanser', 'cleanser_foam', 'niacinamide', 'moisturizer', 'spf', 'toner', 'body_scrub', 'shave']
 
 // Step copy. Title = imperative; instruction = one calm sentence.
 const STEP_COPY = {
-  cleanser: { title: 'Cleanse', instruction: 'Wash with lukewarm water and pat dry.' },
+  cleanser: { title: 'Cleanse', instruction: 'Cetaphil oil-to-foam with lukewarm water, then pat dry. If your skin feels dry in the morning, a water-only rinse is fine.' },
   shave: { title: 'Shave', instruction: 'Shave with the grain, then rinse cool.' },
-  vitc: { title: 'Apply Vitamin C', instruction: 'A few drops to a dry face, avoid the eyes.' },
-  niacinamide: { title: 'Apply niacinamide', instruction: 'A thin layer over the whole face.' },
-  eyeserum: { title: 'Apply eye serum', instruction: 'Tap a small amount gently under each eye.' },
-  moisturizer: { title: 'Moisturize', instruction: 'Smooth an even layer over your face and neck.' },
-  spf: { title: 'Apply SPF', instruction: 'Two fingers of sunscreen, the last thing before you leave.' },
-  bha: { title: 'Exfoliate (BHA)', instruction: 'Thin layer on a dry face — work it over the nose and T-zone. No scrubbing; let it sink in a minute.' },
-  retinoid: { title: 'Apply adapalene', instruction: 'A pea-sized amount across forehead, cheeks and chin. Keep it off the eyelids and the skin right under your eyes.' },
-  azelaic: { title: 'Apply azelaic acid', instruction: 'A thin layer over pigmented areas.' },
-  facialoil: { title: 'Seal with facial oil', instruction: 'A few drops pressed in over your moisturizer.' },
-  guasha: { title: 'Gua sha', instruction: 'Glide upward and out along the jaw and cheeks, slow and light.' },
+  niacinamide: { title: 'Brightening serum', instruction: 'A few drops of the Medicube niacinamide serum over the whole face. Scheduled days only — about 3×/week once your skin is settled.' },
+  moisturizer: { title: 'Moisturize', instruction: 'An even layer of the Medicube capsule cream over face and neck. Pause it if it stings or you start flaking.' },
+  spf: { title: 'Apply SPF 50', instruction: 'Two fingers of the La Roche-Posay tinted mineral sunscreen — the last thing before you leave. Reapply every ~2 hours outdoors.' },
+  toner: { title: 'Resurfacing toner (optional)', instruction: 'Optional weekly treatment — a light swipe of the Medicube resurfacing toner on dry skin, no more than once a week. Check the label, and skip it if your skin is irritated.' },
 }
 
 // ---- date helpers (calendar, local, ISO yyyy-mm-dd) ----
@@ -74,6 +76,7 @@ const isOwned = (id, owned) => id === 'shave' || (owned || []).includes(id)
 
 // Is a product available (owned + unlocked) on this date?
 function isAvailable(prod, dateIso, state) {
+  if (!prod) return false
   if (!isOwned(prod.id, state.profile?.skincare?.ownedProducts)) return false
   if (prod.kind === 'active') {
     const w = weeksSinceStart(dateIso, state.profile?.skincare?.startedDate)
@@ -128,15 +131,27 @@ function weekStartIso(dateIso) {
   const back = (wd + 6) % 7 // days since Monday
   return shift(dateIso, -back)
 }
-function activeDoneThisWeek(id, dateIso, state) {
+function activeDoneThisWeek(id, dateIso, state, slot = 'pm') {
   const start = weekStartIso(dateIso)
   let n = 0
   for (let i = 0; i < 7; i++) {
     const iso = shift(start, i)
     if (iso > dateIso) break
-    if (stepDone(state.days?.[iso], 'pm', id)) n++
+    if (stepDone(state.days?.[iso], slot, id)) n++
   }
   return n
+}
+
+// Is a scheduled active due in a given slot today? (owned + unlocked + today is one
+// of its weekdays + not already at its weekly cap). Drives the AM brightening serum,
+// which the PM-only tonightActive machinery doesn't cover.
+function activeDue(id, slot, dateIso, state) {
+  const prod = PRODUCT_BY_ID[id]
+  if (!prod || !isAvailable(prod, dateIso, state)) return false
+  const sch = activeSchedule(id, dateIso, state)
+  if (!sch.days || !sch.days.includes(weekdayOf(dateIso))) return false
+  if (sch.cap && activeDoneThisWeek(id, dateIso, state, slot) >= sch.cap) return false
+  return true
 }
 
 // The first night adapalene was actually logged (its true ramp anchor), or null.
@@ -206,6 +221,7 @@ function carriedActive(dateIso, state, blockId) {
   const MAX_BACK = 7
   for (const p of PRODUCTS) {
     if (p.kind !== 'active' || p.when !== 'pm') continue
+    if (p.optional) continue // optional treatments (e.g. the weekly toner) never nag via carry-over
     if (p.id === blockId) continue
     if (!isAvailable(p, dateIso, state)) continue
     const sch = activeSchedule(p.id, dateIso, state)
@@ -262,7 +278,7 @@ export function planForDay(dateIso, state) {
       : {}))
   }
   if (avail('vitc')) am.push(mkStep('vitc', 'active'))
-  if (avail('niacinamide')) am.push(mkStep('niacinamide', 'active'))
+  if (activeDue('niacinamide', 'am', dateIso, state)) am.push(mkStep('niacinamide', 'active'))
   if (avail('moisturizer')) am.push(moisturizeStep(['eyeserum'], avail))
   else if (avail('eyeserum')) am.push(mkStep('eyeserum', 'daily'))
   if (avail('spf')) am.push(mkStep('spf', 'daily'))
@@ -281,6 +297,12 @@ export function planForDay(dateIso, state) {
     if (avail('eyeserum')) pm.push(mkStep('eyeserum', 'daily'))
     if (avail('facialoil')) pm.push(mkStep('facialoil', 'daily'))
     if (avail('guasha')) pm.push(mkStep('guasha', 'daily'))
+  }
+  // Optional weekly body exfoliation (Sundays) — body only, never on irritated or
+  // psoriasis-affected skin.
+  if (isAvailable(PRODUCT_BY_ID.body_scrub, dateIso, state) && weekdayOf(dateIso) === 0) {
+    pm.push({ id: 'body_scrub', title: 'Body scrub (optional, weekly)', kind: 'body', due: 'weekly', optional: true,
+      instruction: 'Optional weekly Tree Hut sugar scrub in the shower — gently, on the body only. Avoid any irritated skin and psoriasis-affected areas.' })
   }
 
   return { am, pm }

@@ -427,6 +427,16 @@ export default function App() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedProgram])
+  // One-time skincare catalog migration: adopt the owned-product line and restart
+  // the gradual introduction from the program start, preserving other skincare
+  // settings (sensitive flag, etc.). Historical logs keep their step ids.
+  const migrateSkin = !booting && state?.profile && (state.profile.skincare?.catalogV || 0) < 2
+  useEffect(() => {
+    if (!migrateSkin) return
+    const sk = state.profile.skincare || {}
+    updateProfile({ skincare: { ...sk, ownedProducts: [...DEFAULT_OWNED], startedDate: PROGRAM.start, catalogV: 2 } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [migrateSkin])
   // Manual sleep correction — writes today's sleep object (override wins over inference).
   function saveSleep(sleep) { patch({ sleep: { ...sleep, source: 'manual' } }) }
   // Morning one-tap confirmations of the inferred estimate.
