@@ -5,13 +5,14 @@ import SkincareFlow from './SkincareFlow'
 import TrainFlow from './TrainFlow'
 import RecipeFlow from './RecipeFlow'
 import { todaysPlate } from './recipes'
-import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, PERISH_TIERS, PERISH_META, GROCERY_CATALOG } from './groceries'
+import { stockLevel, cycleStock, shoppingList, lowCount, restockDue, STOCK_LABEL, PERISH_TIERS, PERISH_META, GROCERY_CATALOG, GROCERY_BY_ID } from './groceries'
+import { prepForDay, STORAGE_NOTES } from './prep'
 import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSessions, bestLifts, liftProgress, plateLabel, DB_EXERCISES, swapOptions } from './train'
 import { trainingPhase } from './periodize'
 import { currentPhaseId, currentPhase, phaseDef, startPhasePatch, nextPhaseId, phaseElapsed, PHASE_DEFS } from './phase'
 import { PROGRAM, DEFAULT_TARGETS, programPhase, programProgress, phaseProgress, programWindow } from './program'
 import { WEEKLY_SCHEDULE_DEFAULT, WEEKDAY_LABEL, SESSION_OPTIONS, scheduleFor, templateFor, sessionForDate } from './schedule'
-import { MEAL_LIBRARY, MEAL_LIST, SLOTS, SLOT_LABEL, mealById, planFor, mealPlanForDate, planDayTotals, mealEntry, WEEKLY_MEAL_PLAN_DEFAULT } from './meals'
+import { MEAL_LIBRARY, MEAL_LIST, SLOTS, SLOT_LABEL, mealById, planFor, mealPlanForDate, planDayTotals, mealEntry, WEEKLY_MEAL_PLAN_DEFAULT, weeklyGroceryPlan } from './meals'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue, suppGroupsForDay } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
@@ -569,6 +570,23 @@ export default function App() {
   function logPlannedMeal(meal, slot) {
     importFoods([mealEntry(meal, slot, Date.now())])
   }
+  // Toggle a meal-prep checklist item — persists to day.prep[key][itemId].
+  function togglePrep(key, itemId) {
+    setState((prev) => {
+      const next = clone(prev)
+      next.days[today] = next.days[today] || defaultDay()
+      const prep = { ...(next.days[today].prep || {}) }
+      const grp = { ...(prep[key] || {}) }
+      grp[itemId] = !grp[itemId]
+      prep[key] = grp
+      next.days[today].prep = prep
+      next.days[today]._ts = Date.now()
+      saveLocal(next)
+      return next
+    })
+    setPending(true)
+    scheduleSync()
+  }
   function removeFood(idx) {
     setState((prev) => {
       const next = clone(prev)
@@ -926,6 +944,10 @@ export default function App() {
       {profile.program
         ? <ProgramMealPlan state={state} profile={profile} today={today} onLogMeal={logPlannedMeal} onEdit={() => setMealPlanOpen(true)} onOpenFood={() => setOverride('diet')} />
         : (currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />)}
+
+      {profile.program && prepForDay(today) && (
+        <PrepCard prep={prepForDay(today)} done={day.prep?.[prepForDay(today).key] || {}} onToggle={togglePrep} onGroceries={() => setGroceriesOpen(true)} />
+      )}
 
       {showSessionPreview && (
         <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
@@ -2721,6 +2743,44 @@ function TargetsModal({ profile, onClose, onSave }) {
   )
 }
 
+// Meal-prep checklist — shown on Sunday (full prep) and Wednesday (restock + midweek
+// prep). Checkable, persisted per day. Includes safe-storage reminders.
+function PrepCard({ prep, done, onToggle, onGroceries }) {
+  const [showNotes, setShowNotes] = useState(false)
+  const n = prep.items.length
+  const got = prep.items.filter((it) => done[it.id]).length
+  return (
+    <div className="mt-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-baseline justify-between">
+        <h3 className="font-display text-[17px] font-semibold text-[#23211c]">{prep.title}</h3>
+        <span className="text-[12px] text-[#9a9482]">{got}/{n}</span>
+      </div>
+      <div className="mt-2 flex flex-col divide-y divide-[#ece5d7]">
+        {prep.items.map((it) => {
+          const isDone = !!done[it.id]
+          return (
+            <button key={it.id} onClick={() => (it.id === 'list' || it.id === 'shop' || it.id === 'restock' ? onGroceries() : onToggle(prep.key, it.id))}
+              className="flex items-center gap-3 py-2.5 text-left active:opacity-70">
+              <span onClick={(e) => { e.stopPropagation(); onToggle(prep.key, it.id) }}
+                className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${isDone ? 'border-[#3d4a32] bg-[#3d4a32]' : 'border-[#cfc7b5]'}`}>
+                {isDone && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+              </span>
+              <span className={`min-w-0 flex-1 text-[14px] ${isDone ? 'text-[#b09a7a] line-through' : 'text-[#23211c]'}`}>{it.text}</span>
+              {(it.id === 'list' || it.id === 'shop' || it.id === 'restock') && <span className="shrink-0 text-[11px] font-medium text-[#3d4a32]">Open</span>}
+            </button>
+          )
+        })}
+      </div>
+      <button onClick={() => setShowNotes((v) => !v)} className="mt-2 text-[12px] font-medium text-[#3d4a32] active:opacity-70">{showNotes ? 'Hide' : 'Storage'} notes</button>
+      {showNotes && (
+        <ul className="mt-1.5 space-y-1">
+          {STORAGE_NOTES.map((t, i) => <li key={i} className="text-[12px] leading-snug text-[#8a8474]">· {t}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // Program meal plan — today's planned meals (A–G) with estimated macros, the
 // computed planned-day total vs targets (only states "meets" from the math), and a
 // one-tap log for each meal. Editable via the per-day meal plan editor.
@@ -4037,7 +4097,9 @@ function PlateCard({ state, today, onOpen, onBrowse }) {
 // the shopping list is everything Low/Out, and "Log haul" flips it all back.
 function GroceriesView({ state, today, onStock, onHaul, onClose }) {
   const [open, setOpen] = useState({}) // which pantry tiers are expanded (default collapsed)
+  const [horizon, setHorizon] = useState(7) // grocery-from-plan horizon (days)
   const list = shoppingList(state)
+  const planGroceries = state.profile?.program ? weeklyGroceryPlan(state.profile, today, horizon) : []
   const due = restockDue(state, today)
   const byTier = {}
   for (const g of GROCERY_CATALOG) { (byTier[g.perishability] ||= []).push(g) }
@@ -4061,6 +4123,34 @@ function GroceriesView({ state, today, onStock, onHaul, onClose }) {
           <div className="mt-4 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
             <p className="text-[14px] font-medium text-[#23211c]">Grocery day — {due.low} item{due.low > 1 ? 's' : ''} to restock{due.out ? ", something's out" : ''}.</p>
             <p className="mt-0.5 text-[12px] text-[#8a8474]">{due.daysSince >= 900 ? 'No haul logged yet.' : `${due.daysSince} day${due.daysSince === 1 ? '' : 's'} since your last haul (every ${due.cadence}).`}</p>
+          </div>
+        )}
+
+        {planGroceries.length > 0 && (
+          <div className="mt-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9a9482]">For your meal plan</h2>
+              <div className="flex gap-1">
+                {[3, 4, 7].map((d) => (
+                  <button key={d} onClick={() => setHorizon(d)} className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${horizon === d ? 'bg-[#3d4a32] text-[#f4f1e8]' : 'border border-[#d8d1c2] text-[#6f6a5d]'}`}>{d}d</button>
+                ))}
+              </div>
+            </div>
+            <p className="mt-0.5 text-[12px] text-[#8a8474]">What the next {horizon} days of planned meals need (servings). Items you already have are dimmed — tap any to update stock.</p>
+            <div className="mt-2 divide-y divide-[#ece5d7] rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-3">
+              {planGroceries.map(({ groceryId, servings }) => {
+                const it = GROCERY_BY_ID[groceryId]
+                if (!it) return null
+                const lvl = stockLevel(state, groceryId)
+                const have = lvl === 'stocked'
+                return (
+                  <button key={groceryId} onClick={() => onStock(groceryId, cycleStock(lvl))} className="flex w-full items-center justify-between gap-3 py-2 text-left active:opacity-70">
+                    <span className={`min-w-0 truncate text-[14px] ${have ? 'text-[#a9a393]' : 'text-[#23211c]'}`}>{it.name}<span className="text-[12px] text-[#9a9482]"> · {servings} serving{servings > 1 ? 's' : ''}</span></span>
+                    <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${chip(lvl)}`}>{have ? 'Have' : STOCK_LABEL[lvl]}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
 
