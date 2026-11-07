@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "sync": "node scripts/sync-data.mjs",
+    "test": "esbuild test/dailyImport.test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/lf-test.mjs && node node_modules/.cache/lf-test.mjs",
     "server": "node server/index.mjs",
     "server:dev": "PORT=8799 STATE_FILE=data/state.dev.json node server/index.mjs",
     "vite": "vite --host",
