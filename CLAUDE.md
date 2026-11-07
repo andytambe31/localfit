@@ -88,19 +88,33 @@ Backend has CORS + `Access-Control-Allow-Private-Network: true` for the Pages or
 
 ## Features (all built)
 
-- **Program phases** (`src/phase.js`, pure): the top layer. Phase 1 = foundation
-  (500 deficit, 1.7/1.9/2.1 g/kg protein, 3-day PPL, 2 RIR). **Phase 2 "Strength &
-  Lean"** = the step up (300 deficit, 1.9/2.1/2.3 g/kg, 4-day Upper/Lower/Push/Pull/
-  Legs split, 1 RIR + a set on compounds + a finisher, and a rigid daily meal plan).
-  Starting a phase (`startPhasePatch`) WRITES the phase's dials onto the profile
-  (`profile.deficit`, `gymTargetPerWeek`, `proteinPerKg`, `phase:{id,startedDate,goal}`)
-  so the existing diet/training engines read them with almost no rewiring. Surfaced by
-  `PhaseCenter` (App.jsx) — a "starts today" prompt before Phase 2, then a command
-  center (today's train/protein/cal/steps hit list + weeks-in / bf + weight movement /
-  sessions this week / est-1RM gained). `MealPlanCard` renders the rigid plan
-  (`phase2MealPlan` in diet.js). Rotation is split-aware (`rotation.js` takes a `types`
-  arg; Phase 1 defaults to PPL). Intensity step-up lives in `buildSession` (train.js),
-  gated on Phase 2 and skipped on deload/recovery weeks.
+- **6-month transformation program** (Nov 8 2026 – Apr 30 2027). The calendar spine
+  over everything (supersedes the old Phase 1/2 tiers):
+  - `src/program.js` (pure): dated `PROGRAM_PHASES` 0–6 (`programPhase`/`programProgress`/
+    `phaseProgress`) — the current phase is whichever dated window contains today;
+    transitions carry focus but NEVER change a target. `DEFAULT_TARGETS`.
+  - **Editable targets**: `profile.targets` (kcal/protein/fat/fiber/water; carbs =
+    computed remainder). `diet.js calorieTarget` prefers the manual target (TDEE
+    demoted to advisory); `macroTargets()` resolves them. `TargetsModal` edits them.
+  - **Fixed editable weekly schedule**: `src/schedule.js` — `SESSION_TEMPLATES`
+    (Upper A/B, Lower A/B with explicit exercise lists + core + morning cardio;
+    cardio/mobility/recovery days). `profile.weeklySchedule` (weekday→session, editable
+    via `ScheduleModal`). `train.js decideDayType`/`buildSession` build from the
+    template on the program; **periodization waves still drive set/rep/load**;
+    conservative lower-body ramp for the first 2 weeks. Rolling rotation is the
+    non-program fallback.
+  - **Meal library + plan**: `src/meals.js` — Meals A–G (estimated macros + ingredients;
+    Sweetgreen = customizable restaurant template), `WEEKLY_MEAL_PLAN_DEFAULT`,
+    `planDayTotals` (computed, only states "meets" from the math). `ProgramMealPlan`
+    card (log a meal → diary entry) + `MealPlanModal` (swap slots, editable
+    `profile.mealPlan`).
+  - **Command center**: `ProgramCenter` (App.jsx) — dated phase header + progress bar,
+    editable macro targets vs logged + remaining, today's scheduled lift/cardio + core/
+    mobility + steps + water + sleep (the consolidated "Today's Overview").
+  - PENDING for this program: grocery quantities auto-computed from the meal plan,
+    meal-prep checklists (Sun/Wed), office/WFH daily routines, weekly-review additions
+    (sessions/cardio-min/core/mobility/waist), 2-week photo cadence + front-flexed pose,
+    configurable non-punitive habits.
 - **Coach** (`buildCoach`): time-phase aware (latenight<5 rest / morning<12 / midday<17 /
   evening<21 / night). Surfaces ONE next action. Skincare sequencing: training is
   EVENING-only, so mornings prompt skincare directly; evenings prompt PM skincare after

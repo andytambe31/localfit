@@ -94,3 +94,34 @@ export function mealEntry(meal, slot, ts) {
     fiber: meal.fiber || 0, sugar: 0, provisional: !!meal.estimate, fromPlan: true,
   }
 }
+
+// Which grocery-catalog items each meal needs (ids match groceries.js GROCERY_CATALOG).
+// Used to generate a shopping list from the plan. Sweetgreen (G) needs nothing bought.
+export const MEAL_GROCERIES = {
+  A: ['egg', 'egg_whites', 'whole_wheat_bread', 'blueberries'],
+  B: ['chicken_breast', 'white_rice', 'broccoli', 'olive_oil'],
+  C: ['chicken_breast', 'potato', 'broccoli', 'olive_oil'],
+  D: ['oikos_triple_zero', 'banana'],
+  E: ['chicken_breast', 'whole_wheat_wrap', 'romaine_lettuce', 'tomato'],
+  F: ['rolled_oats', 'whey_isolate', 'strawberries', 'oat_milk'],
+  G: [],
+}
+
+const p2 = (n) => String(n).padStart(2, '0')
+const isoOf = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+
+// Grocery items the plan needs over `days` days from startIso, as
+// [{ groceryId, servings }] — servings = how many planned meals use that item,
+// a serving-count proxy for quantity. The UI resolves names/stock and lets the
+// user check off, edit, or substitute.
+export function weeklyGroceryPlan(profile, startIso, days = 7) {
+  const counts = {}
+  const d0 = new Date(startIso + 'T00:00:00')
+  for (let i = 0; i < days; i++) {
+    const iso = isoOf(new Date(d0.getTime() + i * 86400000))
+    for (const { meal } of mealPlanForDate(profile, iso)) {
+      for (const g of (MEAL_GROCERIES[meal.id] || [])) counts[g] = (counts[g] || 0) + 1
+    }
+  }
+  return Object.entries(counts).map(([groceryId, servings]) => ({ groceryId, servings })).sort((a, b) => b.servings - a.servings)
+}
