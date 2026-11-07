@@ -11,6 +11,7 @@ import { trainingPhase } from './periodize'
 import { currentPhaseId, currentPhase, phaseDef, startPhasePatch, nextPhaseId, phaseElapsed, PHASE_DEFS } from './phase'
 import { PROGRAM, DEFAULT_TARGETS, programPhase, programProgress, phaseProgress, programWindow } from './program'
 import { WEEKLY_SCHEDULE_DEFAULT, WEEKDAY_LABEL, SESSION_OPTIONS, scheduleFor, templateFor, sessionForDate } from './schedule'
+import { MEAL_LIBRARY, MEAL_LIST, SLOTS, SLOT_LABEL, mealById, planFor, mealPlanForDate, planDayTotals, mealEntry, WEEKLY_MEAL_PLAN_DEFAULT } from './meals'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue, suppGroupsForDay } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
@@ -134,6 +135,7 @@ export default function App() {
   const [manageSupps, setManageSupps] = useState(false)
   const [targetsOpen, setTargetsOpen] = useState(false) // editable daily macro/calorie targets
   const [scheduleOpen, setScheduleOpen] = useState(false) // editable weekly training schedule
+  const [mealPlanOpen, setMealPlanOpen] = useState(false) // editable daily meal plan
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
   const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
@@ -167,7 +169,7 @@ export default function App() {
   // NB: dayPlanOpen is intentionally NOT here — DayPlanModal manages its own body
   // scroll lock (like the food/reflect/stats modals). Adding it too double-locks
   // and leaves the page frozen after close.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || mealPlanOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -562,6 +564,11 @@ export default function App() {
     })
     setPending(true); scheduleSync()
   }
+  // Log a planned meal from the weekly plan — drops its estimated macros into the
+  // diary as a food entry (the normal food logger can then adjust portions).
+  function logPlannedMeal(meal, slot) {
+    importFoods([mealEntry(meal, slot, Date.now())])
+  }
   function removeFood(idx) {
     setState((prev) => {
       const next = clone(prev)
@@ -916,7 +923,9 @@ export default function App() {
         onTrain={() => setTraining(true)} onArea={doArea} onEditTargets={() => setTargetsOpen(true)}
         onEditSchedule={() => setScheduleOpen(true)} onCardio={() => setCardioOpen(true)} onMobility={() => setYogaOpen(true)} />
 
-      {currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />}
+      {profile.program
+        ? <ProgramMealPlan state={state} profile={profile} today={today} onLogMeal={logPlannedMeal} onEdit={() => setMealPlanOpen(true)} onOpenFood={() => setOverride('diet')} />
+        : (currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />)}
 
       {showSessionPreview && (
         <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
@@ -1096,6 +1105,10 @@ export default function App() {
       {scheduleOpen && (
         <ScheduleModal profile={profile} onClose={() => setScheduleOpen(false)}
           onSave={(weeklySchedule) => { updateProfile({ weeklySchedule }); setScheduleOpen(false) }} />
+      )}
+      {mealPlanOpen && (
+        <MealPlanModal profile={profile} today={today} onClose={() => setMealPlanOpen(false)}
+          onSave={(mealPlan) => { updateProfile({ mealPlan }); setMealPlanOpen(false) }} />
       )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
@@ -2701,6 +2714,92 @@ function TargetsModal({ profile, onClose, onSave }) {
           <button onClick={reset} className="rounded-full px-3 py-2.5 text-[13px] font-medium text-[#8a8474]">Reset</button>
           <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
           <button onClick={save} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// Program meal plan — today's planned meals (A–G) with estimated macros, the
+// computed planned-day total vs targets (only states "meets" from the math), and a
+// one-tap log for each meal. Editable via the per-day meal plan editor.
+function ProgramMealPlan({ state, profile, today, onLogMeal, onEdit, onOpenFood }) {
+  const mt = macroTargets(state)
+  const { rows, totals, meets } = planDayTotals(profile, today, { ...mt, kcalMin: mt.kcal - 100, kcalMax: mt.kcal + 50, fiberMin: mt.fiberMin })
+  if (!rows.length) return null
+  const logged = new Set((state.days?.[today]?.food || []).filter((e) => e.fromPlan).map((e) => `${e.id}:${e.meal}`))
+  const line = `Planned ${totals.kcal} kcal · ${totals.protein}g P · ${totals.carbs}g C · ${totals.fat}g F · ${totals.fiber}g fiber`
+  const verdict = meets.protein && meets.kcalInRange
+    ? 'Computed: this plan hits protein and lands in your calorie range.'
+    : `Computed: ${[!meets.protein ? `protein ${totals.protein}/${mt.protein}g` : null, !meets.kcalInRange ? `calories ${totals.kcal} vs ${mt.kcal}` : null].filter(Boolean).join(', ')} — adjust portions or swap a meal.`
+
+  return (
+    <div className="mt-3 rounded-3xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
+      <div className="flex items-baseline justify-between">
+        <h3 className="font-display text-[17px] font-semibold text-[#23211c]">Today's meals</h3>
+        <button onClick={onEdit} className="text-[11px] font-medium text-[#3d4a32] active:opacity-70">Edit plan</button>
+      </div>
+      <div className="mt-2 flex flex-col divide-y divide-[#ece5d7]">
+        {rows.map(({ slot, meal }) => {
+          const isLogged = logged.has(`meal_${meal.id}:${slot}`)
+          return (
+            <div key={slot} className="flex items-center gap-3 py-2.5">
+              <span className="w-16 shrink-0 text-[11px] font-medium uppercase tracking-wide text-[#9a9482]">{SLOT_LABEL[slot]}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-medium text-[#23211c]">{meal.name}{meal.customizable && <span className="text-[11px] font-normal text-[#a3894a]"> · customize</span>}</span>
+                <span className="block text-[12px] text-[#8a8474]">~{meal.kcal} cal · {meal.protein}g P{meal.estimate ? ' · est' : ''}</span>
+              </span>
+              <button onClick={() => (isLogged ? onOpenFood() : onLogMeal(meal, slot))}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold ${isLogged ? 'text-[#3d4a32]' : 'bg-[#3d4a32] text-[#f4f1e8] active:scale-95'}`}>
+                {isLogged ? 'Logged' : 'Log'}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <p className="mt-2 text-[12px] font-medium text-[#5c5542]">{line}</p>
+      <p className="mt-0.5 text-[12px] leading-snug text-[#8a8474]">{verdict}</p>
+    </div>
+  )
+}
+
+// Edit today's meal plan (the four slots for this weekday). Swapping a slot writes
+// profile.mealPlan[weekday], so each weekday's plan is editable.
+function MealPlanModal({ profile, today, onClose, onSave }) {
+  const wd = new Date(today + 'T00:00:00').getDay()
+  const [plan, setPlan] = useState(() => ({ ...planFor(profile) }))
+  const dayPlan = plan[wd] || {}
+  const setSlot = (slot, mealId) => setPlan((p) => ({ ...p, [wd]: { ...(p[wd] || {}), [slot]: mealId } }))
+  const options = (slot) => MEAL_LIST.filter((m) => m.slots.includes(slot))
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-[#f4f1ea] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-2xl font-semibold text-[#23211c]">{WEEKDAY_LABEL[wd]}'s meals</h3>
+            <p className="mt-1 text-[13px] text-[#8a8474]">Swap any slot. Macros are estimates — refine portions when you log.</p>
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
+        </div>
+
+        <div className="mt-5 space-y-2.5">
+          {SLOTS.map((slot) => (
+            <div key={slot} className="rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] px-3.5 py-2.5">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#9a9482]">{SLOT_LABEL[slot]}</p>
+              <select value={dayPlan[slot] || ''} onChange={(e) => setSlot(slot, e.target.value)}
+                className="mt-1 w-full rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-[14px] text-[#23211c] outline-none focus:border-[#3d4a32]">
+                <option value="">— none —</option>
+                {options(slot).map((m) => <option key={m.id} value={m.id}>{m.name} (~{m.kcal} cal, {m.protein}g P)</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
+          <button onClick={() => onSave(plan)} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
         </div>
       </div>
     </div>,
