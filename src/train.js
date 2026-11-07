@@ -19,6 +19,7 @@ import { trainingPhase } from './periodize'
 import { gymMakeup, stepsHit } from './makeup'
 import { nextType as rotationNext, rotationState, PPL_LABEL } from './rotation'
 import { phaseSplit, phaseIntensity } from './phase'
+import { sessionForDate, templateFor } from './schedule'
 import { recoveryState } from './sleep'
 
 // ---- libraries --------------------------------------------------------------
@@ -29,6 +30,7 @@ import { recoveryState } from './sleep'
 export const EXERCISES = {
   // --- PUSH ---
   bench_press:        { name: 'Barbell Bench Press',        day: 'push', muscle: 'chest',     role: 'compound',   sets: 4, repLow: 6,  repHigh: 10, inc: 5 },
+  db_bench_press:     { name: 'Dumbbell Bench Press',       day: 'push', muscle: 'chest',     role: 'compound',   sets: 3, repLow: 6,  repHigh: 10, inc: 5,  db: true },
   incline_db_press:   { name: 'Incline Dumbbell Press',     day: 'push', muscle: 'chest',     role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
   shoulder_press:     { name: 'Seated DB Shoulder Press',   day: 'push', muscle: 'shoulders', role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
   lateral_raise:      { name: 'Cable Lateral Raise',        day: 'push', muscle: 'shoulders', role: 'isolation',  sets: 3, repLow: 12, repHigh: 18, inc: 5,  emph: ['side-delts'] },
@@ -41,10 +43,12 @@ export const EXERCISES = {
   lat_pulldown:       { name: 'Lat Pulldown',               day: 'pull', muscle: 'back',      role: 'compound',   sets: 4, repLow: 8,  repHigh: 12, inc: 5,  emph: ['lats'] },
   barbell_row:        { name: 'Barbell Row',                day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5 },
   seated_row:         { name: 'Seated Cable Row',           day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 10, repHigh: 14, inc: 5,  emph: ['lats'] },
+  chest_supported_row:{ name: 'Chest-Supported Row',        day: 'pull', muscle: 'back',      role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5 },
   rear_delt_fly:      { name: 'Reverse Pec-Deck Fly',       day: 'pull', muscle: 'shoulders', role: 'isolation',  sets: 3, repLow: 12, repHigh: 18, inc: 5,  emph: ['rear-delts'] },
   face_pull:          { name: 'Cable Face Pull',            day: 'pull', muscle: 'shoulders', role: 'isolation',  sets: 3, repLow: 15, repHigh: 20, inc: 5,  emph: ['rear-delts'] },
   shrug:              { name: 'Dumbbell Shrug',             day: 'pull', muscle: 'traps',     role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['neck'], db: true },
   db_curl:            { name: 'Incline Dumbbell Curl',      day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
+  cable_curl:         { name: 'Cable Biceps Curl',          day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 2, repLow: 10, repHigh: 15, inc: 5 },
   hammer_curl:        { name: 'Hammer Curl',                day: 'pull', muscle: 'biceps',    role: 'isolation',  sets: 3, repLow: 10, repHigh: 14, inc: 5,  emph: ['forearms'], db: true },
   wrist_curl:         { name: 'Seated Wrist Curl',          day: 'pull', muscle: 'forearms',  role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  emph: ['forearms'] },
   back_ext:           { name: 'Back Extension',             day: 'pull', muscle: 'lower-back',role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['lower-back'] },
@@ -54,10 +58,15 @@ export const EXERCISES = {
   rdl:                { name: 'Romanian Deadlift',          day: 'legs', muscle: 'hamstrings',role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 10, emph: ['glutes', 'lower-back'] },
   hip_thrust:         { name: 'Barbell Hip Thrust',         day: 'legs', muscle: 'glutes',    role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 10, emph: ['glutes'] },
   leg_press:          { name: 'Leg Press',                  day: 'legs', muscle: 'quads',     role: 'compound',   sets: 3, repLow: 10, repHigh: 15, inc: 10 },
+  goblet_squat:       { name: 'Goblet Squat',               day: 'legs', muscle: 'quads',     role: 'compound',   sets: 3, repLow: 8,  repHigh: 12, inc: 5,  db: true },
+  bulgarian_split_squat:{ name: 'Bulgarian Split Squat',    day: 'legs', muscle: 'quads',     role: 'compound',   sets: 2, repLow: 8,  repHigh: 10, inc: 5,  db: true, unilateral: true },
+  reverse_lunge:      { name: 'Reverse Lunge',              day: 'legs', muscle: 'quads',     role: 'compound',   sets: 2, repLow: 8,  repHigh: 12, inc: 5,  db: true, unilateral: true },
+  farmers_carry:      { name: "Farmer's Carry",             day: 'legs', muscle: 'full body', role: 'compound',   sets: 3, repLow: 20, repHigh: 40, inc: 5,  db: true, hold: true },
   leg_curl:           { name: 'Seated Leg Curl',            day: 'legs', muscle: 'hamstrings',role: 'isolation',  sets: 3, repLow: 10, repHigh: 15, inc: 5 },
   leg_ext:            { name: 'Leg Extension',              day: 'legs', muscle: 'quads',     role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5 },
   cable_kickback:     { name: 'Cable Glute Kickback',       day: 'legs', muscle: 'glutes',    role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['glutes'] },
   calf_raise:         { name: 'Standing Calf Raise',        day: 'legs', muscle: 'calves',    role: 'isolation',  sets: 4, repLow: 10, repHigh: 15, inc: 10, emph: ['calves'] },
+  seated_calf_raise:  { name: 'Seated Calf Raise',          day: 'legs', muscle: 'calves',    role: 'isolation',  sets: 3, repLow: 12, repHigh: 15, inc: 5,  emph: ['calves'] },
   tib_raise:          { name: 'Tibialis Raise',             day: 'legs', muscle: 'tibialis',  role: 'isolation',  sets: 3, repLow: 15, repHigh: 20, inc: 5,  emph: ['tibialis'] },
 
   // --- CORE (the priority block — trained first, progressed like a main lift) ---
@@ -77,6 +86,7 @@ export const EXERCISES = {
   glute_bridge:       { name: 'Glute Bridge',               day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  core: 'rotation' },
   bird_dog:           { name: 'Bird Dog',                   day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 8,  repHigh: 12, inc: 5,  core: 'rotation' },
   bicycle_crunch:     { name: 'Bicycle Crunch',             day: 'core', muscle: 'core',      role: 'isolation',  sets: 3, repLow: 12, repHigh: 20, inc: 5,  core: 'rotation' },
+  side_plank:         { name: 'Side Plank',                 day: 'core', muscle: 'core',      role: 'isolation',  sets: 2, repLow: 20, repHigh: 45, inc: 5,  core: 'rotation', hold: true },
 }
 
 // The core priority pools — one anterior (flexion/lower-ab) + one stability/
@@ -86,7 +96,7 @@ const CORE_ROTATION = ['bird_dog', 'glute_bridge', 'bicycle_crunch']
 const pickCore = (n) => [CORE_ANTERIOR[n % CORE_ANTERIOR.length], CORE_ROTATION[n % CORE_ROTATION.length]]
 
 // Two-dumbbell lifts: log ONE dumbbell's weight (the convention), not the pair.
-export const DB_EXERCISES = new Set(['incline_db_press', 'shoulder_press', 'db_curl', 'hammer_curl', 'shrug'])
+export const DB_EXERCISES = new Set(['incline_db_press', 'shoulder_press', 'db_curl', 'hammer_curl', 'shrug', 'db_bench_press', 'goblet_squat', 'bulgarian_split_squat', 'reverse_lunge', 'farmers_carry'])
 
 // Per day-type: the spine of the session. `core` always runs; `emphasisPool`
 // holds extra isolation work pulled in when a lagging part is emphasized.
@@ -282,6 +292,18 @@ export function decideDayType(state, todayIso) {
   const planned = state.days?.[todayIso]?.plan?.trainingDayType
   if (planned === 'rest') return { dayType: 'rest', rest: true, planned: true, reason: 'Rest today — that was your plan for the day.' }
   if (planned && DAY_PLAN[planned]) return { dayType: planned, rest: false, planned: true, reason: `A ${DAY_PLAN[planned].label} session today — that was your plan for the day.` }
+  // Program mode: a FIXED, editable weekly schedule drives the day (Upper A / Lower
+  // A / cardio / recovery …), winning over the rolling rotation. A day-plan override
+  // above still wins over it.
+  if (profile.program) {
+    const tpl = sessionForDate(profile, todayIso)
+    if (tpl && tpl.kind === 'lift') {
+      return { dayType: tpl.dayType, sessionKey: tpl.key, rest: false, scheduled: true, label: tpl.label,
+        reason: `${tpl.label} — today's scheduled session.` }
+    }
+    return { dayType: 'rest', rest: true, scheduled: true, sessionKey: tpl ? tpl.key : null, cardio: tpl || null,
+      reason: tpl ? tpl.note : 'Recovery day — walk, mobility, recover.' }
+  }
   const target = profile.gymTargetPerWeek || 3
   const hist = liftingHistory(state, todayIso) // exclude today; today is what we're deciding
   const last = hist[hist.length - 1]
@@ -510,7 +532,12 @@ export function buildSession(state, todayIso, opts = {}) {
   }
   const swapped = !!opts.dayType && opts.dayType !== decision.dayType
   const plan = DAY_PLAN[dayType]
-  const emphasis = pickEmphasis(state, todayIso, dayType)
+  // Program: build from the fixed weekly-schedule template (explicit exercise list)
+  // rather than the rotation's day-plan. Periodization waves still drive the numbers.
+  const sessKey = opts.sessionKey || (!opts.dayType ? decision.sessionKey : null)
+  const tpl = sessKey ? templateFor(sessKey) : null
+  const useTemplate = !!tpl && tpl.kind === 'lift'
+  const emphasis = useTemplate ? null : pickEmphasis(state, todayIso, dayType)
   const phase = trainingPhase(state, todayIso) // this week's strategic intent
 
   // Recovery auto-regulation: multiple poor/short nights → ease off (hold instead
@@ -519,10 +546,16 @@ export function buildSession(state, todayIso, opts = {}) {
   const recovery = state.profile ? recoveryState(state, todayIso, state.profile) : { level: 'ok' }
   const easeOff = recovery.level === 'reduce' && !phase.deload
 
-  // Core lifts, plus emphasis isolation appended (deduped, capped).
-  const ids = [...plan.core]
-  for (const exId of plan.emphasisPool[emphasis] || []) {
-    if (!ids.includes(exId)) ids.push(exId)
+  // Exercise list: the template's explicit list on the program, else the rotation's
+  // core lifts plus any emphasis isolation (deduped).
+  let ids
+  if (useTemplate) {
+    ids = [...tpl.exercises]
+  } else {
+    ids = [...plan.core]
+    for (const exId of plan.emphasisPool[emphasis] || []) {
+      if (!ids.includes(exId)) ids.push(exId)
+    }
   }
 
   const exercises = ids.map((id) => {
@@ -546,11 +579,19 @@ export function buildSession(state, todayIso, opts = {}) {
     return ex
   })
 
+  // Conservative lower-body ramp: the owner hasn't trained legs consistently, so the
+  // first two program weeks run lower days at reduced volume (one fewer set each).
+  const progStart = state.profile?.program?.start
+  const earlyLegs = useTemplate && tpl.dayType === 'lower' && progStart && daysBetween(progStart, todayIso) < 14
+  if (earlyLegs) {
+    for (const ex of exercises) { if (ex.sets.length > 2) ex.sets.pop() }
+  }
+
   // Make-up for owed (skipped) sessions: harder next lift — add a set to each
   // core lift to win back the missed stimulus. Not on a deload week (recovery), and
   // not while auto-regulating a recovery hole (don't pile on when you're fried).
   const makeup = gymMakeup(state, todayIso)
-  if (makeup.debt > 0 && makeup.extraSets > 0 && !phase.deload && !easeOff) {
+  if (!useTemplate && makeup.debt > 0 && makeup.extraSets > 0 && !phase.deload && !easeOff) {
     for (const ex of exercises) {
       if (!plan.core.includes(ex.id) || !ex.sets?.length) continue
       const last = ex.sets[ex.sets.length - 1]
@@ -563,7 +604,7 @@ export function buildSession(state, todayIso, opts = {}) {
   // finisher (last set to failure + a drop set). Phase 1 is a no-op (0 sets, no
   // finisher). Deload/ease-off weeks are exempt — never pile on when recovering.
   const intensity = phaseIntensity(state.profile)
-  if (!phase.deload && !easeOff) {
+  if (!useTemplate && !phase.deload && !easeOff) {
     if (intensity.extraCompoundSets > 0) {
       for (const ex of exercises) {
         if (ex.role !== 'compound' || !ex.sets?.length) continue
@@ -593,7 +634,8 @@ export function buildSession(state, todayIso, opts = {}) {
   // One anterior + one rotation move, progressed like a main lift. Placed FIRST
   // on push/pull/upper; on leg/lower days it slots in right after the primary
   // heavy lift so the squat/deadlift keeps a fresh, strong brace.
-  const coreExercises = pickCore(hist.length).map((id) => {
+  const coreIds = useTemplate ? tpl.core : pickCore(hist.length)
+  const coreExercises = coreIds.map((id) => {
     const meta = EXERCISES[id]
     let target = targetFor(state, id, todayIso, phase)
     if (easeOff) target = easeTarget(state, id, todayIso, target)
@@ -612,9 +654,11 @@ export function buildSession(state, todayIso, opts = {}) {
     coreLine: legDay
       ? 'Core is a priority now — it runs right after your first big lift, while you\'re still fresh, so the heavy work keeps a strong brace.'
       : 'Core is a priority now — it runs first, before anything else, so it\'s trained fresh instead of half-assed at the end.',
-    makeup: makeup.debt > 0 ? { owed: makeup.debt, extraSets: makeup.extraSets } : null,
+    makeup: (!useTemplate && makeup.debt > 0) ? { owed: makeup.debt, extraSets: makeup.extraSets } : null,
     dayType, emphasis,
-    label: plan.label,
+    label: useTemplate ? tpl.label : plan.label,
+    sessionKey: sessKey || null, scheduled: !!decision.scheduled,
+    morningCardioMin: useTemplate ? (tpl.morningCardioMin || null) : null,
     // periodization stamp — persisted on the session, drives the off-ledger skip
     phase: phase.key, phaseLabel: phase.label, phaseShort: phase.short, phaseLine: phase.line,
     deload: phase.deload, heavy: phase.heavy, effort,
@@ -624,8 +668,9 @@ export function buildSession(state, todayIso, opts = {}) {
     swapped, swappedFrom: swapped ? decision.dayType : null,
     reason: (swapped
       ? `Swapped to ${plan.label} for today — ${DAY_PLAN[decision.dayType].label} is owed and waiting for you next time.`
-      : (decision.rest ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason))
-      + (makeup.debt > 0 && !phase.deload && !easeOff ? ` Making up ${makeup.debt} skipped session${makeup.debt > 1 ? 's' : ''}: one extra set on the main lifts.` : '')
+      : (decision.rest && !useTemplate ? `Rest was the call, but you're training — so it's ${plan.label}, next in the rotation.` : decision.reason))
+      + (!useTemplate && makeup.debt > 0 && !phase.deload && !easeOff ? ` Making up ${makeup.debt} skipped session${makeup.debt > 1 ? 's' : ''}: one extra set on the main lifts.` : '')
+      + (earlyLegs ? ' First two weeks back on legs — volume is pulled back a set per move and loads stay conservative. Leave 2–3 reps in reserve; soreness, not strain.' : '')
       + (easeOff ? ` Sleep's been thin (${recovery.poorNights >= 2 ? `${recovery.poorNights} rough nights` : 'short nights'}), so today auto-regulates: hold your weights, trim a little accessory volume, and leave more in the tank. Protect the progress instead of grinding.` : ''),
     emphasisReason: emphasis ? `Extra focus on ${labelFor(emphasis)} — it's lagging and fits ${plan.label.toLowerCase()} day.` : null,
     warmup: WARMUPS[dayType],

@@ -10,6 +10,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { trainingPhase } from './periodize'
 import { currentPhaseId, currentPhase, phaseDef, startPhasePatch, nextPhaseId, phaseElapsed, PHASE_DEFS } from './phase'
 import { PROGRAM, DEFAULT_TARGETS, programPhase, programProgress, phaseProgress, programWindow } from './program'
+import { WEEKLY_SCHEDULE_DEFAULT, WEEKDAY_LABEL, SESSION_OPTIONS, scheduleFor, templateFor } from './schedule'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue, suppGroupsForDay } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
@@ -132,6 +133,7 @@ export default function App() {
   const [manageProducts, setManageProducts] = useState(false)
   const [manageSupps, setManageSupps] = useState(false)
   const [targetsOpen, setTargetsOpen] = useState(false) // editable daily macro/calorie targets
+  const [scheduleOpen, setScheduleOpen] = useState(false) // editable weekly training schedule
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
   const [recipesOpen, setRecipesOpen] = useState(false) // guided recipe flow (declared before overlayOpen uses it)
@@ -165,7 +167,7 @@ export default function App() {
   // NB: dayPlanOpen is intentionally NOT here — DayPlanModal manages its own body
   // scroll lock (like the food/reflect/stats modals). Adding it too double-locks
   // and leaves the page frozen after close.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -411,13 +413,14 @@ export default function App() {
   // and daily targets once, so the manual calorie/macro targets take effect app-wide.
   // Only fills what's missing — never overwrites edits. (Reads state.profile directly
   // since the `profile` binding is declared after the hooks.)
-  const seedProgram = !booting && state?.profile && (!state.profile.program || !state.profile.targets)
+  const seedProgram = !booting && state?.profile && (!state.profile.program || !state.profile.targets || !state.profile.trainStart)
   useEffect(() => {
     if (!seedProgram) return
     const pf = state.profile
     updateProfile({
       ...(pf.program ? {} : { program: { ...PROGRAM } }),
       ...(pf.targets ? {} : { targets: { ...DEFAULT_TARGETS } }),
+      ...(pf.trainStart ? {} : { trainStart: PROGRAM.start }),
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedProgram])
@@ -910,7 +913,8 @@ export default function App() {
           targets, scheduled workout, and phase progress. */}
       <ProgramCenter state={state} profile={profile} today={today}
         trainSession={trainSession} trainCall={trainCall} trainedToday={trainedToday}
-        onTrain={() => setTraining(true)} onArea={doArea} onEditTargets={() => setTargetsOpen(true)} />
+        onTrain={() => setTraining(true)} onArea={doArea} onEditTargets={() => setTargetsOpen(true)}
+        onEditSchedule={() => setScheduleOpen(true)} />
 
       {currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />}
 
@@ -1088,6 +1092,10 @@ export default function App() {
       {targetsOpen && (
         <TargetsModal profile={profile} onClose={() => setTargetsOpen(false)}
           onSave={(targets) => { updateProfile({ targets }); setTargetsOpen(false) }} />
+      )}
+      {scheduleOpen && (
+        <ScheduleModal profile={profile} onClose={() => setScheduleOpen(false)}
+          onSave={(weeklySchedule) => { updateProfile({ weeklySchedule }); setScheduleOpen(false) }} />
       )}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
@@ -2700,10 +2708,52 @@ function TargetsModal({ profile, onClose, onSave }) {
   )
 }
 
+// Editable weekly training schedule — map each weekday to a session. Lets Saturday's
+// lower day move to Sunday, days swap, etc. Writes profile.weeklySchedule.
+function ScheduleModal({ profile, onClose, onSave }) {
+  const [sched, setSched] = useState(() => ({ ...scheduleFor(profile) }))
+  const order = [1, 2, 3, 4, 5, 6, 0] // Mon..Sun
+  const set = (wd, key) => setSched((s) => ({ ...s, [wd]: key }))
+  const reset = () => setSched({ ...WEEKLY_SCHEDULE_DEFAULT })
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center fade-in" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-[#f4f1ea] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-2xl font-semibold text-[#23211c]">Weekly schedule</h3>
+            <p className="mt-1 text-[13px] text-[#8a8474]">Set what each day is. Move a lower day to Sunday if two in a row is too much.</p>
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none text-[#a39c8d]">×</button>
+        </div>
+
+        <div className="mt-5 space-y-2">
+          {order.map((wd) => (
+            <div key={wd} className="flex items-center justify-between gap-3 rounded-2xl border border-[#e0d9c9] bg-[#fbf9f3] px-3.5 py-2.5">
+              <span className="w-10 shrink-0 text-[13px] font-semibold text-[#23211c]">{WEEKDAY_LABEL[wd]}</span>
+              <select value={sched[wd]} onChange={(e) => set(wd, e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-[#ddd5c5] bg-white px-2.5 py-1.5 text-[14px] text-[#23211c] outline-none focus:border-[#3d4a32]">
+                {SESSION_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <button onClick={reset} className="rounded-full px-3 py-2.5 text-[13px] font-medium text-[#8a8474]">Reset</button>
+          <button onClick={onClose} className="flex-1 rounded-full border border-[#d8d1c2] bg-white py-2.5 text-sm font-medium text-[#4a463c]">Cancel</button>
+          <button onClick={() => onSave(sched)} className="flex-1 rounded-full bg-[#3d4a32] py-2.5 text-sm font-semibold text-[#f4f1e8] active:scale-95">Save</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // Program command center — the primary surface for the 6-month program. Shows the
 // current dated phase + program progress, the editable daily macro targets vs what's
 // been logged, the scheduled workout, and the phase's body-comp / training progress.
-function ProgramCenter({ state, profile, today, trainSession, trainCall, trainedToday, onTrain, onArea, onEditTargets }) {
+function ProgramCenter({ state, profile, today, trainSession, trainCall, trainedToday, onTrain, onArea, onEditTargets, onEditSchedule }) {
   const day = state.days?.[today] || {}
   const pph = programPhase(profile, today)
   const prog = programProgress(profile, today)
@@ -2801,7 +2851,10 @@ function ProgramCenter({ state, profile, today, trainSession, trainCall, trained
           })}
         </div>
 
-        <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
+          <button onClick={onEditSchedule} className="text-[11px] font-medium text-[#3d4a32] active:opacity-70">Schedule</button>
+        </div>
         <div className="mt-1 divide-y divide-[#ece5d7]">
           {todayRows.map((t) => (
             <button key={t.key} onClick={t.onTap || undefined} disabled={!t.onTap}
