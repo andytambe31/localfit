@@ -10,7 +10,7 @@ import { buildSession, estimateSessionMinutes, decideEveningPriority, recentSess
 import { trainingPhase } from './periodize'
 import { currentPhaseId, currentPhase, phaseDef, startPhasePatch, nextPhaseId, phaseElapsed, PHASE_DEFS } from './phase'
 import { PROGRAM, DEFAULT_TARGETS, programPhase, programProgress, phaseProgress, programWindow } from './program'
-import { WEEKLY_SCHEDULE_DEFAULT, WEEKDAY_LABEL, SESSION_OPTIONS, scheduleFor, templateFor } from './schedule'
+import { WEEKLY_SCHEDULE_DEFAULT, WEEKDAY_LABEL, SESSION_OPTIONS, scheduleFor, templateFor, sessionForDate } from './schedule'
 import { DEFAULT_SUPPS, LOOSE_SKIN_NOTE, SUPPLEMENTS, suppsDue, suppGroupsForDay } from './supps'
 import { weeklyCheckin, deficitCoach } from './adapt'
 import { buildReview } from './review'
@@ -914,7 +914,7 @@ export default function App() {
       <ProgramCenter state={state} profile={profile} today={today}
         trainSession={trainSession} trainCall={trainCall} trainedToday={trainedToday}
         onTrain={() => setTraining(true)} onArea={doArea} onEditTargets={() => setTargetsOpen(true)}
-        onEditSchedule={() => setScheduleOpen(true)} />
+        onEditSchedule={() => setScheduleOpen(true)} onCardio={() => setCardioOpen(true)} onMobility={() => setYogaOpen(true)} />
 
       {currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />}
 
@@ -2753,7 +2753,7 @@ function ScheduleModal({ profile, onClose, onSave }) {
 // Program command center — the primary surface for the 6-month program. Shows the
 // current dated phase + program progress, the editable daily macro targets vs what's
 // been logged, the scheduled workout, and the phase's body-comp / training progress.
-function ProgramCenter({ state, profile, today, trainSession, trainCall, trainedToday, onTrain, onArea, onEditTargets, onEditSchedule }) {
+function ProgramCenter({ state, profile, today, trainSession, trainCall, trainedToday, onTrain, onArea, onEditTargets, onEditSchedule, onCardio, onMobility }) {
   const day = state.days?.[today] || {}
   const pph = programPhase(profile, today)
   const prog = programProgress(profile, today)
@@ -2766,20 +2766,36 @@ function ProgramCenter({ state, profile, today, trainSession, trainCall, trained
   const resting = trainCall?.rest || trainSession?.dayType === 'rest'
 
   const fmtD = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const kcalLeft = Math.max(0, mt.kcal - Math.round(dt.kcal))
   const macros = [
-    { k: 'Calories', now: Math.round(dt.kcal), tgt: mt.kcal, unit: '', over: dt.kcal > mt.kcal + 80 },
+    { k: 'Calories', now: Math.round(dt.kcal), tgt: mt.kcal, unit: '', over: dt.kcal > mt.kcal + 80, rem: `${kcalLeft} left` },
     { k: 'Protein', now: Math.round(dt.protein), tgt: mt.protein, unit: 'g', floor: true },
     { k: 'Fat', now: Math.round(dt.fat), tgt: mt.fat, unit: 'g', band: `${mt.fatMin}–${mt.fatMax}` },
     { k: 'Carbs', now: Math.round(dt.carbs), tgt: mt.carbs, unit: 'g' },
     { k: 'Fiber', now: Math.round(dt.fiber), tgt: mt.fiberMin, unit: 'g', band: `${mt.fiberMin}–${mt.fiberMax}`, floor: true },
   ]
 
-  const todayRows = [
-    { key: 'train', label: resting ? 'Recover' : (trainSession?.label || 'Train'),
-      sub: resting ? 'Rest — walk & recover' : `${trainSession?.exercises?.length || ''} moves · ~${trainCall?.estMin || (trainSession ? estimateSessionMinutes(trainSession) : '')} min`,
-      done: trainedToday || resting, onTap: (resting || trainedToday) ? null : onTrain },
-    { key: 'steps', label: `Steps ${Math.round(stepTarget / 1000)}k`, sub: stepsIn ? 'Done' : 'Get on your feet', done: stepsIn, onTap: () => onArea('movement') },
-  ]
+  // Today's plan — the day's scheduled session (lift or cardio/recovery) plus the
+  // morning cardio, core/mobility, steps and water, so the overview answers "what do
+  // I do today" without leaving the dashboard.
+  const tpl = sessionForDate(profile, today)
+  const waterTarget = profile.waterTarget || 8
+  const water = day.water || 0
+  const sleepMin = day.sleep?.minutes
+  const todayRows = []
+  if (tpl && tpl.kind === 'lift') {
+    todayRows.push({ key: 'train', label: trainSession?.label || tpl.label,
+      sub: `${trainSession?.exercises?.length || ''} moves · ~${trainCall?.estMin || (trainSession ? estimateSessionMinutes(trainSession) : '')} min`,
+      done: trainedToday, onTap: trainedToday ? null : onTrain })
+    if (tpl.morningCardioMin) todayRows.push({ key: 'cardio', label: `Morning cardio ~${tpl.morningCardioMin} min`, sub: 'Easy pace to open the day', done: false, onTap: onCardio })
+    if (tpl.core && tpl.core.length) todayRows.push({ key: 'core', label: 'Core & abs', sub: 'Runs with your lift', done: false })
+  } else if (tpl) {
+    todayRows.push({ key: 'train', label: tpl.label, sub: `${tpl.cardioMin ? `~${tpl.cardioMin} min cardio` : 'Recover'}${tpl.mobility ? ' · mobility' : ''}`, done: resting && trainedToday, onTap: onCardio })
+    if (tpl.mobility) todayRows.push({ key: 'mob', label: 'Mobility ~10 min', sub: 'Hips, ankles, t-spine, shoulders', done: false, onTap: onMobility })
+  }
+  todayRows.push({ key: 'steps', label: `Steps ${Math.round(stepTarget / 1000)}k`, sub: stepsIn ? 'Done' : 'Get on your feet', done: stepsIn, onTap: () => onArea('movement') })
+  todayRows.push({ key: 'water', label: `Water ${water}/${waterTarget}`, sub: water >= waterTarget ? 'Hydrated' : 'glasses', done: water >= waterTarget, onTap: () => onArea('water') })
+  if (sleepMin) todayRows.push({ key: 'sleep', label: `Sleep ${Math.floor(sleepMin / 60)}h ${sleepMin % 60}m`, sub: 'Last night', done: sleepMin >= (profile.sleepTargetHours || 7) * 60 })
 
   // Progress since the program began.
   const base = win.start
@@ -2841,7 +2857,7 @@ function ProgramCenter({ state, profile, today, trainSession, trainCall, trained
               <button key={m.k} onClick={() => onArea('diet')} className="block w-full text-left active:opacity-70">
                 <div className="flex items-baseline justify-between">
                   <span className="text-[13px] font-medium text-[#23211c]">{m.k}</span>
-                  <span className={`text-[12px] tabular-nums ${over ? 'text-[#a8842a]' : hit ? 'text-[#3d4a32]' : 'text-[#8a8474]'}`}>{m.now}/{m.tgt}{m.unit}{m.band ? ` (${m.band})` : ''}</span>
+                  <span className={`text-[12px] tabular-nums ${over ? 'text-[#a8842a]' : hit ? 'text-[#3d4a32]' : 'text-[#8a8474]'}`}>{m.now}/{m.tgt}{m.unit}{m.rem ? ` · ${m.rem}` : ''}{m.band ? ` (${m.band})` : ''}</span>
                 </div>
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#ece5d7]">
                   <div className={`h-full rounded-full ${over ? 'bg-[#c58a2a]' : 'bg-[#7d8a5f]'}`} style={{ width: `${pct}%` }} />
