@@ -139,6 +139,8 @@ export default function App() {
   const [scheduleOpen, setScheduleOpen] = useState(false) // editable weekly training schedule
   const [mealPlanOpen, setMealPlanOpen] = useState(false) // editable daily meal plan
   const [importOpen, setImportOpen] = useState(false) // ChatGPT daily import
+  const [prepOpen, setPrepOpen] = useState(false) // meal-prep checklist modal (from the More hub)
+  const [checkinOpen, setCheckinOpen] = useState(false) // weekly check-in modal (from the More hub)
   const lastImportRef = useRef(null) // most recent import, for undo
   const [liftsOpen, setLiftsOpen] = useState(false) // PRs / best-lifts view (declared before overlayOpen uses it)
   const [diaryOpen, setDiaryOpen] = useState(false) // success-heatmap diary (declared before overlayOpen uses it)
@@ -173,7 +175,7 @@ export default function App() {
   // NB: dayPlanOpen is intentionally NOT here — DayPlanModal manages its own body
   // scroll lock (like the food/reflect/stats modals). Adding it too double-locks
   // and leaves the page frozen after close.
-  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || mealPlanOpen || importOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
+  const overlayOpen = !!flow || !!hairFlow || training || manageProducts || manageSupps || targetsOpen || scheduleOpen || mealPlanOpen || importOpen || prepOpen || checkinOpen || liftsOpen || diaryOpen || !!recipesOpen || groceriesOpen || !!journeyView || sleepOpen || booting
   useEffect(() => {
     if (!overlayOpen) return
     const { overflow, position, width } = document.body.style
@@ -921,14 +923,12 @@ export default function App() {
     else if (t === 'movement' && !trainCall.rest && !trainedToday) setTraining(true)
     else setOverride(t)
   }
-  // A training day still to be done → show a small session preview card (which
-  // carries its own Start button), so the hero CTA skips the movement case to
-  // avoid two Start buttons.
-  const showSessionPreview = trainSession.dayType !== 'rest' && !trainCall.done && !trainCall.active && !day.workout?.skip
+  // A training day still to be done is started straight from the coach hero CTA
+  // (the separate preview card was removed to keep the landing to four components).
   const heroCTA = coach.action?.target ? ({
     skin: `Start ${slotWord(skinSlot).toLowerCase()} skincare`,
     hair: 'Do your haircare',
-    movement: trainCall.rest ? 'Mark your steps' : trainedToday ? 'Review your session' : (showSessionPreview ? null : `Start ${trainCall.label} session`),
+    movement: trainCall.rest ? 'Mark your steps' : trainedToday ? 'Review your session' : `Start ${trainCall.label} session`,
     diet: 'Log your food',
     water: 'Log water',
   }[coach.action.target]) : null
@@ -996,135 +996,54 @@ export default function App() {
         ? <ProgramMealPlan state={state} profile={profile} today={today} onLogMeal={logPlannedMeal} onEdit={() => setMealPlanOpen(true)} onOpenFood={() => setOverride('diet')} />
         : (currentPhaseId(profile) >= 2 && <MealPlanCard state={state} today={today} onOpenFood={() => setOverride('diet')} />)}
 
-      {profile.program && prepForDay(today) && (
-        <PrepCard prep={prepForDay(today)} done={day.prep?.[prepForDay(today).key] || {}} onToggle={togglePrep} onGroceries={() => setGroceriesOpen(true)} />
-      )}
-
-      {/* ChatGPT daily import — a fast, low-friction way to log the day by pasting JSON. */}
-      <button onClick={() => setImportOpen(true)}
-        className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#d8cdb8] bg-[#f4f1ea] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#efe9dc]">
-        <span className="flex items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#3d4a32]">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-          </span>
-          <span className="min-w-0">
-            <span className="block font-display text-[16px] font-semibold text-[#23211c]">Import from ChatGPT</span>
-            <span className="block text-[12px] text-[#8a8474]">Paste your day — cardio, meals, routines, sleep…</span>
-          </span>
-        </span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b7b0a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
-      </button>
-
-      {showSessionPreview && (
-        <SessionPreview session={trainSession} estMin={trainCall.estMin} onStart={() => setTraining(true)} />
-      )}
-
-      {sleepConfirmDue && lastSleep && (
-        <section className="mt-3 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] p-4">
-          <p className="text-[13px] leading-snug text-[#4a463c]">Was last night's sleep about right?{lastSleep.minutes != null && <span className="text-[#8a8474]"> Estimated {fmtDuration(lastSleep.minutes)}{lastSleep.start ? `, ${fmtClock(lastSleep.start)}–${fmtClock(lastSleep.end)}` : ''}.</span>}</p>
-          <div className="mt-2.5 flex gap-2">
-            <button onClick={() => confirmSleep(lastSleep)} className="flex-1 rounded-full bg-[#3d4a32] px-3 py-2 text-[13px] font-semibold text-[#f4f1e8] active:scale-[0.98]">Yes</button>
-            <button onClick={() => setSleepOpen(true)} className="flex-1 rounded-full border border-[#cdd4bb] bg-[#fbf9f3] px-3 py-2 text-[13px] font-semibold text-[#3d4a32] active:scale-[0.98]">Edit</button>
-            <button onClick={poorSleep} className="flex-1 rounded-full border border-[#e0c9a8] bg-[#f7ecd6] px-3 py-2 text-[13px] font-semibold text-[#8a5a1e] active:scale-[0.98]">Poor sleep</button>
-          </div>
-        </section>
-      )}
-
-      <button onClick={() => setView('review')}
-        className="mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#cdd4bb] bg-[#eef0e6] px-5 py-4 text-left transition active:scale-[0.99] hover:bg-[#e8ecdd]">
-        <span className="flex items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#3d4a32]">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#f4f1e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></svg>
-          </span>
-          <span className="min-w-0">
-            <span className="block font-display text-[16px] font-semibold text-[#23291f]">Coach's review</span>
-            <span className="block text-[12px] text-[#6b7355]">Your progress, your pace, what's next.</span>
-          </span>
-        </span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7d8a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
-      </button>
-
-      {/* Live briefing → AI plan for the rest of the day. Shows the checklist once
-          a plan is saved, else the CTA to build one. */}
-      {day.plan?.items?.length
-        ? <DayPlanCard plan={day.plan} onToggle={togglePlanItem} onReplan={() => setDayPlanOpen(true)} onClear={clearDayPlan}
-            onTailor={(['push', 'pull', 'legs'].includes(day.plan.trainingDayType) && !trainedToday) ? () => { setAutoTailor(true); setTraining(true) } : null} />
-        : (
-          <button onClick={() => setDayPlanOpen(true)}
-            className="mt-2 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#e7d4b6] bg-[#f7ecd6] px-5 py-3.5 text-left transition active:scale-[0.99] hover:bg-[#f3e5c9]">
-            <span className="flex items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#8a5a1e]">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f7ecd6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.6 4L18 8l-4 1.4L12 13l-1.6-3.6L6 8l4.4-1zM18 14l.9 2 2.1.9-2.1.9L18 20l-.9-2.2-2.1-.9 2.1-.9z" /></svg>
-              </span>
-              <span className="min-w-0">
-                <span className="block font-display text-[16px] font-semibold text-[#5c3d13]">Plan the rest of my day</span>
-                <span className="block text-[12px] text-[#8a5a1e]">Hand an AI your day so far — get a checklist back.</span>
-              </span>
-            </span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b08a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m9 18 6-6-6-6" /></svg>
-          </button>
-        )}
-
-      {ret && <ReturnCard state={state} ret={ret} />}
-
-      {/* Weigh-ins stay hidden through the just-back window so you judge a settled
-          number, not a bloated one. */}
-      {!ret && <WeightCard weightLog={state.weightLog || []} today={today} day={day} onSave={saveWeight} />}
-
-      {/* Deficit coach + the full weight trajectory now live in Coach's Review
-          (Your pace / Trajectory) — kept off the dashboard to reduce density. */}
-
+      {/* Everything else lives in one "More" hub so the landing stays to four
+          components (coach · command center · meals · more). Each tile routes to an
+          existing flow/view; status tiles show skin/hair/diet at a glance. */}
       {(() => {
         const checkin = weeklyCheckin(state, today)
-        return checkin.due && checkin.findings.length > 0 ? (
-          <CheckinCard checkin={checkin}
-            onApply={(changes) => updateProfile({ ...changes, lastCheckin: today })}
-            onDismiss={() => updateProfile({ lastCheckin: today })} />
-        ) : null
+        const dietDoneToday = !!day.dietClosed
+        const statusTiles = [
+          { label: 'Skin', done: skinSlotDone, attn: skinAttn, locked: skinLocked && !skinSlotDone, sub: skinLocked ? skinHint : skinSlotDone ? 'Done' : slotWord(skinSlot), onTap: () => (skinLocked && !skinSlotDone ? null : setFlow(skinSlot)) },
+          { label: 'Hair', done: hairSlotDone, attn: hairAttn, locked: skinLocked && !hairSlotDone, sub: skinLocked ? skinHint : hairSlotDone ? 'Done' : slotWord(hairSlot), onTap: () => (skinLocked && !hairSlotDone ? null : setHairFlow(hairSlot)) },
+          { label: 'Diet', done: dietDoneToday, sub: dietDoneToday ? 'Closed' : `${proteinNow}g protein`, onTap: () => setOverride('diet') },
+        ]
+        const alertTiles = [
+          sleepConfirmDue && lastSleep ? { label: 'Confirm sleep', attn: 'attention', sub: lastSleep.minutes != null ? fmtDuration(lastSleep.minutes) : 'Tap to log', onTap: () => setSleepOpen(true) } : null,
+          prepForDay(today) ? { label: prepForDay(today).title.replace(' meal prep', ' prep'), sub: 'Checklist', onTap: () => setPrepOpen(true) } : null,
+          checkin.due && checkin.findings.length > 0 ? { label: 'Weekly check-in', attn: 'attention', sub: `${checkin.findings.length} to review`, onTap: () => setCheckinOpen(true) } : null,
+        ].filter(Boolean)
+        const toolTiles = [
+          { label: "Coach's review", sub: 'Progress & pace', onTap: () => setView('review') },
+          { label: 'Plan my day', sub: 'AI day plan', onTap: () => setDayPlanOpen(true) },
+          { label: 'Import', sub: 'From ChatGPT', onTap: () => setImportOpen(true) },
+          { label: 'Weigh in', sub: 'Log weight', onTap: () => setOverride('weight') },
+          { label: 'Supplements', sub: 'Your stack', onTap: () => setManageSupps(true) },
+          { label: 'Body fat', sub: 'Estimate', onTap: () => setBfOpen(true) },
+          { label: 'Diary', sub: 'History', onTap: () => setDiaryOpen(true) },
+          { label: 'Lifts', sub: 'PRs', onTap: () => setLiftsOpen(true) },
+          { label: 'Recipes', sub: 'Meals', onTap: () => setRecipesOpen(true) },
+          { label: 'Groceries', sub: lowCount(state) ? `${lowCount(state)} to restock` : 'Pantry', onTap: () => setGroceriesOpen(true) },
+          { label: 'Rewards', sub: 'Streaks', onTap: () => setView('rewards') },
+        ]
+        const Tile = ({ t }) => (
+          <button onClick={t.onTap || undefined} disabled={t.locked && !t.onTap}
+            className={`flex flex-col items-start gap-0.5 rounded-2xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${t.attn === 'attention' ? 'border-[#e0c9a8] bg-[#f7ecd6]' : 'border-[#e6dfd0] bg-[#fbf9f3]'} ${t.locked ? 'opacity-60' : 'hover:bg-[#f4f1e8]'}`}>
+            <span className="flex w-full items-center gap-1.5">
+              {typeof t.done === 'boolean' && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.done ? 'bg-[#3d4a32]' : t.attn === 'attention' ? 'bg-[#c58a2a]' : 'bg-[#cfc7b5]'}`} />}
+              <span className="truncate text-[13px] font-semibold text-[#23211c]">{t.label}</span>
+            </span>
+            <span className="truncate text-[11px] text-[#8a8474]">{t.sub}</span>
+          </button>
+        )
+        return (
+          <section className="mt-6">
+            <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">More</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[...statusTiles, ...alertTiles, ...toolTiles].map((t) => <Tile key={t.label} t={t} />)}
+            </div>
+          </section>
+        )
       })()}
-
-      {/* Today's thread — one tappable line per area, in the order they matter.
-          Tapping routes to the right place: skin/hair to their flows, yoga/cardio
-          to theirs, everything else focuses the card below. */}
-      <div className="mt-6">
-        <div className="mb-2 flex items-baseline justify-between">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-[#a39c8d]">Today</p>
-          <button onClick={() => setFoodReview(true)} className="flex items-center gap-1 text-[12px] font-medium text-[#3d4a32]">
-            {dayTotals(day).count > 0 ? `See today's food · ${Math.round(dayTotals(day).protein)}g P, ${dayTotals(day).kcal} cal` : "See today's food"}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-          </button>
-        </div>
-        <div className="flex flex-col gap-2">
-          {areas.map((a) => (
-            <TodayRow key={a.id} a={a} active={focus === a.id}
-              onTap={() => (a.id === 'skin' ? setFlow(skinSlot)
-                : a.id === 'hair' ? setHairFlow(hairSlot)
-                : a.id === 'yoga' ? setYogaOpen(true)
-                : a.id === 'cardio' ? setCardioOpen(true)
-                : setOverride(a.id))} />
-          ))}
-        </div>
-      </div>
-
-      {/* Supplements — taken with a meal, so they live here next to food, not in
-          the skincare flow. The card highlights the stack whose meal is due. */}
-      <SuppsCard state={state} today={today} onToggle={toggleSupp} onManage={() => setManageSupps(true)} />
-
-      {/* Quick access to the tools that live off the home — one tap each */}
-      <div className="mt-3 grid grid-cols-4 gap-2">
-        {[
-          { label: 'Lifts', on: () => setLiftsOpen(true), icon: <path d="M6 9V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v12a2 2 0 0 0 2 2 2 2 0 0 0 2-2V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v3M3 10v4M21 10v4" /> },
-          { label: 'Recipes', on: () => setRecipesOpen(true), icon: <path d="M3 2h13l5 5v15H3zM16 2v5h5M8 13h8M8 17h8M8 9h2" /> },
-          { label: 'Groceries', on: () => setGroceriesOpen(true), icon: <><path d="M3 3h2l2.4 12.3a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L22 7H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></> },
-          { label: 'Diary', on: () => setDiaryOpen(true), icon: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></> },
-        ].map((q) => (
-          <button key={q.label} onClick={q.on}
-            className="flex flex-col items-center gap-1 rounded-2xl border border-[#e6dfd0] bg-[#fbf9f3] px-1 py-2.5 text-[11px] font-medium text-[#4a463c] active:scale-[0.98]">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#3d4a32" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{q.icon}</svg>
-            {q.label}{q.label === 'Groceries' && lowCount(state) ? <span className="text-[#a3894a]"> · {lowCount(state)}</span> : ''}
-          </button>
-        ))}
-      </div>
 
       {/* The detail card only when you tap an area — otherwise the home stays short */}
       {focus && (
@@ -1142,10 +1061,6 @@ export default function App() {
             onWeight={saveWeight} />
         </div>
       )}
-
-      <GoalsSection state={state} profile={profile} today={today} onOpenJourney={setJourneyView} onEstimate={() => setBfOpen(true)} />
-
-      <RewardsSummary state={state} profile={profile} today={today} onOpen={() => setView('rewards')} />
 
       <p className="mt-9 text-center text-[12px] text-[#a39c8d]">Consistency over intensity. One step at a time.</p>
 
@@ -1202,6 +1117,20 @@ export default function App() {
         <ImportModal today={today} state={state} onClose={() => setImportOpen(false)}
           onImport={doImport} onUndo={undoImport} />
       )}
+      {prepOpen && prepForDay(today) && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-end justify-center overflow-y-auto bg-black/40 p-3 sm:items-center fade-in" onClick={() => setPrepOpen(false)}>
+          <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <PrepCard prep={prepForDay(today)} done={day.prep?.[prepForDay(today).key] || {}} onToggle={togglePrep} onGroceries={() => { setPrepOpen(false); setGroceriesOpen(true) }} />
+          </div>
+        </div>, document.body)}
+      {checkinOpen && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-end justify-center overflow-y-auto bg-black/40 p-3 sm:items-center fade-in" onClick={() => setCheckinOpen(false)}>
+          <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <CheckinCard checkin={weeklyCheckin(state, today)}
+              onApply={(changes) => { updateProfile({ ...changes, lastCheckin: today }); setCheckinOpen(false) }}
+              onDismiss={() => { updateProfile({ lastCheckin: today }); setCheckinOpen(false) }} />
+          </div>
+        </div>, document.body)}
       {manageProducts && (
         <ProductsModal profile={profile} onClose={() => setManageProducts(false)}
           onSave={(owned) => { updateProfile({ skincare: { ...profile.skincare, ownedProducts: owned } }); setManageProducts(false) }}
